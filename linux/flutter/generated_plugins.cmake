@@ -3,9 +3,14 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  desktop_drop
   file_selector_linux
+  hotkey_manager_linux
   isar_community_flutter_libs
+  screen_retriever_linux
+  tray_manager
   url_launcher_linux
+  window_manager
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

@@ -1,0 +1,29 @@
+name: Auto Update Version (Zeabur)
+
+on:
+  release:
+    types: [published, edited]
+  workflow_dispatch:
+
+jobs:
+  bridge-to-zeabur:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # 允许读取仓库内容
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run Bridge Script
+        env:
+          # 在 Zeabur 生成的 ADMIN_SECRET (需要在 GitHub Settings -> Secrets 中配置)
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          # GitHub 自动生成的 Token (无需配置，直接使用)
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/update_version.js

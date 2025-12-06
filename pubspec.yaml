@@ -43,6 +43,13 @@ dependencies:
   video_player: ^2.10.1
   chewie: ^1.13.0
   flutter_svg: ^2.0.10
+  
+  # --- 桌面端功能 ---
+  hotkey_manager: ^0.2.3       # 全局快捷键
+  window_manager: ^0.4.3       # 窗口管理（置顶、最小化等）
+  tray_manager: ^0.2.3         # 系统托盘 (替代 system_tray，兼容 uuid ^4)
+  shared_preferences: ^2.3.4   # 用户设置存储
+  desktop_drop: ^0.5.0         # 文件拖拽
 
 dev_dependencies:
   flutter_test:
