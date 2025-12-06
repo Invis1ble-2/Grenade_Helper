@@ -363,6 +363,123 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     );
   }
 
+  // 编辑步骤文字（标题和描述）
+  void _editStep(GrenadeStep step) {
+    final titleController = TextEditingController(text: step.title);
+    final descController = TextEditingController(text: step.description);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1B1E23),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+            top: 20,
+            left: 20,
+            right: 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text("编辑步骤",
+                style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white)),
+            const SizedBox(height: 15),
+            TextField(
+              controller: titleController,
+              decoration: const InputDecoration(
+                labelText: "步骤标题",
+                border: OutlineInputBorder(),
+                filled: true,
+                fillColor: Color(0xFF2A2D33),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: descController,
+              autofocus: true,
+              maxLines: 4,
+              decoration: const InputDecoration(
+                labelText: "说明文字",
+                border: OutlineInputBorder(),
+                filled: true,
+                fillColor: Color(0xFF2A2D33),
+              ),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () {
+                final store = ref.read(objectBoxProvider).store;
+                step.title = titleController.text;
+                step.description = descController.text;
+                store.box<GrenadeStep>().put(step);
+                grenade!.updatedAt = DateTime.now();
+                store.box<Grenade>().put(grenade!);
+                Navigator.pop(ctx);
+                _loadData();
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text("步骤已更新"),
+                    duration: Duration(milliseconds: 800)));
+              },
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  padding: const EdgeInsets.symmetric(vertical: 14)),
+              child: const Text("保存修改",
+                  style: TextStyle(
+                      color: Colors.black, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 编辑图片（重新进入图片编辑器）
+  Future<void> _editImage(StepMedia media) async {
+    if (media.type != MediaType.image) return;
+
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File(media.localPath);
+    if (!file.existsSync()) return;
+
+    if (!mounted) return;
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ProImageEditor.file(
+          file,
+          callbacks: ProImageEditorCallbacks(
+            onImageEditingComplete: (Uint8List bytes) async {
+              // 保存编辑后的新文件（覆盖原文件或创建新文件）
+              final fileName = "${DateTime.now().millisecondsSinceEpoch}.jpg";
+              final savePath = p.join(dir.path, fileName);
+              await File(savePath).writeAsBytes(bytes);
+
+              // 更新媒体路径
+              final store = ref.read(objectBoxProvider).store;
+              media.localPath = savePath;
+              store.box<StepMedia>().put(media);
+              grenade!.updatedAt = DateTime.now();
+              store.box<Grenade>().put(grenade!);
+
+              if (mounted) {
+                Navigator.pop(context);
+                setState(() {});
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text("图片已更新"),
+                    duration: Duration(milliseconds: 800)));
+              }
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (grenade == null)
@@ -537,6 +654,12 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                 ),
                 if (isEditing) ...[
                   IconButton(
+                    icon: const Icon(Icons.edit,
+                        size: 20, color: Colors.orangeAccent),
+                    onPressed: () => _editStep(step),
+                    tooltip: "编辑步骤",
+                  ),
+                  IconButton(
                     icon: const Icon(Icons.add_photo_alternate,
                         size: 20, color: Colors.blueAccent),
                     onPressed: () => _appendMediaToStep(step, true),
@@ -584,7 +707,24 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                                 )
                               : VideoPlayerWidget(file: File(media.localPath)),
                         ),
-                        if (isEditing)
+                        if (isEditing) ...[
+                          // 编辑图片按钮
+                          if (media.type == MediaType.image)
+                            Positioned(
+                              top: 5,
+                              right: 40,
+                              child: CircleAvatar(
+                                backgroundColor: Colors.black54,
+                                radius: 14,
+                                child: IconButton(
+                                  icon: const Icon(Icons.edit,
+                                      size: 14, color: Colors.orangeAccent),
+                                  padding: EdgeInsets.zero,
+                                  onPressed: () => _editImage(media),
+                                ),
+                              ),
+                            ),
+                          // 删除按钮
                           Positioned(
                             top: 5,
                             right: 5,
@@ -603,7 +743,8 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                                 },
                               ),
                             ),
-                          )
+                          ),
+                        ]
                       ],
                     ),
                   );
