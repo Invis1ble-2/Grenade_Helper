@@ -10,14 +10,11 @@ import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
 import 'package:intl/intl.dart';
 import 'package:photo_view/photo_view.dart';
-import 'package:media_kit/media_kit.dart' as media_kit;
-import 'package:media_kit_video/media_kit_video.dart' as media_kit_video;
 
 import '../models.dart';
 import '../providers.dart';
 
 // --- 视频播放小组件 ---
-// Windows 使用 media_kit，其他平台使用 chewie
 class VideoPlayerWidget extends StatefulWidget {
   final File file;
   const VideoPlayerWidget({super.key, required this.file});
@@ -27,49 +24,36 @@ class VideoPlayerWidget extends StatefulWidget {
 }
 
 class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
-  // 非 Windows 平台
   VideoPlayerController? _videoController;
   ChewieController? _chewieController;
-
-  // Windows 平台使用 media_kit
-  media_kit.Player? _mkPlayer;
-  media_kit_video.VideoController? _mkController;
-
   String? _errorMessage;
-  bool _isInitialized = false;
+  bool _isWindows = false;
 
   @override
   void initState() {
     super.initState();
-    _initVideo();
+    _isWindows = Platform.isWindows;
+    if (!_isWindows) {
+      _initVideo();
+    }
   }
 
   Future<void> _initVideo() async {
     try {
-      if (Platform.isWindows) {
-        // Windows 使用 media_kit
-        _mkPlayer = media_kit.Player();
-        _mkController = media_kit_video.VideoController(_mkPlayer!);
-        await _mkPlayer!.open(media_kit.Media(widget.file.path));
-        _isInitialized = true;
-      } else {
-        // 其他平台使用 chewie
-        _videoController = VideoPlayerController.file(widget.file);
-        await _videoController!.initialize();
-        _chewieController = ChewieController(
-          videoPlayerController: _videoController!,
-          autoPlay: false,
-          looping: true,
-          allowMuting: true,
-          aspectRatio: _videoController!.value.aspectRatio,
-          errorBuilder: (context, errorMessage) {
-            return Center(
-                child: Text(errorMessage,
-                    style: const TextStyle(color: Colors.white)));
-          },
-        );
-        _isInitialized = true;
-      }
+      _videoController = VideoPlayerController.file(widget.file);
+      await _videoController!.initialize();
+      _chewieController = ChewieController(
+        videoPlayerController: _videoController!,
+        autoPlay: false,
+        looping: true,
+        allowMuting: true,
+        aspectRatio: _videoController!.value.aspectRatio,
+        errorBuilder: (context, errorMessage) {
+          return Center(
+              child: Text(errorMessage,
+                  style: const TextStyle(color: Colors.white)));
+        },
+      );
       if (mounted) setState(() {});
     } catch (e) {
       _errorMessage = e.toString();
@@ -81,57 +65,59 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   void dispose() {
     _videoController?.dispose();
     _chewieController?.dispose();
-    _mkPlayer?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_errorMessage != null) {
+    // Windows 平台不支持 video_player，显示占位符
+    if (_isWindows) {
       return Container(
-        color: Colors.black,
+        color: Colors.black87,
         height: 200,
         child: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, color: Colors.red, size: 32),
+              const Icon(Icons.videocam_outlined, size: 48, color: Colors.grey),
+              const SizedBox(height: 12),
+              const Text(
+                '视频播放暂不支持 Windows 平台',
+                style: TextStyle(color: Colors.grey, fontSize: 14),
+              ),
               const SizedBox(height: 8),
-              Text('视频加载失败', style: TextStyle(color: Colors.grey[400])),
+              Text(
+                '文件: ${widget.file.path.split(Platform.pathSeparator).last}',
+                style: TextStyle(color: Colors.grey[600], fontSize: 12),
+              ),
             ],
           ),
         ),
       );
     }
 
-    if (!_isInitialized) {
+    if (_errorMessage != null) {
+      return Container(
+        color: Colors.black,
+        height: 200,
+        child: Center(
+          child:
+              Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
+        ),
+      );
+    }
+
+    if (_chewieController == null) {
       return Container(
         color: Colors.black,
         height: 200,
         child: const Center(child: CircularProgressIndicator()),
       );
     }
-
-    // Windows 平台使用 media_kit_video
-    if (Platform.isWindows && _mkController != null) {
-      return SizedBox(
-        height: 250,
-        child: media_kit_video.Video(
-          controller: _mkController!,
-          controls: media_kit_video.AdaptiveVideoControls,
-        ),
-      );
-    }
-
-    // 其他平台使用 chewie
-    if (_chewieController != null) {
-      return AspectRatio(
-        aspectRatio: _videoController!.value.aspectRatio,
-        child: Chewie(controller: _chewieController!),
-      );
-    }
-
-    return const SizedBox.shrink();
+    return AspectRatio(
+      aspectRatio: _videoController!.value.aspectRatio,
+      child: Chewie(controller: _chewieController!),
+    );
   }
 }
 
@@ -409,11 +395,18 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     } else {
       final xFile = await picker.pickVideo(source: ImageSource.gallery);
       if (xFile == null) return null;
-      final fileName =
-          "${DateTime.now().millisecondsSinceEpoch}${p.extension(xFile.path)}";
-      final savePath = p.join(dir.path, fileName);
-      await File(xFile.path).copy(savePath);
-      return savePath;
+      if (!mounted) return null;
+
+      try {
+        final fileName =
+            "${DateTime.now().millisecondsSinceEpoch}${p.extension(xFile.path)}";
+        final savePath = p.join(dir.path, fileName);
+        await File(xFile.path).copy(savePath);
+        return savePath;
+      } catch (e) {
+        print('Video copy error: $e');
+        return null;
+      }
     }
   }
 

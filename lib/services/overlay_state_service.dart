@@ -107,13 +107,6 @@ class OverlayStateService extends ChangeNotifier {
     _applyFilters();
   }
 
-  /// 刷新数据（用于悬浮窗实时更新）
-  void refresh() {
-    if (_currentLayer == null) return;
-    _loadGrenades();
-    notifyListeners();
-  }
-
   /// 应用过滤器
   void _applyFilters() {
     // 保存当前选中的道具 ID（用于恢复位置）

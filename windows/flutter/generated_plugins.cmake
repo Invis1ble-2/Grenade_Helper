@@ -8,13 +8,10 @@ list(APPEND FLUTTER_PLUGIN_LIST
   file_selector_windows
   hotkey_manager_windows
   isar_community_flutter_libs
-  media_kit_libs_windows_video
-  media_kit_video
   screen_retriever_windows
   share_plus
   tray_manager
   url_launcher_windows
-  volume_controller
   window_manager
 )
 

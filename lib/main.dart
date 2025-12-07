@@ -5,7 +5,6 @@ import 'package:isar_community/isar.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:window_manager/window_manager.dart';
-import 'package:media_kit/media_kit.dart';
 import 'models.dart';
 import 'providers.dart';
 import 'screens/home_screen.dart';
@@ -33,9 +32,6 @@ class WindowType {
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // 初始化 media_kit（Windows 视频播放需要）
-  MediaKit.ensureInitialized();
 
   // 检查是否是桌面平台
   if (SettingsService.isDesktop) {
