@@ -5,6 +5,7 @@ import 'package:photo_view/photo_view.dart';
 import 'package:isar_community/isar.dart';
 import '../models.dart';
 import '../providers.dart';
+import '../main.dart';
 import 'grenade_detail_screen.dart';
 
 // --- 页面级状态管理 ---
@@ -111,8 +112,50 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     super.initState();
     widget.gameMap.layers.loadSync();
     final defaultIndex = widget.gameMap.layers.length > 1 ? 1 : 0;
-    Future.microtask(() =>
-        ref.read(selectedLayerIndexProvider.notifier).state = defaultIndex);
+    Future.microtask(() {
+      ref.read(selectedLayerIndexProvider.notifier).state = defaultIndex;
+      // 通知悬浮窗服务当前地图
+      _updateOverlayState(defaultIndex);
+    });
+  }
+
+  @override
+  void dispose() {
+    // 离开地图时清除悬浮窗状态
+    globalOverlayState?.clearMap();
+    // 通知独立悬浮窗清除地图
+    _notifyOverlayWindowClearMap();
+    super.dispose();
+  }
+
+  void _updateOverlayState(int layerIndex) {
+    widget.gameMap.layers.loadSync();
+    final layers = widget.gameMap.layers.toList();
+    if (layerIndex < layers.length) {
+      final layer = layers[layerIndex];
+      globalOverlayState?.setCurrentMap(widget.gameMap, layer);
+      // 通知独立悬浮窗
+      _notifyOverlayWindowSetMap(widget.gameMap.id, layer.id);
+    }
+  }
+
+  void _notifyOverlayWindowSetMap(int mapId, int layerId) {
+    if (overlayWindowController != null) {
+      try {
+        overlayWindowController!.invokeMethod('set_map', {
+          'map_id': mapId,
+          'layer_id': layerId,
+        });
+      } catch (_) {}
+    }
+  }
+
+  void _notifyOverlayWindowClearMap() {
+    if (overlayWindowController != null) {
+      try {
+        overlayWindowController!.invokeMethod('clear_map');
+      } catch (_) {}
+    }
   }
 
   void _handleTap(

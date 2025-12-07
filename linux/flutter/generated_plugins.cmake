@@ -4,12 +4,15 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   desktop_drop
+  desktop_multi_window
   file_selector_linux
   hotkey_manager_linux
   isar_community_flutter_libs
+  media_kit_video
   screen_retriever_linux
   tray_manager
   url_launcher_linux
+  volume_controller
   window_manager
 )
 

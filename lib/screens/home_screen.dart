@@ -3,10 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:isar_community/isar.dart';
 import '../models.dart';
 import '../providers.dart';
+import '../main.dart';
 import 'map_screen.dart';
 import 'grenade_detail_screen.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'share_screen.dart';
+import 'settings_screen.dart';
 
 // 全局搜索逻辑
 class GlobalSearchDelegate extends SearchDelegate {
@@ -104,6 +106,24 @@ class HomeScreen extends ConsumerWidget {
                 Navigator.pop(context);
                 Navigator.push(context,
                     MaterialPageRoute(builder: (_) => const ShareScreen()));
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.settings),
+              title: const Text("设置"),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SettingsScreen(
+                      settingsService: globalSettingsService,
+                      onHotkeyChanged: (action, config) {
+                        globalHotkeyService?.updateHotkey(action, config);
+                      },
+                    ),
+                  ),
+                );
               },
             ),
           ],

@@ -153,7 +153,11 @@ class DataService {
     if (result == null) return "取消导入";
 
     final filePath = result.files.single.path!;
+    return importFromPath(filePath);
+  }
 
+  /// 从指定路径导入数据（支持拖拽导入）
+  Future<String> importFromPath(String filePath) async {
     if (!filePath.toLowerCase().endsWith('.cs2pkg')) {
       return "请选择 .cs2pkg 格式的文件";
     }

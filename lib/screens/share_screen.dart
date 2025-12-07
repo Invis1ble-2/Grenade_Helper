@@ -1,20 +1,119 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:isar_community/isar.dart';
+import 'package:desktop_drop/desktop_drop.dart';
 import '../models.dart';
 import '../providers.dart';
 import '../services/data_service.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
-class ShareScreen extends ConsumerWidget {
+class ShareScreen extends ConsumerStatefulWidget {
   const ShareScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ShareScreen> createState() => _ShareScreenState();
+}
+
+class _ShareScreenState extends ConsumerState<ShareScreen> {
+  bool _isDragging = false;
+  bool _isImporting = false;
+
+  bool get _isDesktop =>
+      Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+
+  @override
+  Widget build(BuildContext context) {
     final isar = ref.watch(isarProvider);
     final maps = isar.gameMaps.where().findAllSync();
     final grenades = isar.grenades.where().findAllSync();
     final dataService = DataService(isar);
+
+    Widget body = TabBarView(
+      children: [
+        _buildSingleGrenadeList(context, grenades, dataService),
+        _buildMapList(context, maps, dataService),
+        _buildAllDataView(context, grenades.length, dataService),
+      ],
+    );
+
+    // 桌面端添加拖拽支持
+    if (_isDesktop) {
+      body = DropTarget(
+        onDragEntered: (_) => setState(() => _isDragging = true),
+        onDragExited: (_) => setState(() => _isDragging = false),
+        onDragDone: (details) async {
+          setState(() {
+            _isDragging = false;
+            _isImporting = true;
+          });
+
+          for (final file in details.files) {
+            if (file.path.toLowerCase().endsWith('.cs2pkg')) {
+              final result = await dataService.importFromPath(file.path);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(result),
+                    backgroundColor:
+                        result.contains("成功") ? Colors.green : Colors.orange,
+                  ),
+                );
+              }
+            }
+          }
+
+          setState(() => _isImporting = false);
+        },
+        child: Stack(
+          children: [
+            body,
+            if (_isDragging)
+              Container(
+                color: Colors.black.withOpacity(0.7),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.file_download,
+                        size: 80,
+                        color: Colors.orange.withOpacity(0.8),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        '释放以导入 .cs2pkg 文件',
+                        style: TextStyle(
+                          fontSize: 20,
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            if (_isImporting)
+              Container(
+                color: Colors.black.withOpacity(0.7),
+                child: const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(color: Colors.orange),
+                      SizedBox(height: 16),
+                      Text(
+                        '正在导入...',
+                        style: TextStyle(color: Colors.white, fontSize: 18),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    }
 
     return DefaultTabController(
       length: 3,
@@ -50,20 +149,16 @@ class ShareScreen extends ConsumerWidget {
             ],
           ),
         ),
-        body: TabBarView(
-          children: [
-            _buildSingleGrenadeList(context, grenades, dataService),
-            _buildMapList(context, maps, dataService),
-            _buildAllDataView(context, grenades.length, dataService),
-          ],
-        ),
+        body: body,
       ),
     );
   }
 
   Widget _buildSingleGrenadeList(
       BuildContext context, List<Grenade> list, DataService service) {
-    if (list.isEmpty) return const Center(child: Text("暂无道具数据"));
+    if (list.isEmpty) {
+      return _buildEmptyWithDragHint("暂无道具数据");
+    }
     return ListView.separated(
       padding: const EdgeInsets.all(16),
       itemCount: list.length,
@@ -149,14 +244,34 @@ class ShareScreen extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 20),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 40),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 40),
             child: Text(
-              "这将打包所有地图、所有楼层的所有道具及图片视频，生成一个备份文件。",
+              _isDesktop
+                  ? "这将打包所有地图、所有楼层的所有道具及图片视频。\n💡 提示：您也可以直接拖拽 .cs2pkg 文件到此页面进行导入"
+                  : "这将打包所有地图、所有楼层的所有道具及图片视频，生成一个备份文件。",
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey),
+              style: const TextStyle(color: Colors.grey),
             ),
-          )
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyWithDragHint(String message) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(message, style: const TextStyle(color: Colors.grey)),
+          if (_isDesktop) ...[
+            const SizedBox(height: 16),
+            Text(
+              "💡 拖拽 .cs2pkg 文件到此处可快速导入",
+              style: TextStyle(color: Colors.grey[600], fontSize: 12),
+            ),
+          ],
         ],
       ),
     );

@@ -10,11 +10,14 @@ import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
 import 'package:intl/intl.dart';
 import 'package:photo_view/photo_view.dart';
+import 'package:media_kit/media_kit.dart' as media_kit;
+import 'package:media_kit_video/media_kit_video.dart' as media_kit_video;
 
 import '../models.dart';
 import '../providers.dart';
 
 // --- 视频播放小组件 ---
+// Windows 使用 media_kit，其他平台使用 chewie
 class VideoPlayerWidget extends StatefulWidget {
   final File file;
   const VideoPlayerWidget({super.key, required this.file});
@@ -24,8 +27,16 @@ class VideoPlayerWidget extends StatefulWidget {
 }
 
 class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
-  late VideoPlayerController _videoController;
+  // 非 Windows 平台
+  VideoPlayerController? _videoController;
   ChewieController? _chewieController;
+
+  // Windows 平台使用 media_kit
+  media_kit.Player? _mkPlayer;
+  media_kit_video.VideoController? _mkController;
+
+  String? _errorMessage;
+  bool _isInitialized = false;
 
   @override
   void initState() {
@@ -34,43 +45,93 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   }
 
   Future<void> _initVideo() async {
-    _videoController = VideoPlayerController.file(widget.file);
-    await _videoController.initialize();
-    _chewieController = ChewieController(
-      videoPlayerController: _videoController,
-      autoPlay: false,
-      looping: true,
-      allowMuting: true,
-      aspectRatio: _videoController.value.aspectRatio,
-      errorBuilder: (context, errorMessage) {
-        return Center(
-            child: Text(errorMessage,
-                style: const TextStyle(color: Colors.white)));
-      },
-    );
-    if (mounted) setState(() {});
+    try {
+      if (Platform.isWindows) {
+        // Windows 使用 media_kit
+        _mkPlayer = media_kit.Player();
+        _mkController = media_kit_video.VideoController(_mkPlayer!);
+        await _mkPlayer!.open(media_kit.Media(widget.file.path));
+        _isInitialized = true;
+      } else {
+        // 其他平台使用 chewie
+        _videoController = VideoPlayerController.file(widget.file);
+        await _videoController!.initialize();
+        _chewieController = ChewieController(
+          videoPlayerController: _videoController!,
+          autoPlay: false,
+          looping: true,
+          allowMuting: true,
+          aspectRatio: _videoController!.value.aspectRatio,
+          errorBuilder: (context, errorMessage) {
+            return Center(
+                child: Text(errorMessage,
+                    style: const TextStyle(color: Colors.white)));
+          },
+        );
+        _isInitialized = true;
+      }
+      if (mounted) setState(() {});
+    } catch (e) {
+      _errorMessage = e.toString();
+      if (mounted) setState(() {});
+    }
   }
 
   @override
   void dispose() {
-    _videoController.dispose();
+    _videoController?.dispose();
     _chewieController?.dispose();
+    _mkPlayer?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_chewieController == null) {
+    if (_errorMessage != null) {
+      return Container(
+        color: Colors.black,
+        height: 200,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, color: Colors.red, size: 32),
+              const SizedBox(height: 8),
+              Text('视频加载失败', style: TextStyle(color: Colors.grey[400])),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (!_isInitialized) {
       return Container(
         color: Colors.black,
         height: 200,
         child: const Center(child: CircularProgressIndicator()),
       );
     }
-    return AspectRatio(
-      aspectRatio: _videoController.value.aspectRatio,
-      child: Chewie(controller: _chewieController!),
-    );
+
+    // Windows 平台使用 media_kit_video
+    if (Platform.isWindows && _mkController != null) {
+      return SizedBox(
+        height: 250,
+        child: media_kit_video.Video(
+          controller: _mkController!,
+          controls: media_kit_video.AdaptiveVideoControls,
+        ),
+      );
+    }
+
+    // 其他平台使用 chewie
+    if (_chewieController != null) {
+      return AspectRatio(
+        aspectRatio: _videoController!.value.aspectRatio,
+        child: Chewie(controller: _chewieController!),
+      );
+    }
+
+    return const SizedBox.shrink();
   }
 }
 

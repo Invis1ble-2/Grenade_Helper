@@ -1,0 +1,672 @@
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../models.dart';
+import '../services/settings_service.dart';
+import '../services/overlay_state_service.dart';
+import '../widgets/radar_mini_map.dart';
+
+/// 悬浮窗组件 - 独立无边框窗口，显示道具教程
+class OverlayWindow extends StatefulWidget {
+  final SettingsService settingsService;
+  final OverlayStateService overlayState;
+  final VoidCallback onClose;
+  final VoidCallback onMinimize;
+  final VoidCallback onStartDrag;
+
+  const OverlayWindow({
+    super.key,
+    required this.settingsService,
+    required this.overlayState,
+    required this.onClose,
+    required this.onMinimize,
+    required this.onStartDrag,
+  });
+
+  @override
+  State<OverlayWindow> createState() => _OverlayWindowState();
+}
+
+class _OverlayWindowState extends State<OverlayWindow> {
+  final FocusNode _focusNode = FocusNode();
+  late Map<HotkeyAction, HotkeyConfig> _hotkeys;
+
+  @override
+  void initState() {
+    super.initState();
+    _hotkeys = widget.settingsService.getHotkeys();
+    widget.overlayState.addListener(_onStateChanged);
+  }
+
+  void _onStateChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    widget.overlayState.removeListener(_onStateChanged);
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RawKeyboardListener(
+      focusNode: _focusNode,
+      autofocus: true,
+      onKey: _handleRawKeyEvent,
+      child: Material(
+        color: const Color(0xFF1B1E23), // 填充整个窗口的背景色
+        child: Container(
+          // 移除固定尺寸，让容器填满窗口
+          constraints: const BoxConstraints(
+            minWidth: 600,
+            minHeight: 750,
+          ),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1B1E23).withValues(alpha: 0.95),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+                color: Colors.orange.withValues(alpha: 0.5), width: 2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.5),
+                blurRadius: 30,
+                spreadRadius: 5,
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              _buildTitleBar(),
+              Expanded(child: _buildContent()),
+              _buildFooter(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 自定义标题栏（可拖动，无系统按钮）
+  Widget _buildTitleBar() {
+    final state = widget.overlayState;
+    final mapName = state.currentMap?.name ?? '未选择地图';
+    final grenade = state.currentGrenade;
+    final title = grenade?.title ?? '';
+
+    return GestureDetector(
+      onPanStart: (_) => widget.onStartDrag(),
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.4),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+        ),
+        child: Row(
+          children: [
+            // 拖动手柄图标
+            Icon(Icons.drag_indicator, color: Colors.grey[600], size: 20),
+            const SizedBox(width: 8),
+
+            // 地图名称标签
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                mapName,
+                style: const TextStyle(
+                  color: Colors.orange,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+
+            // 道具标题
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
+                  fontSize: 14,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+
+            // 过滤器按钮
+            _buildFilterButtons(),
+            const SizedBox(width: 12),
+
+            // 最小化按钮
+            _buildWindowButton(
+              icon: Icons.remove,
+              onTap: widget.onMinimize,
+              color: Colors.grey,
+            ),
+            const SizedBox(width: 4),
+
+            // 关闭按钮
+            _buildWindowButton(
+              icon: Icons.close,
+              onTap: widget.onClose,
+              color: Colors.redAccent,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWindowButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    required Color color,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Icon(icon, size: 16, color: color),
+      ),
+    );
+  }
+
+  Widget _buildFilterButtons() {
+    final state = widget.overlayState;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildFilterIcon(GrenadeType.smoke, Icons.cloud, Colors.grey, state),
+        _buildFilterIcon(
+            GrenadeType.flash, Icons.flash_on, Colors.yellow, state),
+        _buildFilterIcon(GrenadeType.molotov, Icons.local_fire_department,
+            Colors.red, state),
+        _buildFilterIcon(GrenadeType.he, Icons.circle, Colors.green, state),
+      ],
+    );
+  }
+
+  Widget _buildFilterIcon(
+      int type, IconData icon, Color color, OverlayStateService state) {
+    final isActive = state.activeFilters.contains(type);
+    return GestureDetector(
+      onTap: () => state.toggleFilter(type),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 3),
+        child: Icon(
+          icon,
+          size: 18,
+          color: isActive ? color : Colors.grey.withValues(alpha: 0.3),
+        ),
+      ),
+    );
+  }
+
+  /// 主内容区域
+  Widget _buildContent() {
+    final state = widget.overlayState;
+
+    // 未进入地图
+    if (!state.hasMap) {
+      return _buildNoMapPrompt();
+    }
+
+    // 没有道具
+    if (state.currentGrenade == null) {
+      return _buildNoGrenadePrompt();
+    }
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          // 雷达小地图
+          _buildRadarMap(),
+          const SizedBox(height: 16),
+
+          // 道具媒体区域
+          _buildMediaArea(),
+          const SizedBox(height: 12),
+
+          // 步骤说明
+          _buildDescription(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNoMapPrompt() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.map_outlined, size: 80, color: Colors.grey[700]),
+          const SizedBox(height: 16),
+          const Text(
+            '请先进入地图',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '在主界面选择一张地图后\n悬浮窗将显示该地图的道具',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey[500], fontSize: 14),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNoGrenadePrompt() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.add_location_alt, size: 80, color: Colors.grey[700]),
+          const SizedBox(height: 16),
+          const Text(
+            '该地图暂无道具',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '请先在地图上添加道具点位',
+            style: TextStyle(color: Colors.grey[500], fontSize: 14),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRadarMap() {
+    final state = widget.overlayState;
+    final layer = state.currentLayer;
+
+    if (layer == null) return const SizedBox.shrink();
+
+    return RadarMiniMap(
+      mapAssetPath: layer.assetPath,
+      currentGrenade: state.currentGrenade,
+      allGrenades: state.filteredGrenades,
+      width: 550, // 更宽
+      height: 140, // 更矮 - 长方形
+      zoomLevel: 1.3,
+    );
+  }
+
+  Widget _buildMediaArea() {
+    final state = widget.overlayState;
+    final grenade = state.currentGrenade;
+    if (grenade == null) return const SizedBox.shrink();
+
+    final steps = grenade.steps.toList();
+    steps.sort((a, b) => a.stepIndex.compareTo(b.stepIndex));
+
+    if (steps.isEmpty) {
+      return Container(
+        height: 200,
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.3),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Center(
+          child: Text('该道具暂无步骤', style: TextStyle(color: Colors.grey)),
+        ),
+      );
+    }
+
+    final currentStep = state.currentStepIndex < steps.length
+        ? steps[state.currentStepIndex]
+        : steps.first;
+
+    final medias = currentStep.medias.toList();
+
+    return Container(
+      height: 350,
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: medias.isEmpty
+          ? const Center(
+              child:
+                  Icon(Icons.image_not_supported, size: 48, color: Colors.grey),
+            )
+          : _buildMediaView(medias.first),
+    );
+  }
+
+  Widget _buildMediaView(StepMedia media) {
+    if (media.type == MediaType.image) {
+      final file = File(media.localPath);
+      if (file.existsSync()) {
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.file(
+            file,
+            fit: BoxFit.contain,
+            width: double.infinity,
+            errorBuilder: (_, __, ___) => const Center(
+              child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
+            ),
+          ),
+        );
+      }
+    }
+
+    return const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.videocam, size: 48, color: Colors.grey),
+          SizedBox(height: 8),
+          Text('视频需在主界面查看', style: TextStyle(color: Colors.grey)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDescription() {
+    final state = widget.overlayState;
+    final grenade = state.currentGrenade;
+    if (grenade == null) return const SizedBox.shrink();
+
+    final steps = grenade.steps.toList();
+    steps.sort((a, b) => a.stepIndex.compareTo(b.stepIndex));
+
+    if (steps.isEmpty) return const SizedBox.shrink();
+
+    final currentStep = state.currentStepIndex < steps.length
+        ? steps[state.currentStepIndex]
+        : steps.first;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (currentStep.title.isNotEmpty)
+            Text(
+              currentStep.title,
+              style: const TextStyle(
+                color: Colors.orange,
+                fontWeight: FontWeight.bold,
+                fontSize: 10,
+              ),
+            ),
+          if (currentStep.title.isNotEmpty) const SizedBox(height: 4),
+          Text(
+            currentStep.description.isNotEmpty
+                ? currentStep.description
+                : '(无说明)',
+            style: const TextStyle(color: Colors.white, fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 底部导航栏
+  Widget _buildFooter() {
+    final state = widget.overlayState;
+
+    if (!state.hasMap || state.currentGrenade == null) {
+      return Container(
+        height: 60,
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.4),
+          borderRadius:
+              const BorderRadius.vertical(bottom: Radius.circular(14)),
+        ),
+        child: const Center(
+          child: Text(
+            '↑←↓→ 空间导航  |  PageUp/Down 切换道具  |  [ ] 切换步骤',
+            style: TextStyle(color: Colors.grey, fontSize: 11),
+          ),
+        ),
+      );
+    }
+
+    final grenade = state.currentGrenade!;
+    final steps = grenade.steps.toList();
+    steps.sort((a, b) => a.stepIndex.compareTo(b.stepIndex));
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.4),
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // 道具切换
+              _buildNavRow(
+                label: '道具',
+                current: state.currentGrenadeIndex + 1,
+                total: state.filteredGrenades.length,
+                onPrev: state.prevGrenade,
+                onNext: state.nextGrenade,
+                color: Colors.orange,
+              ),
+
+              // 步骤切换
+              _buildNavRow(
+                label: '步骤',
+                current: state.currentStepIndex + 1,
+                total: steps.length,
+                onPrev: state.prevStep,
+                onNext: state.nextStep,
+                color: Colors.blue,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '↑←↓→ 空间导航  |  7/8/9/0 过滤器  |  PageUp/Down 切换道具  |  [ ] 切换步骤',
+            style: TextStyle(color: Colors.grey[600], fontSize: 10),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNavRow({
+    required String label,
+    required int current,
+    required int total,
+    required VoidCallback onPrev,
+    required VoidCallback onNext,
+    required Color color,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          icon: const Icon(Icons.chevron_left, size: 22),
+          color: color,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          onPressed: onPrev,
+        ),
+        Text(
+          '$label $current/$total',
+          style: const TextStyle(color: Colors.white, fontSize: 13),
+        ),
+        IconButton(
+          icon: const Icon(Icons.chevron_right, size: 22),
+          color: color,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          onPressed: onNext,
+        ),
+      ],
+    );
+  }
+
+  // === 快捷键处理 ===
+
+  void _handleRawKeyEvent(RawKeyEvent event) {
+    if (event is! RawKeyDownEvent) return;
+
+    final key = event.logicalKey;
+
+    // 忽略单独的修饰键事件
+    if (_isModifierKey(key)) return;
+
+    // 从事件本身获取修饰键状态
+    // Alt 键在 Windows 上可能需要特殊处理
+    bool hasAlt = event.isAltPressed;
+
+    // 如果标准方法检测不到 Alt，尝试检查物理键状态
+    if (!hasAlt) {
+      // 检查当前按下的物理键中是否有 Alt
+      final pressedKeys = HardwareKeyboard.instance.physicalKeysPressed;
+      hasAlt = pressedKeys.contains(PhysicalKeyboardKey.altLeft) ||
+          pressedKeys.contains(PhysicalKeyboardKey.altRight);
+    }
+
+    // 还可以检查逻辑键
+    if (!hasAlt) {
+      final logicalKeys = HardwareKeyboard.instance.logicalKeysPressed;
+      hasAlt = logicalKeys.contains(LogicalKeyboardKey.alt) ||
+          logicalKeys.contains(LogicalKeyboardKey.altLeft) ||
+          logicalKeys.contains(LogicalKeyboardKey.altRight);
+    }
+
+    final hasCtrl = event.isControlPressed;
+    final hasShift = event.isShiftPressed;
+
+    // 调试输出
+    print(
+        'Overlay Key: ${key.keyLabel}, keyId: ${key.keyId}, Alt: $hasAlt, Ctrl: $hasCtrl, Shift: $hasShift');
+
+    // 检查每个动作
+    for (final entry in _hotkeys.entries) {
+      if (_matchesHotkey(key, hasAlt, hasCtrl, hasShift, entry.value)) {
+        print('Matched action: ${entry.key}');
+        _executeAction(entry.key);
+        return;
+      }
+    }
+  }
+
+  /// 判断是否是修饰键
+  bool _isModifierKey(LogicalKeyboardKey key) {
+    return key == LogicalKeyboardKey.alt ||
+        key == LogicalKeyboardKey.altLeft ||
+        key == LogicalKeyboardKey.altRight ||
+        key == LogicalKeyboardKey.control ||
+        key == LogicalKeyboardKey.controlLeft ||
+        key == LogicalKeyboardKey.controlRight ||
+        key == LogicalKeyboardKey.shift ||
+        key == LogicalKeyboardKey.shiftLeft ||
+        key == LogicalKeyboardKey.shiftRight ||
+        key == LogicalKeyboardKey.meta ||
+        key == LogicalKeyboardKey.metaLeft ||
+        key == LogicalKeyboardKey.metaRight;
+  }
+
+  bool _matchesHotkey(
+    LogicalKeyboardKey key,
+    bool hasAlt,
+    bool hasCtrl,
+    bool hasShift,
+    HotkeyConfig config,
+  ) {
+    // 使用 keyId 比较而不是对象比较
+    if (key.keyId != config.key.keyId) return false;
+
+    final needsAlt = config.modifiers.any((m) =>
+        m == LogicalKeyboardKey.alt ||
+        m == LogicalKeyboardKey.altLeft ||
+        m == LogicalKeyboardKey.altRight);
+    final needsCtrl = config.modifiers.any((m) =>
+        m == LogicalKeyboardKey.control ||
+        m == LogicalKeyboardKey.controlLeft ||
+        m == LogicalKeyboardKey.controlRight);
+    final needsShift = config.modifiers.any((m) =>
+        m == LogicalKeyboardKey.shift ||
+        m == LogicalKeyboardKey.shiftLeft ||
+        m == LogicalKeyboardKey.shiftRight);
+
+    return hasAlt == needsAlt && hasCtrl == needsCtrl && hasShift == needsShift;
+  }
+
+  void _executeAction(HotkeyAction action) {
+    final state = widget.overlayState;
+
+    switch (action) {
+      case HotkeyAction.hideOverlay:
+      case HotkeyAction.toggleOverlay:
+        widget.onClose();
+        break;
+      case HotkeyAction.navigateUp:
+        state.navigateDirection(NavigationDirection.up);
+        break;
+      case HotkeyAction.navigateDown:
+        state.navigateDirection(NavigationDirection.down);
+        break;
+      case HotkeyAction.navigateLeft:
+        state.navigateDirection(NavigationDirection.left);
+        break;
+      case HotkeyAction.navigateRight:
+        state.navigateDirection(NavigationDirection.right);
+        break;
+      case HotkeyAction.prevGrenade:
+        state.prevGrenade();
+        break;
+      case HotkeyAction.nextGrenade:
+        state.nextGrenade();
+        break;
+      case HotkeyAction.prevStep:
+        state.prevStep();
+        break;
+      case HotkeyAction.nextStep:
+        state.nextStep();
+        break;
+      case HotkeyAction.toggleSmoke:
+        state.toggleFilter(GrenadeType.smoke);
+        break;
+      case HotkeyAction.toggleFlash:
+        state.toggleFilter(GrenadeType.flash);
+        break;
+      case HotkeyAction.toggleMolotov:
+        state.toggleFilter(GrenadeType.molotov);
+        break;
+      case HotkeyAction.toggleHE:
+        state.toggleFilter(GrenadeType.he);
+        break;
+    }
+  }
+}
