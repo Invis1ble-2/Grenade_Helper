@@ -17,6 +17,9 @@ final typeFilterProvider = StateProvider.autoDispose<Set<int>>((ref) => <int>{
       GrenadeType.he
     });
 
+// 出生点显示开关（默认关闭）
+final showSpawnPointsProvider = StateProvider.autoDispose<bool>((ref) => false);
+
 // ==================== Isar 数据流 ====================
 
 // 层级 1: 原始数据源 (Raw Data)

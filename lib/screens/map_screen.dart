@@ -7,6 +7,7 @@ import 'package:isar_community/isar.dart';
 import '../models.dart';
 import '../providers.dart';
 import '../main.dart';
+import '../spawn_point_data.dart';
 import 'grenade_detail_screen.dart';
 
 // --- 页面级状态管理 ---
@@ -106,8 +107,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   Offset? _tempTapPosition;
   GrenadeCluster? _draggingCluster;
   Offset? _dragOffset;
+  Offset? _dragAnchorOffset; // 拖拽锚点偏移
   bool _isMovingCluster = false;
   late final PhotoViewController _photoViewController;
+  final GlobalKey _stackKey = GlobalKey(); // 添加 GlobalKey
 
   @override
   void initState() {
@@ -130,6 +133,70 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     // 通知独立悬浮窗清除地图
     _notifyOverlayWindowClearMap();
     super.dispose();
+  }
+
+  /// 计算 BoxFit.contain 模式下正方形图片的实际显示区域
+  /// 返回 (imageWidth, imageHeight, offsetX, offsetY)
+  ({double width, double height, double offsetX, double offsetY})
+      _getImageBounds(double containerWidth, double containerHeight) {
+    const double imageAspectRatio = 1.0; // 地图图片是正方形
+    final double containerAspectRatio = containerWidth / containerHeight;
+
+    if (containerAspectRatio > imageAspectRatio) {
+      // 容器更宽，图片以高度为准，左右有留白
+      final imageHeight = containerHeight;
+      final imageWidth = containerHeight * imageAspectRatio;
+      return (
+        width: imageWidth,
+        height: imageHeight,
+        offsetX: (containerWidth - imageWidth) / 2,
+        offsetY: 0.0,
+      );
+    } else {
+      // 容器更高，图片以宽度为准，上下有留白
+      final imageWidth = containerWidth;
+      final imageHeight = containerWidth / imageAspectRatio;
+      return (
+        width: imageWidth,
+        height: imageHeight,
+        offsetX: 0.0,
+        offsetY: (containerHeight - imageHeight) / 2,
+      );
+    }
+  }
+
+  /// 将局部坐标（相对于 GestureDetector/Stack）转换为原始图片坐标比例 (0-1)
+  /// 参数 localPosition 是手势事件的 localPosition，已经是相对于内容的坐标
+  /// 参数 containerWidth/containerHeight 是容器尺寸
+  Offset? _getLocalPositionFromLocal(
+      Offset localPosition, double containerWidth, double containerHeight) {
+    // 计算图片实际显示区域
+    final bounds = _getImageBounds(containerWidth, containerHeight);
+
+    // 将局部坐标转换为相对于图片区域的偏移
+    final tapX = localPosition.dx - bounds.offsetX;
+    final tapY = localPosition.dy - bounds.offsetY;
+
+    // 转换为比例
+    return Offset(tapX / bounds.width, tapY / bounds.height);
+  }
+
+  /// 从全局坐标获取图片比例坐标 (用于拖拽等场景)
+  /// 返回 null 如果坐标无效
+  Offset? _getLocalPosition(Offset globalPosition) {
+    // 1. 获取 Stack 的 RenderBox
+    final RenderBox? box =
+        _stackKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return null;
+
+    // 2. 将全局坐标转换为 Stack 的局部坐标
+    final localPosition = box.globalToLocal(globalPosition);
+
+    // 3. 获取 Container 尺寸（Stack 的尺寸）
+    final size = box.size;
+
+    // 4. 使用新方法计算
+    return _getLocalPositionFromLocal(localPosition, size.width, size.height);
   }
 
   void _updateOverlayState(int layerIndex) {
@@ -196,9 +263,17 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final isEditMode = ref.read(isEditModeProvider);
     if (!isEditMode) return;
 
-    // 计算点击位置比例
-    final xRatio = details.localPosition.dx / width;
-    final yRatio = details.localPosition.dy / height;
+    // 直接使用 localPosition - 这是相对于 GestureDetector 的坐标
+    // PhotoView.customChild 的 child 内部的手势已经处于未变换的坐标空间
+    final localRatio =
+        _getLocalPositionFromLocal(details.localPosition, width, height);
+
+    if (localRatio == null) {
+      return;
+    }
+
+    final xRatio = localRatio.dx;
+    final yRatio = localRatio.dy;
 
     // 边界检查：只允许在地图范围内创建点位
     if (xRatio < 0 || xRatio > 1 || yRatio < 0 || yRatio > 1) {
@@ -508,6 +583,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       _isMovingCluster = false;
       _draggingCluster = null;
       _dragOffset = null;
+      _dragAnchorOffset = null;
     });
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
   }
@@ -515,8 +591,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   void _handleMoveClusterTap(
       TapUpDetails details, double width, double height) async {
     if (_draggingCluster == null) return;
-    final newX = details.localPosition.dx / width;
-    final newY = details.localPosition.dy / height;
+
+    // 直接使用 localPosition 获取精确的坐标比例
+    final localRatio =
+        _getLocalPositionFromLocal(details.localPosition, width, height);
+    if (localRatio == null) return;
+
+    final newX = localRatio.dx;
+    final newY = localRatio.dy;
 
     // 边界检查：只允许移动到地图范围内
     if (newX < 0 || newX > 1 || newY < 0 || newY > 1) {
@@ -568,6 +650,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     setState(() {
       _draggingCluster = null;
       _dragOffset = null;
+      _dragAnchorOffset = null;
     });
   }
 
@@ -717,8 +800,18 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     );
   }
 
-  Widget _buildClusterMarker(GrenadeCluster cluster, BoxConstraints constraints,
-      bool isEditMode, int layerId, double markerScale) {
+  Widget _buildClusterMarker(
+      GrenadeCluster cluster,
+      BoxConstraints constraints,
+      bool isEditMode,
+      int layerId,
+      double markerScale,
+      ({
+        double width,
+        double height,
+        double offsetX,
+        double offsetY
+      }) imageBounds) {
     final color = _getTeamColor(cluster.primaryTeam);
     final icon = _getTypeIcon(cluster.primaryType);
     final count = cluster.grenades.length;
@@ -727,32 +820,50 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final scaledSize = 20.0 * markerScale;
     final scaledHalfSize = scaledSize / 2;
 
+    // 计算标记在 Stack 中的实际位置（考虑图片偏移）
+    final left = imageBounds.offsetX +
+        cluster.xRatio * imageBounds.width -
+        scaledHalfSize;
+    final top = imageBounds.offsetY +
+        cluster.yRatio * imageBounds.height -
+        scaledHalfSize;
+
     return Positioned(
-      left: cluster.xRatio * constraints.maxWidth - scaledHalfSize,
-      top: cluster.yRatio * constraints.maxHeight - scaledHalfSize,
+      left: left,
+      top: top,
       child: Transform.scale(
         scale: markerScale,
         alignment: Alignment.center,
         child: GestureDetector(
           onTap: () => _handleClusterTap(cluster, layerId),
           onLongPressStart: isEditMode
-              ? (_) {
+              ? (details) {
+                  // 获取按下的触摸点位置（Ratio）
+                  final touchRatio = _getLocalPosition(details.globalPosition);
+                  if (touchRatio == null) return;
+
                   setState(() {
                     _draggingCluster = cluster;
+                    // 计算锚点偏移：触摸点 - Cluster中心
+                    // 这样在拖动时，我们只需要用 新触摸点 - 锚点偏移 就能还原出 Cluster中心
+                    _dragAnchorOffset =
+                        touchRatio - Offset(cluster.xRatio, cluster.yRatio);
                     _dragOffset = Offset(cluster.xRatio, cluster.yRatio);
                   });
                 }
               : null,
           onLongPressMoveUpdate: isEditMode
               ? (details) {
+                  if (_dragAnchorOffset == null) return;
+
+                  // 获取当前触摸点位置（Ratio）
+                  final touchRatio = _getLocalPosition(details.globalPosition);
+                  if (touchRatio == null) return;
+
                   setState(() {
-                    _dragOffset = Offset(
-                        details.localPosition.dx / constraints.maxWidth +
-                            cluster.xRatio -
-                            10 / constraints.maxWidth,
-                        details.localPosition.dy / constraints.maxHeight +
-                            cluster.yRatio -
-                            10 / constraints.maxHeight);
+                    // 新 Cluster 中心 = 当前触摸点 - 锚点偏移
+                    final newPos = touchRatio - _dragAnchorOffset!;
+                    _dragOffset = newPos;
                   });
                 }
               : null,
@@ -810,6 +921,65 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     );
   }
 
+  /// 构建出生点标记（方形 + 数字）
+  Widget _buildSpawnPointMarker(
+      SpawnPoint spawn,
+      bool isCT,
+      BoxConstraints constraints,
+      double markerScale,
+      ({
+        double width,
+        double height,
+        double offsetX,
+        double offsetY
+      }) imageBounds) {
+    final color = isCT ? Colors.blueAccent : Colors.amber;
+    final scaledSize = 22.0 * markerScale;
+    final scaledHalfSize = scaledSize / 2;
+
+    // 计算标记在 Stack 中的实际位置（考虑图片偏移）
+    final left =
+        imageBounds.offsetX + spawn.x * imageBounds.width - scaledHalfSize;
+    final top =
+        imageBounds.offsetY + spawn.y * imageBounds.height - scaledHalfSize;
+
+    return Positioned(
+      left: left,
+      top: top,
+      child: Transform.scale(
+        scale: markerScale,
+        alignment: Alignment.center,
+        child: Container(
+          width: 22,
+          height: 22,
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.85),
+            borderRadius: BorderRadius.circular(4),
+            border:
+                Border.all(color: Colors.white.withOpacity(0.6), width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.4),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              )
+            ],
+          ),
+          child: Center(
+            child: Text(
+              '${spawn.id}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildFavoritesBar(AsyncValue<List<Grenade>> asyncData) {
     return Container(
       height: 60,
@@ -854,6 +1024,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final teamFilter = ref.watch(teamFilterProvider);
     final onlyFav = ref.watch(onlyFavoritesProvider);
     final selectedTypes = ref.watch(typeFilterProvider);
+    final showSpawnPoints = ref.watch(showSpawnPointsProvider);
+
+    // 获取当前地图的出生点数据
+    final mapName = widget.gameMap.name.toLowerCase();
+    final spawnConfig = spawnPointData[mapName];
 
     widget.gameMap.layers.loadSync();
     final layers = widget.gameMap.layers.toList();
@@ -931,6 +1106,22 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                       showCheckmark: false,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(20))),
+                  const SizedBox(width: 8),
+                  FilterChip(
+                      label: const Text("出生点", style: TextStyle(fontSize: 12)),
+                      selected: showSpawnPoints,
+                      onSelected: (val) => ref
+                          .read(showSpawnPointsProvider.notifier)
+                          .state = val,
+                      backgroundColor: Colors.white10,
+                      selectedColor: Colors.green.withOpacity(0.3),
+                      showCheckmark: false,
+                      labelStyle: TextStyle(
+                          color: showSpawnPoints
+                              ? Colors.greenAccent
+                              : Colors.grey),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20))),
                 ]))),
       ),
       body: LayoutBuilder(builder: (context, constraints) {
@@ -958,14 +1149,28 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                         // Clamp scale to prevent markers getting too small or too big if needed
                         // For now we use direct inverse scaling to keep visual size constant
 
+                        // 计算 BoxFit.contain 模式下图片的实际显示区域
+                        final imageBounds = _getImageBounds(
+                            constraints.maxWidth, constraints.maxHeight);
+
                         return GestureDetector(
                             onTapUp: (d) => _handleTap(d, constraints.maxWidth,
                                 constraints.maxHeight, currentLayer.id),
-                            child: Stack(children: [
+                            child: Stack(key: _stackKey, children: [
                               Image.asset(currentLayer.assetPath,
                                   width: constraints.maxWidth,
                                   height: constraints.maxHeight,
                                   fit: BoxFit.contain),
+                              // 出生点标记
+                              if (showSpawnPoints && spawnConfig != null) ...[
+                                ...spawnConfig.ctSpawns.map((spawn) =>
+                                    _buildSpawnPointMarker(spawn, true,
+                                        constraints, markerScale, imageBounds)),
+                                ...spawnConfig.tSpawns.map((spawn) =>
+                                    _buildSpawnPointMarker(spawn, false,
+                                        constraints, markerScale, imageBounds)),
+                              ],
+                              // 道具点位标记
                               ...grenadesAsync.when(
                                   data: (list) {
                                     final clusters = clusterGrenades(list);
@@ -975,18 +1180,19 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                             constraints,
                                             isEditMode,
                                             currentLayer.id,
-                                            markerScale));
+                                            markerScale,
+                                            imageBounds));
                                   },
                                   error: (_, __) => [],
                                   loading: () => []),
                               if (_draggingCluster != null &&
                                   _dragOffset != null)
                                 Positioned(
-                                    left:
-                                        _dragOffset!.dx * constraints.maxWidth -
-                                            14 * markerScale,
-                                    top: _dragOffset!.dy *
-                                            constraints.maxHeight -
+                                    left: imageBounds.offsetX +
+                                        _dragOffset!.dx * imageBounds.width -
+                                        14 * markerScale,
+                                    top: imageBounds.offsetY +
+                                        _dragOffset!.dy * imageBounds.height -
                                         14 * markerScale,
                                     child: Transform.scale(
                                       scale: markerScale,
@@ -1005,11 +1211,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                     )),
                               if (_tempTapPosition != null)
                                 Positioned(
-                                    left: _tempTapPosition!.dx *
-                                            constraints.maxWidth -
+                                    left: imageBounds.offsetX +
+                                        _tempTapPosition!.dx *
+                                            imageBounds.width -
                                         12 * markerScale,
-                                    top: _tempTapPosition!.dy *
-                                            constraints.maxHeight -
+                                    top: imageBounds.offsetY +
+                                        _tempTapPosition!.dy *
+                                            imageBounds.height -
                                         12 * markerScale,
                                     child: Transform.scale(
                                       scale: markerScale,

@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CS2 出生点坐标拾取工具</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 24px;
+            background: linear-gradient(90deg, #4facfe, #00f2fe);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .controls {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        label {
+            font-size: 14px;
+            color: #aaa;
+        }
+
+        select {
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: 1px solid #3a3a5a;
+            background: #2a2a4a;
+            color: #fff;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .team-btns {
+            display: flex;
+            gap: 8px;
+        }
+
+        .team-btn {
+            padding: 8px 20px;
+            border-radius: 8px;
+            border: 2px solid #555;
+            background: transparent;
+            color: #888;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.2s;
+        }
+
+        .team-btn.ct.active {
+            border-color: #4facfe;
+            color: #4facfe;
+            background: rgba(79, 172, 254, 0.1);
+        }
+
+        .team-btn.t.active {
+            border-color: #f5a623;
+            color: #f5a623;
+            background: rgba(245, 166, 35, 0.1);
+        }
+
+        .team-btn:hover {
+            opacity: 0.8;
+        }
+
+        .map-container {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .map-wrapper {
+            position: relative;
+            background: #0a0a1a;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        #mapImage {
+            display: block;
+            width: 800px;
+            height: 800px;
+            cursor: crosshair;
+            transition: none;
+            transform-origin: center center;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+
+        .map-wrapper.dragging #mapImage {
+            cursor: grabbing;
+        }
+
+        .map-inner {
+            position: relative;
+            display: inline-block;
+        }
+
+        .zoom-controls {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            z-index: 10;
+        }
+
+        .zoom-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            border: none;
+            background: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            font-size: 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+
+        .zoom-btn:hover {
+            background: rgba(79, 172, 254, 0.8);
+        }
+
+        .zoom-level {
+            text-align: center;
+            font-size: 12px;
+            color: #aaa;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .spawn-marker {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+            color: #fff;
+            cursor: pointer;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            /* 使用 transform-origin 确保从中心缩放 */
+            transform-origin: center center;
+        }
+
+        .spawn-marker:hover {
+            opacity: 0.8;
+        }
+
+        .spawn-marker.ct {
+            background: rgba(79, 172, 254, 0.9);
+        }
+
+        .spawn-marker.t {
+            background: rgba(245, 166, 35, 0.9);
+        }
+
+        .sidebar {
+            background: rgba(30, 30, 50, 0.9);
+            border-radius: 12px;
+            padding: 20px;
+            min-width: 300px;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .sidebar h3 {
+            margin-bottom: 15px;
+            font-size: 16px;
+            color: #4facfe;
+        }
+
+        .spawn-list {
+            list-style: none;
+        }
+
+        .spawn-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            margin-bottom: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+            font-size: 13px;
+        }
+
+        .spawn-item .coords {
+            color: #888;
+            font-family: monospace;
+        }
+
+        .spawn-item .delete-btn {
+            background: #e74c3c;
+            border: none;
+            color: #fff;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+
+        .spawn-item .delete-btn:hover {
+            background: #c0392b;
+        }
+
+        .actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #4facfe, #00f2fe);
+            color: #000;
+        }
+
+        .btn-danger {
+            background: #e74c3c;
+            color: #fff;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .code-output {
+            margin-top: 20px;
+            background: #0a0a1a;
+            border-radius: 8px;
+            padding: 15px;
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            color: #4facfe;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 24px;
+            background: #27ae60;
+            color: #fff;
+            border-radius: 8px;
+            font-weight: bold;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 1000;
+        }
+
+        .toast.show {
+            opacity: 1;
+        }
+
+        .tip {
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🎯 CS2 出生点坐标拾取工具</h1>
+
+        <div class="controls">
+            <div class="control-group">
+                <label>地图:</label>
+                <select id="mapSelect">
+                    <option value="mirage">Mirage</option>
+                    <option value="dust2">Dust2</option>
+                    <option value="inferno">Inferno</option>
+                    <option value="anubis">Anubis</option>
+                    <option value="ancient">Ancient</option>
+                    <option value="nuke_upper">Nuke (上层)</option>
+                    <option value="nuke_lower">Nuke (下层)</option>
+                    <option value="overpass">Overpass</option>
+                    <option value="vertigo_upper">Vertigo (上层)</option>
+                    <option value="vertigo_lower">Vertigo (下层)</option>
+                    <option value="train">Train</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>阵营:</label>
+                <div class="team-btns">
+                    <button class="team-btn ct active" data-team="ct">CT</button>
+                    <button class="team-btn t" data-team="t">T</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="map-container">
+            <div class="map-wrapper" id="mapWrapper">
+                <div class="map-inner" id="mapInner">
+                    <img id="mapImage" src="../assets/maps/mirage.png" alt="Map">
+                    <div id="markersContainer"></div>
+                </div>
+                <div class="zoom-controls">
+                    <button class="zoom-btn" onclick="zoomIn()" title="放大">+</button>
+                    <div class="zoom-level" id="zoomLevel">100%</div>
+                    <button class="zoom-btn" onclick="zoomOut()" title="缩小">−</button>
+                    <button class="zoom-btn" onclick="resetZoom()" title="重置" style="font-size:14px;">↺</button>
+                </div>
+            </div>
+
+            <div class="sidebar">
+                <h3>📍 已添加的出生点</h3>
+                <div id="ctList">
+                    <h4 style="color:#4facfe;margin:10px 0 5px;font-size:13px;">CT 出生点</h4>
+                    <ul class="spawn-list" id="ctSpawnList"></ul>
+                </div>
+                <div id="tList">
+                    <h4 style="color:#f5a623;margin:10px 0 5px;font-size:13px;">T 出生点</h4>
+                    <ul class="spawn-list" id="tSpawnList"></ul>
+                </div>
+
+                <div class="actions">
+                    <button class="btn btn-primary" onclick="copyDartCode()">📋 复制 Dart 代码</button>
+                    <button class="btn btn-danger" onclick="clearCurrentMap()">🗑️ 清空当前地图</button>
+                </div>
+
+                <div class="code-output" id="codeOutput">// 选择地图并添加出生点后，代码将显示在这里</div>
+            </div>
+        </div>
+        <p class="tip">💡 左键点击添加出生点 | 右键拖拽移动地图 | 滚轮缩放 | 数据自动保存</p>
+    </div>
+
+    <div class="toast" id="toast">已复制到剪贴板</div>
+
+    <script>
+        // 数据存储 - 从 localStorage 加载
+        const STORAGE_KEY = 'cs2_spawn_points';
+        let spawnData = loadFromStorage();
+        let currentMap = 'mirage';
+        let currentTeam = 'ct';
+        let currentZoom = 1;
+        let panX = 0, panY = 0;
+        const minZoom = 0.5;
+        const maxZoom = 5;
+
+        // 拖拽状态
+        let isDragging = false;
+        let dragStartX = 0, dragStartY = 0;
+        let dragStartPanX = 0, dragStartPanY = 0;
+
+        // 保存到 localStorage
+        function saveToStorage() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(spawnData));
+        }
+
+        // 从 localStorage 加载
+        function loadFromStorage() {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            return saved ? JSON.parse(saved) : {};
+        }
+
+        // 缩放和平移功能
+        const mapInner = document.getElementById('mapInner');
+        const mapWrapper = document.getElementById('mapWrapper');
+
+        function updateTransform() {
+            mapInner.style.transform = `translate(${panX}px, ${panY}px) scale(${currentZoom})`;
+            document.getElementById('zoomLevel').textContent = `${Math.round(currentZoom * 100)}%`;
+        }
+
+        function zoomIn() {
+            currentZoom = Math.min(maxZoom, currentZoom + 0.25);
+            updateTransform();
+            updateMarkerScale();
+        }
+
+        function zoomOut() {
+            currentZoom = Math.max(minZoom, currentZoom - 0.25);
+            updateTransform();
+            updateMarkerScale();
+        }
+
+        function resetZoom() {
+            currentZoom = 1;
+            panX = 0;
+            panY = 0;
+            updateTransform();
+            updateMarkerScale();
+        }
+
+        // 滚轮缩放
+        mapWrapper.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            if (e.deltaY < 0) {
+                zoomIn();
+            } else {
+                zoomOut();
+            }
+        });
+
+        // 右键拖拽平移
+        mapWrapper.addEventListener('mousedown', (e) => {
+            if (e.button === 2) { // 右键
+                e.preventDefault();
+                isDragging = true;
+                dragStartX = e.clientX;
+                dragStartY = e.clientY;
+                dragStartPanX = panX;
+                dragStartPanY = panY;
+                mapWrapper.classList.add('dragging');
+            }
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                panX = dragStartPanX + (e.clientX - dragStartX);
+                panY = dragStartPanY + (e.clientY - dragStartY);
+                updateTransform();
+            }
+        });
+
+        document.addEventListener('mouseup', (e) => {
+            if (e.button === 2 && isDragging) {
+                isDragging = false;
+                mapWrapper.classList.remove('dragging');
+            }
+        });
+
+        // 禁止右键菜单
+        mapWrapper.addEventListener('contextmenu', (e) => e.preventDefault());
+
+        // 初始化地图数据
+        function initMapData(mapName) {
+            if (!spawnData[mapName]) {
+                spawnData[mapName] = { ct: [], t: [] };
+            }
+        }
+
+        // DOM 元素
+        const mapSelect = document.getElementById('mapSelect');
+        const mapImage = document.getElementById('mapImage');
+        const markersContainer = document.getElementById('markersContainer');
+        const ctSpawnList = document.getElementById('ctSpawnList');
+        const tSpawnList = document.getElementById('tSpawnList');
+        const codeOutput = document.getElementById('codeOutput');
+        const teamBtns = document.querySelectorAll('.team-btn');
+
+        // 切换地图
+        mapSelect.addEventListener('change', (e) => {
+            currentMap = e.target.value;
+            mapImage.src = `../assets/maps/${currentMap}.png`;
+            initMapData(currentMap);
+            renderAll();
+        });
+
+        // 切换阵营
+        teamBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                teamBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentTeam = btn.dataset.team;
+            });
+        });
+
+        // 点击地图添加出生点
+        mapImage.addEventListener('click', (e) => {
+            // 获取 mapWrapper 的边界（作为视口参考）
+            const wrapperRect = mapWrapper.getBoundingClientRect();
+
+            // 获取图片的原始尺寸（CSS 定义的 800x800）
+            const imageWidth = 800;
+            const imageHeight = 800;
+
+            // 计算图片中心在 wrapper 中的位置
+            // mapInner 的 transform-origin 是 center center，所以缩放以 (400, 400) 为中心
+            const imageCenterX = wrapperRect.left + wrapperRect.width / 2 + panX;
+            const imageCenterY = wrapperRect.top + wrapperRect.height / 2 + panY;
+
+            // 计算缩放后图片的左上角位置
+            const scaledWidth = imageWidth * currentZoom;
+            const scaledHeight = imageHeight * currentZoom;
+            const imageLeft = imageCenterX - scaledWidth / 2;
+            const imageTop = imageCenterY - scaledHeight / 2;
+
+            // 计算点击位置相对于图片左上角的偏移（在缩放后的坐标系中）
+            const clickOffsetX = e.clientX - imageLeft;
+            const clickOffsetY = e.clientY - imageTop;
+
+            // 转换为原始图片坐标的百分比
+            const x = clickOffsetX / scaledWidth;
+            const y = clickOffsetY / scaledHeight;
+
+            initMapData(currentMap);
+            const spawns = spawnData[currentMap][currentTeam];
+            const id = spawns.length + 1;
+
+            spawns.push({ id, x: parseFloat(x.toFixed(4)), y: parseFloat(y.toFixed(4)) });
+            renderAll();
+        });
+
+        // 删除出生点
+        function deleteSpawn(team, index) {
+            spawnData[currentMap][team].splice(index, 1);
+            // 重新编号
+            spawnData[currentMap][team].forEach((s, i) => s.id = i + 1);
+            renderAll();
+        }
+
+        // 渲染标记
+        function renderMarkers() {
+            markersContainer.innerHTML = '';
+            initMapData(currentMap);
+
+            ['ct', 't'].forEach(team => {
+                spawnData[currentMap][team].forEach((spawn, index) => {
+                    const marker = document.createElement('div');
+                    marker.className = `spawn-marker ${team}`;
+                    marker.style.left = `${spawn.x * 100}%`;
+                    marker.style.top = `${spawn.y * 100}%`;
+                    // 反向缩放保持视觉大小一致，并居中定位
+                    const scale = 1 / currentZoom;
+                    marker.style.transform = `translate(-50%, -50%) scale(${scale})`;
+                    marker.textContent = spawn.id;
+                    marker.title = `${team.toUpperCase()}-${spawn.id} (${spawn.x}, ${spawn.y}) - 点击删除`;
+                    marker.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        deleteSpawn(team, index);
+                    });
+                    markersContainer.appendChild(marker);
+                });
+            });
+        }
+
+        // 更新标记缩放（缩放时调用）
+        function updateMarkerScale() {
+            const scale = 1 / currentZoom;
+            document.querySelectorAll('.spawn-marker').forEach(marker => {
+                marker.style.transform = `translate(-50%, -50%) scale(${scale})`;
+            });
+        }
+
+        // 渲染列表
+        function renderLists() {
+            initMapData(currentMap);
+
+            ctSpawnList.innerHTML = spawnData[currentMap].ct.map((s, i) => `
+                <li class="spawn-item">
+                    <span>CT-${s.id}</span>
+                    <span class="coords">(${s.x}, ${s.y})</span>
+                    <button class="delete-btn" onclick="deleteSpawn('ct', ${i})">删除</button>
+                </li>
+            `).join('') || '<li style="color:#555;font-size:12px;">暂无</li>';
+
+            tSpawnList.innerHTML = spawnData[currentMap].t.map((s, i) => `
+                <li class="spawn-item">
+                    <span>T-${s.id}</span>
+                    <span class="coords">(${s.x}, ${s.y})</span>
+                    <button class="delete-btn" onclick="deleteSpawn('t', ${i})">删除</button>
+                </li>
+            `).join('') || '<li style="color:#555;font-size:12px;">暂无</li>';
+        }
+
+        // 生成 Dart 代码
+        function generateDartCode() {
+            initMapData(currentMap);
+            const data = spawnData[currentMap];
+
+            const ctCode = data.ct.map(s => `SpawnPoint(${s.id}, ${s.x}, ${s.y})`).join(', ');
+            const tCode = data.t.map(s => `SpawnPoint(${s.id}, ${s.x}, ${s.y})`).join(', ');
+
+            return `'${currentMap}': MapSpawnConfig(
+  ctSpawns: [${ctCode}],
+  tSpawns: [${tCode}],
+),`;
+        }
+
+        // 渲染代码输出
+        function renderCode() {
+            codeOutput.textContent = generateDartCode();
+        }
+
+        // 渲染全部并自动保存
+        function renderAll() {
+            renderMarkers();
+            renderLists();
+            renderCode();
+            saveToStorage(); // 自动保存到 localStorage
+        }
+
+        // 复制 Dart 代码
+        function copyDartCode() {
+            const code = generateDartCode();
+            navigator.clipboard.writeText(code).then(() => {
+                showToast('已复制到剪贴板');
+            });
+        }
+
+        // 清空当前地图
+        function clearCurrentMap() {
+            if (confirm(`确定要清空 ${currentMap} 的所有出生点吗？`)) {
+                spawnData[currentMap] = { ct: [], t: [] };
+                renderAll();
+            }
+        }
+
+        // 显示提示
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 2000);
+        }
+
+        // 初始化
+        initMapData(currentMap);
+        renderAll();
+    </script>
+</body>
+
+</html>
