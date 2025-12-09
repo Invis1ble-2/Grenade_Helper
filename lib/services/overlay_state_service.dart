@@ -59,6 +59,28 @@ class OverlayStateService extends ChangeNotifier {
     return _filteredGrenades[_currentGrenadeIndex];
   }
 
+  /// 合并阈值（与 map_screen.dart 中的 clusterGrenades 保持一致）
+  static const double _clusterThreshold = 0.03;
+
+  /// 获取当前点位（cluster）内的所有道具
+  List<Grenade> get currentClusterGrenades {
+    final current = currentGrenade;
+    if (current == null) return [];
+
+    return _filteredGrenades.where((g) {
+      final dx = (g.xRatio - current.xRatio).abs();
+      final dy = (g.yRatio - current.yRatio).abs();
+      return (dx * dx + dy * dy) < _clusterThreshold * _clusterThreshold;
+    }).toList();
+  }
+
+  /// 当前道具在 cluster 内的索引
+  int get currentClusterIndex {
+    final cluster = currentClusterGrenades;
+    if (cluster.isEmpty || currentGrenade == null) return 0;
+    return cluster.indexWhere((g) => g.id == currentGrenade!.id);
+  }
+
   bool get hasMap => _currentMap != null && _currentLayer != null;
 
   /// 设置当前地图（从 MapScreen 调用）
@@ -191,23 +213,42 @@ class OverlayStateService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 切换到上一个道具
+  /// 切换到当前点位的上一个道具（只在同一点位内循环）
   void prevGrenade() {
-    if (_filteredGrenades.isEmpty) return;
-    _currentGrenadeIndex =
-        (_currentGrenadeIndex - 1 + _filteredGrenades.length) %
-            _filteredGrenades.length;
-    _currentStepIndex = 0;
-    notifyListeners();
+    final cluster = currentClusterGrenades;
+    if (cluster.isEmpty) return;
+
+    final clusterIdx = currentClusterIndex;
+    final newClusterIdx = (clusterIdx - 1 + cluster.length) % cluster.length;
+    final targetGrenade = cluster[newClusterIdx];
+
+    // 找到该道具在 filteredGrenades 中的索引
+    final globalIdx =
+        _filteredGrenades.indexWhere((g) => g.id == targetGrenade.id);
+    if (globalIdx >= 0) {
+      _currentGrenadeIndex = globalIdx;
+      _currentStepIndex = 0;
+      notifyListeners();
+    }
   }
 
-  /// 切换到下一个道具
+  /// 切换到当前点位的下一个道具（只在同一点位内循环）
   void nextGrenade() {
-    if (_filteredGrenades.isEmpty) return;
-    _currentGrenadeIndex =
-        (_currentGrenadeIndex + 1) % _filteredGrenades.length;
-    _currentStepIndex = 0;
-    notifyListeners();
+    final cluster = currentClusterGrenades;
+    if (cluster.isEmpty) return;
+
+    final clusterIdx = currentClusterIndex;
+    final newClusterIdx = (clusterIdx + 1) % cluster.length;
+    final targetGrenade = cluster[newClusterIdx];
+
+    // 找到该道具在 filteredGrenades 中的索引
+    final globalIdx =
+        _filteredGrenades.indexWhere((g) => g.id == targetGrenade.id);
+    if (globalIdx >= 0) {
+      _currentGrenadeIndex = globalIdx;
+      _currentStepIndex = 0;
+      notifyListeners();
+    }
   }
 
   /// 切换到上一步
@@ -242,26 +283,35 @@ class OverlayStateService extends ChangeNotifier {
       final g = _filteredGrenades[i];
       final dx = g.xRatio - current.xRatio;
       final dy = g.yRatio - current.yRatio;
+      final dist = dx * dx + dy * dy;
+      final absDx = dx.abs();
+      final absDy = dy.abs();
 
-      // 检查是否在正确的方向上
+      // 跳过同一个点位（cluster）内的道具
+      if (dist < _clusterThreshold * _clusterThreshold) continue;
+
+      // 检查是否在正确的方向上，并且主要偏向该方向（角度 < 45°）
       bool isInDirection = false;
       switch (direction) {
         case NavigationDirection.up:
-          isInDirection = dy < -0.01;
+          // 上方：dy < 0 且 |dy| > |dx|（主要是向上，不是斜向）
+          isInDirection = dy < -0.01 && absDy > absDx;
           break;
         case NavigationDirection.down:
-          isInDirection = dy > 0.01;
+          // 下方：dy > 0 且 |dy| > |dx|
+          isInDirection = dy > 0.01 && absDy > absDx;
           break;
         case NavigationDirection.left:
-          isInDirection = dx < -0.01;
+          // 左方：dx < 0 且 |dx| > |dy|
+          isInDirection = dx < -0.01 && absDx > absDy;
           break;
         case NavigationDirection.right:
-          isInDirection = dx > 0.01;
+          // 右方：dx > 0 且 |dx| > |dy|
+          isInDirection = dx > 0.01 && absDx > absDy;
           break;
       }
 
       if (isInDirection) {
-        final dist = dx * dx + dy * dy;
         if (dist < minDist) {
           minDist = dist;
           nearest = g;

@@ -95,23 +95,32 @@ class RadarMiniMap extends StatelessWidget {
     final centerX = currentGrenade!.xRatio;
     final centerY = currentGrenade!.yRatio;
 
-    // 使用较大的尺寸作为基准进行缩放
-    final baseSize = width > height ? width : height;
+    // 使用方形地图尺寸，取宽高中较大者确保覆盖整个容器
+    final mapSize = width > height ? width : height;
 
-    return Transform.scale(
-      scale: zoomLevel,
-      child: Transform.translate(
-        offset: Offset(
-          (0.5 - centerX) * width,
-          (0.5 - centerY) * height,
-        ),
-        child: Image.asset(
-          mapAssetPath,
-          fit: BoxFit.cover,
-          width: baseSize,
-          height: baseSize,
-          errorBuilder: (_, __, ___) => Container(
-            color: Colors.grey[900],
+    // 计算偏移量：让当前点位位于容器中心
+    // 地图以容器中心为基准点进行偏移
+    final offsetX = (0.5 - centerX) * mapSize * zoomLevel;
+    final offsetY = (0.5 - centerY) * mapSize * zoomLevel;
+
+    return SizedBox(
+      width: width,
+      height: height,
+      child: ClipRect(
+        child: OverflowBox(
+          maxWidth: mapSize * zoomLevel,
+          maxHeight: mapSize * zoomLevel,
+          child: Transform.translate(
+            offset: Offset(offsetX, offsetY),
+            child: Image.asset(
+              mapAssetPath,
+              fit: BoxFit.cover,
+              width: mapSize * zoomLevel,
+              height: mapSize * zoomLevel,
+              errorBuilder: (_, __, ___) => Container(
+                color: Colors.grey[900],
+              ),
+            ),
           ),
         ),
       ),
@@ -124,19 +133,27 @@ class RadarMiniMap extends StatelessWidget {
     final centerX = currentGrenade!.xRatio;
     final centerY = currentGrenade!.yRatio;
 
-    return allGrenades.where((g) => g.id != currentGrenade!.id).map((g) {
-      // 计算相对于中心点的位置
-      final relX = (g.xRatio - centerX) * zoomLevel + 0.5;
-      final relY = (g.yRatio - centerY) * zoomLevel + 0.5;
+    // 使用与 _buildZoomedMap 一致的地图尺寸
+    final mapSize = width > height ? width : height;
 
-      // 如果超出可见范围，不显示
-      if (relX < 0 || relX > 1 || relY < 0 || relY > 1) {
+    return allGrenades.where((g) => g.id != currentGrenade!.id).map((g) {
+      // 计算相对于当前点的偏移（基于地图坐标系）
+      // 其他点相对于当前中心点的位置差，乘以缩放后的地图尺寸
+      final relX = (g.xRatio - centerX) * mapSize * zoomLevel;
+      final relY = (g.yRatio - centerY) * mapSize * zoomLevel;
+
+      // 转换为容器坐标（以容器中心为原点）
+      final screenX = width / 2 + relX;
+      final screenY = height / 2 + relY;
+
+      // 如果超出容器可见范围，不显示
+      if (screenX < 0 || screenX > width || screenY < 0 || screenY > height) {
         return const SizedBox.shrink();
       }
 
       return Positioned(
-        left: relX * width - 4,
-        top: relY * height - 4,
+        left: screenX - 4,
+        top: screenY - 4,
         child: Container(
           width: 8,
           height: 8,

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -277,6 +278,10 @@ Future<void> _runOverlayWindow(
       case 'navigate_right':
         overlayState.navigateDirection(NavigationDirection.right);
         return 'ok';
+      // 获取悬浮窗可见状态（供主窗口轮询）
+      case 'get_visibility':
+        final isVisible = await windowManager.isVisible();
+        return isVisible ? 'visible' : 'hidden';
       default:
         return null;
     }
@@ -301,14 +306,17 @@ Future<void> _runOverlayWindow(
           onClose: () async {
             final position = await windowManager.getPosition();
             await settingsService.setOverlayPosition(position.dx, position.dy);
-            // 通知主窗口我已隐藏
-            try {
-              final mainWindow = await WindowController.fromWindowId('0');
-              await mainWindow.invokeMethod('overlay_hidden');
-            } catch (_) {}
+            // 直接隐藏悬浮窗
+            // 注意：由于 desktop_multi_window 的限制，子窗口无法向主窗口发送消息
+            // 热键将在用户下次按 Alt+G 时自动注销
+            print('[Overlay] Hiding overlay window');
             await windowManager.hide();
           },
           onMinimize: () async {
+            final position = await windowManager.getPosition();
+            await settingsService.setOverlayPosition(position.dx, position.dy);
+            // 直接隐藏悬浮窗
+            print('[Overlay] Minimizing overlay window');
             await windowManager.hide();
           },
         ),
@@ -420,6 +428,9 @@ class MainApp extends StatefulWidget {
 }
 
 class _MainAppState extends State<MainApp> {
+  // 用于轮询悬浮窗可见性的定时器
+  Timer? _visibilityPollTimer;
+
   @override
   void initState() {
     super.initState();
@@ -449,9 +460,12 @@ class _MainAppState extends State<MainApp> {
     // 获取主窗口控制器并监听来自其他窗口的消息
     mainWindowController = await WindowController.fromCurrentEngine();
     await mainWindowController?.setWindowMethodHandler((call) async {
+      print('[Main] Received IPC method: ${call.method}');
       if (call.method == 'overlay_closed' || call.method == 'overlay_hidden') {
-        // 悬浮窗已隐藏/关闭，更新状态
+        // 悬浮窗已隐藏/关闭，更新状态并注销热键
+        print('[Main] Processing overlay_hidden - calling hideOverlay');
         await globalWindowService?.hideOverlay();
+        print('[Main] hideOverlay completed');
       }
       return null;
     });
@@ -460,6 +474,34 @@ class _MainAppState extends State<MainApp> {
     Future.delayed(const Duration(seconds: 1), () {
       _preloadOverlay();
     });
+
+    // 启动定时器轮询悬浮窗可见性（每500ms检查一次）
+    _visibilityPollTimer =
+        Timer.periodic(const Duration(milliseconds: 500), (_) {
+      _checkOverlayVisibility();
+    });
+  }
+
+  /// 检查悬浮窗可见性，如果隐藏则通知主窗口注销热键
+  Future<void> _checkOverlayVisibility() async {
+    // 仅当主窗口认为悬浮窗可见时才检查
+    if (overlayWindowController == null ||
+        globalWindowService == null ||
+        !globalWindowService!.isOverlayVisible) {
+      return;
+    }
+
+    try {
+      final result =
+          await overlayWindowController!.invokeMethod('get_visibility');
+      if (result == 'hidden') {
+        print(
+            '[Main] Detected overlay hidden via polling, unregistering hotkeys');
+        await globalWindowService!.hideOverlay();
+      }
+    } catch (e) {
+      // 忽略通信错误（悬浮窗可能还没准备好）
+    }
   }
 
   /// 预加载悬浮窗（不显示）
@@ -541,6 +583,7 @@ class _MainAppState extends State<MainApp> {
 
   @override
   void dispose() {
+    _visibilityPollTimer?.cancel();
     _hideOverlay();
     globalHotkeyService?.dispose();
     globalWindowService?.dispose();

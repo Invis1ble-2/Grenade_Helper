@@ -711,6 +711,21 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     }
   }
 
+  Color _getTypeColor(int type) {
+    switch (type) {
+      case GrenadeType.smoke:
+        return Colors.grey;
+      case GrenadeType.flash:
+        return Colors.yellow;
+      case GrenadeType.molotov:
+        return Colors.red;
+      case GrenadeType.he:
+        return Colors.green;
+      default:
+        return Colors.white;
+    }
+  }
+
   String _getTeamName(int team) {
     switch (team) {
       case TeamType.ct:
@@ -882,9 +897,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                     ]),
                 child: Icon(cluster.hasMultipleTypes ? Icons.layers : icon,
                     size: 10,
-                    color:
-                        (cluster.hasMultipleTypes ? Colors.purpleAccent : color)
-                            .withValues(alpha: 0.8))), // 图标保持较高可见度
+                    color: cluster.hasMultipleTypes
+                        ? Colors.purpleAccent.withValues(alpha: 0.9)
+                        : _getTypeColor(cluster.primaryType))), // 图标使用道具类型颜色
             if (count > 1)
               Positioned(
                   right: -3,
@@ -1163,9 +1178,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                         constraints, markerScale, imageBounds)),
                               ],
                               // 道具点位标记
+                              // 缩放 200% 以上时禁用合并，显示完整细节
                               ...grenadesAsync.when(
                                   data: (list) {
-                                    final clusters = clusterGrenades(list);
+                                    final clusterThreshold =
+                                        scale >= 2.0 ? 0.0 : 0.03;
+                                    final clusters = clusterGrenades(list,
+                                        threshold: clusterThreshold);
                                     return clusters.map((c) =>
                                         _buildClusterMarker(
                                             c,

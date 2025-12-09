@@ -145,19 +145,11 @@ class _OverlayWindowState extends State<OverlayWindow> {
             _buildFilterButtons(),
             const SizedBox(width: 12),
 
-            // 最小化按钮
+            // 最小化按钮（隐藏悬浮窗，使用 onClose 以便同时注销热键）
             _buildWindowButton(
               icon: Icons.remove,
-              onTap: widget.onMinimize,
-              color: Colors.grey,
-            ),
-            const SizedBox(width: 4),
-
-            // 关闭按钮
-            _buildWindowButton(
-              icon: Icons.close,
               onTap: widget.onClose,
-              color: Colors.redAccent,
+              color: Colors.grey,
             ),
           ],
         ),
@@ -470,11 +462,11 @@ class _OverlayWindowState extends State<OverlayWindow> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // 道具切换
+              // 道具切换（只在当前点位内循环）
               _buildNavRow(
                 label: '道具',
-                current: state.currentGrenadeIndex + 1,
-                total: state.filteredGrenades.length,
+                current: state.currentClusterIndex + 1,
+                total: state.currentClusterGrenades.length,
                 onPrev: state.prevGrenade,
                 onNext: state.nextGrenade,
                 color: Colors.orange,
