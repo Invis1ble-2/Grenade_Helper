@@ -807,17 +807,17 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final icon = _getTypeIcon(cluster.primaryType);
     final count = cluster.grenades.length;
 
-    // Base size is 20, scaled by markerScale
-    final scaledSize = 20.0 * markerScale;
-    final scaledHalfSize = scaledSize / 2;
+    // Base size is 20, use FIXED half-size for positioning
+    // Transform.scale only affects visual rendering, NOT layout position
+    // So positioning offset must be constant to avoid drift during zoom
+    const double baseHalfSize = 10.0;
 
     // 计算标记在 Stack 中的实际位置（考虑图片偏移）
-    final left = imageBounds.offsetX +
-        cluster.xRatio * imageBounds.width -
-        scaledHalfSize;
+    final left =
+        imageBounds.offsetX + cluster.xRatio * imageBounds.width - baseHalfSize;
     final top = imageBounds.offsetY +
         cluster.yRatio * imageBounds.height -
-        scaledHalfSize;
+        baseHalfSize;
 
     return Positioned(
       left: left,
@@ -925,14 +925,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         double offsetY
       }) imageBounds) {
     final color = isCT ? Colors.blueAccent : Colors.amber;
-    final scaledSize = 22.0 * markerScale;
-    final scaledHalfSize = scaledSize / 2;
+    // Base size is 22, use FIXED half-size for positioning
+    const double baseHalfSize = 11.0;
 
     // 计算标记在 Stack 中的实际位置（考虑图片偏移）
     final left =
-        imageBounds.offsetX + spawn.x * imageBounds.width - scaledHalfSize;
+        imageBounds.offsetX + spawn.x * imageBounds.width - baseHalfSize;
     final top =
-        imageBounds.offsetY + spawn.y * imageBounds.height - scaledHalfSize;
+        imageBounds.offsetY + spawn.y * imageBounds.height - baseHalfSize;
 
     return Positioned(
       left: left,
@@ -1181,10 +1181,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                 Positioned(
                                     left: imageBounds.offsetX +
                                         _dragOffset!.dx * imageBounds.width -
-                                        14 * markerScale,
+                                        14.0, // Fixed offset, not scaled
                                     top: imageBounds.offsetY +
                                         _dragOffset!.dy * imageBounds.height -
-                                        14 * markerScale,
+                                        14.0, // Fixed offset, not scaled
                                     child: Transform.scale(
                                       scale: markerScale,
                                       child: Container(
@@ -1205,11 +1205,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                     left: imageBounds.offsetX +
                                         _tempTapPosition!.dx *
                                             imageBounds.width -
-                                        12 * markerScale,
+                                        12.0, // Fixed offset, not scaled
                                     top: imageBounds.offsetY +
                                         _tempTapPosition!.dy *
                                             imageBounds.height -
-                                        12 * markerScale,
+                                        12.0, // Fixed offset, not scaled
                                     child: Transform.scale(
                                       scale: markerScale,
                                       child: const Icon(Icons.add_circle,
