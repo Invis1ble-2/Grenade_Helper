@@ -90,6 +90,7 @@ enum HotkeyAction {
   toggleMolotov, // 切换燃烧弹过滤
   toggleHE, // 切换手雷过滤
   hideOverlay, // 隐藏悬浮窗
+  togglePlayPause, // 播放/暂停视频
 }
 
 /// 设置服务 - 管理用户设置和快捷键配置
@@ -175,6 +176,10 @@ class SettingsService {
         key: LogicalKeyboardKey.digit0,
       ),
       HotkeyAction.hideOverlay: HotkeyConfig(key: LogicalKeyboardKey.escape),
+      HotkeyAction.togglePlayPause: HotkeyConfig(
+        key: LogicalKeyboardKey.keyP,
+        modifiers: {LogicalKeyboardKey.alt},
+      ),
     };
   }
 

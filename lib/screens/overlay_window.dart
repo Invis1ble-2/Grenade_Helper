@@ -5,6 +5,8 @@ import '../models.dart';
 import '../services/settings_service.dart';
 import '../services/overlay_state_service.dart';
 import '../widgets/radar_mini_map.dart';
+import 'grenade_detail_screen.dart'
+    show VideoPlayerWidget, VideoPlayerWidgetState;
 
 /// 悬浮窗组件 - 独立无边框窗口，显示道具教程
 class OverlayWindow extends StatefulWidget {
@@ -30,12 +32,25 @@ class OverlayWindow extends StatefulWidget {
 class _OverlayWindowState extends State<OverlayWindow> {
   final FocusNode _focusNode = FocusNode();
   late Map<HotkeyAction, HotkeyConfig> _hotkeys;
+  final GlobalKey<VideoPlayerWidgetState> _videoPlayerKey = GlobalKey();
 
   @override
   void initState() {
     super.initState();
     _hotkeys = widget.settingsService.getHotkeys();
     widget.overlayState.addListener(_onStateChanged);
+    // 注册视频播放/暂停回调
+    widget.overlayState.setVideoTogglePlayPauseCallback(_handleVideoToggle);
+  }
+
+  void _handleVideoToggle() {
+    print('[OverlayWindow] _handleVideoToggle called');
+    if (_videoPlayerKey.currentState != null) {
+      _videoPlayerKey.currentState!.togglePlayPause();
+      print('[OverlayWindow] Video toggle called successfully');
+    } else {
+      print('[OverlayWindow] No video player state available');
+    }
   }
 
   void _onStateChanged() {
@@ -44,6 +59,7 @@ class _OverlayWindowState extends State<OverlayWindow> {
 
   @override
   void dispose() {
+    widget.overlayState.setVideoTogglePlayPauseCallback(null);
     widget.overlayState.removeListener(_onStateChanged);
     _focusNode.dispose();
     super.dispose();
@@ -351,32 +367,31 @@ class _OverlayWindowState extends State<OverlayWindow> {
   }
 
   Widget _buildMediaView(StepMedia media) {
-    if (media.type == MediaType.image) {
-      final file = File(media.localPath);
-      if (file.existsSync()) {
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: Image.file(
-            file,
-            fit: BoxFit.contain,
-            width: double.infinity,
-            errorBuilder: (_, __, ___) => const Center(
-              child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
-            ),
-          ),
-        );
-      }
+    final file = File(media.localPath);
+    if (!file.existsSync()) {
+      return const Center(
+        child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
+      );
     }
 
-    return const Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.videocam, size: 48, color: Colors.grey),
-          SizedBox(height: 8),
-          Text('视频需在主界面查看', style: TextStyle(color: Colors.grey)),
-        ],
-      ),
+    if (media.type == MediaType.image) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Image.file(
+          file,
+          fit: BoxFit.contain,
+          width: double.infinity,
+          errorBuilder: (_, __, ___) => const Center(
+            child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
+          ),
+        ),
+      );
+    }
+
+    // 视频播放
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: VideoPlayerWidget(key: _videoPlayerKey, file: file),
     );
   }
 
@@ -551,12 +566,27 @@ class _OverlayWindowState extends State<OverlayWindow> {
 
     // 检查每个动作
     for (final entry in _hotkeys.entries) {
+      final config = entry.value;
+      // Debug: 检查 togglePlayPause 的配置
+      if (entry.key == HotkeyAction.togglePlayPause) {
+        print(
+            'Checking togglePlayPause: configKey=${config.key.keyId}, eventKey=${key.keyId}, configMods=${config.modifiers}');
+      }
       if (_matchesHotkey(key, hasAlt, hasCtrl, hasShift, entry.value)) {
         print('Matched action: ${entry.key}');
         _executeAction(entry.key);
         return;
       }
     }
+
+    // 直接检查 Alt+P 用于视频播放/暂停 (备用方案)
+    if (hasAlt && !hasCtrl && !hasShift && key == LogicalKeyboardKey.keyP) {
+      print('Direct match: Alt+P for video play/pause');
+      _executeAction(HotkeyAction.togglePlayPause);
+      return;
+    }
+
+    print('No hotkey matched for key: ${key.keyLabel}');
   }
 
   /// 判断是否是修饰键
@@ -644,6 +674,16 @@ class _OverlayWindowState extends State<OverlayWindow> {
         break;
       case HotkeyAction.toggleHE:
         state.toggleFilter(GrenadeType.he);
+        break;
+      case HotkeyAction.togglePlayPause:
+        print(
+            'togglePlayPause: currentState = ${_videoPlayerKey.currentState}');
+        if (_videoPlayerKey.currentState != null) {
+          _videoPlayerKey.currentState!.togglePlayPause();
+          print('togglePlayPause: called successfully');
+        } else {
+          print('togglePlayPause: no video player state available');
+        }
         break;
     }
   }

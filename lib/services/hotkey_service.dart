@@ -64,6 +64,8 @@ class HotkeyService {
       HotkeyAction.navigateDown,
       HotkeyAction.navigateLeft,
       HotkeyAction.navigateRight,
+      // 视频播放控制
+      HotkeyAction.togglePlayPause,
     ];
 
     for (final action in overlayActions) {

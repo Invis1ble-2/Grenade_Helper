@@ -145,6 +145,10 @@ Future<void> _runMainWindow() async {
     globalHotkeyService!.registerHandler(HotkeyAction.navigateRight, () {
       _sendOverlayCommand('navigate_right');
     });
+    // 视频播放控制
+    globalHotkeyService!.registerHandler(HotkeyAction.togglePlayPause, () {
+      _sendOverlayCommand('toggle_play_pause');
+    });
   }
 
   runApp(
@@ -277,6 +281,10 @@ Future<void> _runOverlayWindow(
         return 'ok';
       case 'navigate_right':
         overlayState.navigateDirection(NavigationDirection.right);
+        return 'ok';
+      // 视频播放控制
+      case 'toggle_play_pause':
+        overlayState.triggerVideoTogglePlayPause();
         return 'ok';
       // 获取悬浮窗可见状态（供主窗口轮询）
       case 'get_visibility':

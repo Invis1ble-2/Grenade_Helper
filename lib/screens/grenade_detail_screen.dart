@@ -20,10 +20,10 @@ class VideoPlayerWidget extends StatefulWidget {
   const VideoPlayerWidget({super.key, required this.file});
 
   @override
-  State<VideoPlayerWidget> createState() => _VideoPlayerWidgetState();
+  State<VideoPlayerWidget> createState() => VideoPlayerWidgetState();
 }
 
-class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
+class VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   VideoPlayerController? _videoController;
   ChewieController? _chewieController;
   String? _errorMessage;
@@ -54,6 +54,18 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     } catch (e) {
       _errorMessage = e.toString();
       if (mounted) setState(() {});
+    }
+  }
+
+  /// 切换播放/暂停状态 (供外部通过 GlobalKey 调用)
+  void togglePlayPause() {
+    if (_videoController == null || !_videoController!.value.isInitialized) {
+      return;
+    }
+    if (_videoController!.value.isPlaying) {
+      _videoController!.pause();
+    } else {
+      _videoController!.play();
     }
   }
 

@@ -33,7 +33,21 @@ class OverlayStateService extends ChangeNotifier {
   // 数据监听订阅
   StreamSubscription<void>? _grenadeSubscription;
 
+  // 视频播放控制回调
+  VoidCallback? _videoTogglePlayPauseCallback;
+
   OverlayStateService(this.isar);
+
+  /// 注册视频播放/暂停回调
+  void setVideoTogglePlayPauseCallback(VoidCallback? callback) {
+    _videoTogglePlayPauseCallback = callback;
+  }
+
+  /// 触发视频播放/暂停
+  void triggerVideoTogglePlayPause() {
+    print('[OverlayStateService] triggerVideoTogglePlayPause called');
+    _videoTogglePlayPauseCallback?.call();
+  }
 
   @override
   void dispose() {
