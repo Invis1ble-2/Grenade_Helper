@@ -14,6 +14,8 @@ import 'services/settings_service.dart';
 import 'services/hotkey_service.dart';
 import 'services/window_service.dart';
 import 'services/overlay_state_service.dart';
+import 'services/update_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 // 全局服务实例（仅桌面端使用）
 SettingsService? globalSettingsService;
@@ -428,21 +430,36 @@ Future<void> _initMapData(Isar isar) async {
 }
 
 /// 主窗口应用
-class MainApp extends StatefulWidget {
+class MainApp extends ConsumerStatefulWidget {
   const MainApp({super.key});
 
   @override
-  State<MainApp> createState() => _MainAppState();
+  ConsumerState<MainApp> createState() => _MainAppState();
 }
 
-class _MainAppState extends State<MainApp> {
+class _MainAppState extends ConsumerState<MainApp> {
   // 用于轮询悬浮窗可见性的定时器
   Timer? _visibilityPollTimer;
+  // 用于获取 MaterialApp 内部 context 的 navigatorKey
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
   @override
   void initState() {
     super.initState();
     _initDesktopServices();
+    // 检查更新（所有平台）- 延迟确保 MaterialApp 已初始化
+    Future.delayed(const Duration(seconds: 1), () {
+      if (mounted) _checkForUpdates();
+    });
+    // 加载保存的主题设置
+    _loadThemeSetting();
+  }
+
+  Future<void> _loadThemeSetting() async {
+    if (globalSettingsService != null) {
+      final savedTheme = globalSettingsService!.getThemeMode();
+      ref.read(themeModeProvider.notifier).state = savedTheme;
+    }
   }
 
   Future<void> _initDesktopServices() async {
@@ -598,20 +615,176 @@ class _MainAppState extends State<MainApp> {
     super.dispose();
   }
 
+  /// 检查应用更新
+  Future<void> _checkForUpdates() async {
+    final updateService = UpdateService();
+    final updateInfo = await updateService.checkForUpdate();
+    if (updateInfo != null && mounted) {
+      _showUpdateDialog(updateInfo, updateService.currentPlatform);
+    }
+  }
+
+  /// 显示更新提示对话框
+  void _showUpdateDialog(UpdateInfo updateInfo, String platform) {
+    // 使用 navigatorKey 获取 MaterialApp 内部的 context
+    final navContext = _navigatorKey.currentContext;
+    if (navContext == null) return;
+
+    showDialog(
+      context: navContext,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.system_update, color: Colors.orange),
+            const SizedBox(width: 8),
+            const Text('发现新版本'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '新版本: ${updateInfo.versionName}',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            const SizedBox(height: 12),
+            const Text('更新内容:', style: TextStyle(fontWeight: FontWeight.w500)),
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.black26,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                updateInfo.content.isEmpty ? '优化和修复' : updateInfo.content,
+                style: const TextStyle(fontSize: 13),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text('请选择下载方式:',
+                style: TextStyle(fontSize: 13, color: Colors.grey)),
+          ],
+        ),
+        actions: [
+          // 稍后提醒
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('稍后提醒'),
+          ),
+          // 网盘下载
+          PopupMenuButton<String>(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.grey[800],
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.cloud_download, size: 18),
+                  SizedBox(width: 4),
+                  Text('网盘下载'),
+                  Icon(Icons.arrow_drop_down, size: 18),
+                ],
+              ),
+            ),
+            onSelected: (url) {
+              _launchUrl(url);
+              // 不关闭对话框，让用户可以继续选择其他下载方式
+            },
+            itemBuilder: (context) => DownloadLinks.panLinks.entries
+                .map((e) => PopupMenuItem(
+                      value: e.value,
+                      child: Text(e.key),
+                    ))
+                .toList(),
+          ),
+          const SizedBox(width: 4),
+          // 官方下载
+          ElevatedButton.icon(
+            onPressed: () {
+              _launchUrl(DownloadLinks.getOfficialUrl(platform));
+              // 不关闭对话框，让用户可以继续选择其他下载方式
+            },
+            icon: const Icon(Icons.download, size: 18),
+            label: const Text('官方下载'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 打开 URL
+  Future<void> _launchUrl(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final themeMode = ref.watch(themeModeProvider);
+
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       title: 'Grenade Helper',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
+      themeMode: intToThemeMode(themeMode),
+      // 深色主题
+      darkTheme: ThemeData(
         brightness: Brightness.dark,
         primarySwatch: Colors.orange,
+        colorScheme: ColorScheme.dark(
+          primary: Colors.orange,
+          secondary: Colors.orangeAccent,
+        ),
         scaffoldBackgroundColor: const Color(0xFF1B1E23),
         useMaterial3: true,
         appBarTheme: const AppBarTheme(
           backgroundColor: Color(0xFF141619),
           elevation: 0,
         ),
+      ),
+      // 浅色主题 - 使用柔和的奶白色，增强文字对比度
+      theme: ThemeData(
+        brightness: Brightness.light,
+        primarySwatch: Colors.orange,
+        colorScheme: ColorScheme.light(
+          primary: Colors.orange,
+          secondary: Colors.orangeAccent,
+          surface: const Color.fromARGB(255, 248, 239, 225), // 奶白色卡片背景
+          onSurface: const Color(0xFF1A1A1A), // 深色文字
+        ),
+        scaffoldBackgroundColor:
+            const Color.fromARGB(255, 248, 240, 227), // 柔和的米色背景
+        cardColor: const Color.fromARGB(255, 248, 240, 227), // 奶白色卡片
+        useMaterial3: true,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color.fromARGB(255, 255, 239, 213), // 奶白色 AppBar
+          foregroundColor: Color.fromARGB(255, 5, 5, 5), // 深色标题文字
+          elevation: 0,
+          iconTheme: IconThemeData(color: Color(0xFF333333)),
+        ),
+        textTheme: const TextTheme(
+          bodyLarge: TextStyle(color: Color(0xFF1A1A1A)),
+          bodyMedium: TextStyle(color: Color(0xFF333333)),
+          bodySmall: TextStyle(color: Color(0xFF555555)),
+          titleLarge:
+              TextStyle(color: Color(0xFF1A1A1A), fontWeight: FontWeight.bold),
+          titleMedium: TextStyle(color: Color(0xFF1A1A1A)),
+          labelLarge: TextStyle(color: Color(0xFF1A1A1A)),
+        ),
+        iconTheme: const IconThemeData(color: Color(0xFF333333)),
+        dividerColor: const Color(0xFFE0DDD8),
       ),
       home: const HomeScreen(),
     );

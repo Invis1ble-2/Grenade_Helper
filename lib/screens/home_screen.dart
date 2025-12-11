@@ -94,11 +94,24 @@ class HomeScreen extends ConsumerWidget {
       drawer: Drawer(
         child: ListView(
           children: [
-            const DrawerHeader(
-                child: Center(
-                    child: Text("Grenade Helper",
-                        style: TextStyle(
-                            fontSize: 24, fontWeight: FontWeight.bold)))),
+            DrawerHeader(
+                child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ClipOval(
+                  child: Image.asset(
+                    'assets/icons/app_icon.png',
+                    width: 80,
+                    height: 80,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text("Grenade Helper",
+                    style:
+                        TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+              ],
+            )),
             ListTile(
               leading: const Icon(Icons.share),
               title: const Text("分享 / 导入"),

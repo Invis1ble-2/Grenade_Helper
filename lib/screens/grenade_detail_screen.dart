@@ -188,7 +188,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF1B1E23),
+      backgroundColor: Theme.of(context).colorScheme.surface,
       builder: (ctx) => Padding(
         padding: EdgeInsets.only(
             bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
@@ -199,20 +199,20 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text("添加步骤",
+            Text("添加步骤",
                 style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
-                    color: Colors.white)),
+                    color: Theme.of(ctx).textTheme.bodyLarge?.color)),
             const SizedBox(height: 15),
             TextField(
               controller: titleController,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: "步骤标题 (可选)",
                 hintText: "例如：站位、瞄点",
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
                 filled: true,
-                fillColor: Color(0xFF2A2D33),
+                fillColor: Theme.of(ctx).colorScheme.surfaceContainerHighest,
               ),
             ),
             const SizedBox(height: 10),
@@ -220,12 +220,12 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
               controller: descController,
               autofocus: true,
               maxLines: 3,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: "说明文字",
                 hintText: "在此输入详细操作说明...",
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
                 filled: true,
-                fillColor: Color(0xFF2A2D33),
+                fillColor: Theme.of(ctx).colorScheme.surfaceContainerHighest,
               ),
             ),
             const SizedBox(height: 20),
@@ -429,7 +429,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF1B1E23),
+      backgroundColor: Theme.of(context).colorScheme.surface,
       builder: (ctx) => Padding(
         padding: EdgeInsets.only(
             bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
@@ -440,19 +440,19 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text("编辑步骤",
+            Text("编辑步骤",
                 style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
-                    color: Colors.white)),
+                    color: Theme.of(ctx).textTheme.bodyLarge?.color)),
             const SizedBox(height: 15),
             TextField(
               controller: titleController,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: "步骤标题",
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
                 filled: true,
-                fillColor: Color(0xFF2A2D33),
+                fillColor: Theme.of(ctx).colorScheme.surfaceContainerHighest,
               ),
             ),
             const SizedBox(height: 10),
@@ -460,11 +460,11 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
               controller: descController,
               autofocus: true,
               maxLines: 4,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: "说明文字",
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
                 filled: true,
-                fillColor: Color(0xFF2A2D33),
+                fillColor: Theme.of(ctx).colorScheme.surfaceContainerHighest,
               ),
             ),
             const SizedBox(height: 20),
@@ -553,11 +553,13 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
         title: isEditing
             ? TextField(
                 controller: _titleController,
-                style: const TextStyle(color: Colors.white, fontSize: 18),
+                style: TextStyle(
+                    color: Theme.of(context).appBarTheme.foregroundColor,
+                    fontSize: 18),
                 decoration: InputDecoration(
                   border: InputBorder.none,
                   hintText: "输入标题",
-                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
+                  hintStyle: TextStyle(color: Theme.of(context).hintColor),
                   suffixIcon: IconButton(
                     icon: const Icon(Icons.check_circle,
                         color: Colors.greenAccent),
@@ -591,12 +593,12 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
           if (isEditing)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: const Color(0xFF2A2D33),
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
               child: Row(
                 children: [
                   DropdownButton<int>(
                     value: grenade!.type,
-                    dropdownColor: const Color(0xFF2A2D33),
+                    dropdownColor: Theme.of(context).colorScheme.surface,
                     items: const [
                       DropdownMenuItem(
                           value: GrenadeType.smoke, child: Text("☁️ 烟雾")),
@@ -613,7 +615,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                   const Spacer(),
                   DropdownButton<int>(
                     value: grenade!.team,
-                    dropdownColor: const Color(0xFF2A2D33),
+                    dropdownColor: Theme.of(context).colorScheme.surface,
                     items: const [
                       DropdownMenuItem(
                           value: TeamType.all, child: Text("⚪ 通用")),
@@ -751,7 +753,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     return Card(
       key: ValueKey(step.id),
       margin: const EdgeInsets.only(bottom: 20),
-      color: const Color(0xFF25282F),
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       clipBehavior: Clip.antiAlias,
       child: Column(

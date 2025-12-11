@@ -434,7 +434,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF1E2126),
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => StatefulBuilder(
@@ -473,10 +473,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                 isMultiSelectMode
                                     ? "已选择 ${selectedIds.length} 个"
                                     : "该点位共 ${grenades.length} 个道具",
-                                style: const TextStyle(
+                                style: TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.bold,
-                                    color: Colors.white)),
+                                    color: Theme.of(context)
+                                        .textTheme
+                                        .bodyLarge
+                                        ?.color)),
                             if (isEditMode)
                               Row(mainAxisSize: MainAxisSize.min, children: [
                                 // 删除/确认删除按钮
@@ -489,15 +492,22 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                                 await showDialog<bool>(
                                               context: context,
                                               builder: (ctx) => AlertDialog(
-                                                backgroundColor:
-                                                    const Color(0xFF2A2D33),
-                                                title: const Text("批量删除",
+                                                backgroundColor: Theme.of(ctx)
+                                                    .colorScheme
+                                                    .surface,
+                                                title: Text("批量删除",
                                                     style: TextStyle(
-                                                        color: Colors.white)),
+                                                        color: Theme.of(ctx)
+                                                            .textTheme
+                                                            .bodyLarge
+                                                            ?.color)),
                                                 content: Text(
                                                     "确定要删除选中的 ${selectedIds.length} 个道具吗？",
-                                                    style: const TextStyle(
-                                                        color: Colors.grey)),
+                                                    style: TextStyle(
+                                                        color: Theme.of(ctx)
+                                                            .textTheme
+                                                            .bodySmall
+                                                            ?.color)),
                                                 actions: [
                                                   TextButton(
                                                       onPressed: () =>
@@ -640,14 +650,21 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                 ],
                               ),
                               title: Text(g.title,
-                                  style: const TextStyle(
-                                      color: Colors.white,
+                                  style: TextStyle(
+                                      color: Theme.of(context)
+                                          .textTheme
+                                          .bodyLarge
+                                          ?.color,
                                       fontWeight: FontWeight.w500,
                                       fontSize: 14)),
                               subtitle: Text(
                                   "${_getTypeName(g.type)} • ${_getTeamName(g.team)}",
-                                  style: const TextStyle(
-                                      color: Colors.grey, fontSize: 11)),
+                                  style: TextStyle(
+                                      color: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.color,
+                                      fontSize: 11)),
                               trailing: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
@@ -1020,6 +1037,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   Widget _buildTypeFilterBtn(Set<int> selectedTypes, int type, String label,
       IconData icon, Color activeColor) {
     final isSelected = selectedTypes.contains(type);
+    final unselectedColor = Theme.of(context).colorScheme.onSurface;
     return InkWell(
       onTap: () {
         final newSet = Set<int>.from(selectedTypes);
@@ -1036,14 +1054,17 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             color:
                 isSelected ? activeColor.withOpacity(0.2) : Colors.transparent,
             border: Border.all(
-                color: isSelected ? activeColor : Colors.grey.shade700),
+                color: isSelected
+                    ? activeColor
+                    : unselectedColor.withOpacity(0.4)),
             borderRadius: BorderRadius.circular(8)),
         child: Row(children: [
-          Icon(icon, size: 16, color: isSelected ? activeColor : Colors.grey),
+          Icon(icon,
+              size: 16, color: isSelected ? activeColor : unselectedColor),
           const SizedBox(width: 4),
           Text(label,
               style: TextStyle(
-                  color: isSelected ? activeColor : Colors.grey,
+                  color: isSelected ? activeColor : unselectedColor,
                   fontSize: 12,
                   fontWeight: FontWeight.bold))
         ]),
@@ -1054,18 +1075,19 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   Widget _buildFilterChip(
       String label, int value, int groupValue, Color color) {
     final isSelected = value == groupValue;
+    final unselectedColor = Theme.of(context).colorScheme.onSurface;
     return GestureDetector(
       onTap: () => ref.read(teamFilterProvider.notifier).state = value,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
             color: isSelected ? color.withOpacity(0.2) : Colors.transparent,
-            border:
-                Border.all(color: isSelected ? color : Colors.grey.shade700),
+            border: Border.all(
+                color: isSelected ? color : unselectedColor.withOpacity(0.4)),
             borderRadius: BorderRadius.circular(20)),
         child: Text(label,
             style: TextStyle(
-                color: isSelected ? color : Colors.grey,
+                color: isSelected ? color : unselectedColor,
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                 fontSize: 12)),
       ),

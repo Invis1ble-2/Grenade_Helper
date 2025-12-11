@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:isar_community/isar.dart';
@@ -5,6 +6,21 @@ import 'models.dart';
 
 // 全局 Isar 数据库
 final isarProvider = Provider<Isar>((ref) => throw UnimplementedError());
+
+// 主题模式 Provider (0=跟随系统, 1=浅色, 2=深色)
+final themeModeProvider = StateProvider<int>((ref) => 2); // 默认深色
+
+/// 将 int 转换为 Flutter ThemeMode
+ThemeMode intToThemeMode(int value) {
+  switch (value) {
+    case 1:
+      return ThemeMode.light;
+    case 2:
+      return ThemeMode.dark;
+    default:
+      return ThemeMode.system;
+  }
+}
 
 // --- 筛选状态 ---
 final teamFilterProvider =

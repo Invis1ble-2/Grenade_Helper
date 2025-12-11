@@ -101,6 +101,7 @@ class SettingsService {
   static const String _keyCloseToTray = 'close_to_tray';
   static const String _keyOverlayX = 'overlay_x';
   static const String _keyOverlayY = 'overlay_y';
+  static const String _keyThemeMode = 'theme_mode'; // 0=system, 1=light, 2=dark
 
   SharedPreferences? _prefs;
 
@@ -217,6 +218,11 @@ class SettingsService {
         return (450.0, 400.0); // 中（默认）
     }
   }
+
+  /// 主题模式 (0=跟随系统, 1=浅色, 2=深色)
+  int getThemeMode() => _prefs?.getInt(_keyThemeMode) ?? 2; // 默认深色
+  Future<void> setThemeMode(int value) async =>
+      await _prefs?.setInt(_keyThemeMode, value);
 
   /// 检查是否是桌面平台
   static bool get isDesktop =>

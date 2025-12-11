@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.invis1ble" "\0"
-            VALUE "FileDescription", "grenade_helper" "\0"
+            VALUE "FileDescription", "Grenade Helper" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "grenade_helper" "\0"
+            VALUE "InternalName", "Grenade Helper" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2025 com.invis1ble. All rights reserved." "\0"
-            VALUE "OriginalFilename", "grenade_helper.exe" "\0"
-            VALUE "ProductName", "grenade_helper" "\0"
+            VALUE "OriginalFilename", "Grenade_Helper.exe" "\0"
+            VALUE "ProductName", "Grenade Helper" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

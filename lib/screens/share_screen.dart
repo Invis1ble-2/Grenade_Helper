@@ -162,7 +162,8 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
     return ListView.separated(
       padding: const EdgeInsets.all(16),
       itemCount: list.length,
-      separatorBuilder: (_, __) => const Divider(color: Colors.white10),
+      separatorBuilder: (_, __) =>
+          Divider(color: Theme.of(context).dividerColor),
       itemBuilder: (ctx, index) {
         final g = list[index];
         g.layer.loadSync();
@@ -201,9 +202,12 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
           margin: const EdgeInsets.only(bottom: 12),
           child: ListTile(
             leading: SvgPicture.asset(map.iconPath, width: 40, height: 40),
-            title: Text(map.name, style: const TextStyle(color: Colors.white)),
+            title: Text(map.name,
+                style: TextStyle(
+                    color: Theme.of(context).textTheme.bodyLarge?.color)),
             subtitle: Text("包含 $count 个道具",
-                style: const TextStyle(color: Colors.grey)),
+                style: TextStyle(
+                    color: Theme.of(context).textTheme.bodySmall?.color)),
             trailing: ElevatedButton.icon(
               icon: const Icon(Icons.folder_open, size: 16),
               label: const Text("导出"),

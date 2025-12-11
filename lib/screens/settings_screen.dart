@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/settings_service.dart';
+import '../providers.dart';
 
 /// 设置页面
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -22,7 +23,6 @@ class SettingsScreen extends ConsumerStatefulWidget {
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late Map<HotkeyAction, HotkeyConfig> _hotkeys;
   late double _overlayOpacity;
-  late int _overlaySize;
   late bool _closeToTray;
 
   bool get _isDesktop =>
@@ -38,13 +38,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (widget.settingsService != null) {
       _hotkeys = widget.settingsService!.getHotkeys();
       _overlayOpacity = widget.settingsService!.getOverlayOpacity();
-      _overlaySize = widget.settingsService!.getOverlaySize();
       _closeToTray = widget.settingsService!.getCloseToTray();
     } else {
       // 默认值
       _hotkeys = {};
       _overlayOpacity = 0.9;
-      _overlaySize = 1;
       _closeToTray = true;
     }
   }
@@ -60,38 +58,61 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Widget _buildMobileSettings() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+    final themeMode = ref.watch(themeModeProvider);
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        _buildSection(
+          title: '🎨 外观设置',
           children: [
-            Icon(
-              Icons.desktop_windows,
-              size: 80,
-              color: Colors.grey[600],
-            ),
-            const SizedBox(height: 24),
-            Text(
-              '桌面端专属功能',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey[400],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              '快捷键配置、悬浮窗等功能仅在\nWindows / macOS / Linux 上可用',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.grey[500],
+            ListTile(
+              title: const Text('主题模式'),
+              trailing: SegmentedButton<int>(
+                segments: const [
+                  ButtonSegment(
+                      value: 0,
+                      icon: Icon(Icons.brightness_auto),
+                      label: Text('自动')),
+                  ButtonSegment(
+                      value: 1,
+                      icon: Icon(Icons.light_mode),
+                      label: Text('浅色')),
+                  ButtonSegment(
+                      value: 2, icon: Icon(Icons.dark_mode), label: Text('深色')),
+                ],
+                selected: {themeMode},
+                onSelectionChanged: (value) async {
+                  ref.read(themeModeProvider.notifier).state = value.first;
+                  if (widget.settingsService != null) {
+                    await widget.settingsService!.setThemeMode(value.first);
+                  }
+                },
               ),
             ),
           ],
         ),
-      ),
+        const SizedBox(height: 24),
+        Center(
+          child: Column(
+            children: [
+              Icon(
+                Icons.desktop_windows,
+                size: 60,
+                color: Colors.grey[600],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                '快捷键、悬浮窗等功能仅在桌面端可用',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey[500],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -146,27 +167,34 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ),
               ),
             ),
-            ListTile(
-              title: const Text('尺寸'),
-              trailing: SegmentedButton<int>(
-                segments: const [
-                  ButtonSegment(value: 0, label: Text('小')),
-                  ButtonSegment(value: 1, label: Text('中')),
-                  ButtonSegment(value: 2, label: Text('大')),
-                ],
-                selected: {_overlaySize},
-                onSelectionChanged: (value) async {
-                  setState(() => _overlaySize = value.first);
-                  await widget.settingsService!.setOverlaySize(value.first);
-                },
-              ),
-            ),
           ],
         ),
         const SizedBox(height: 16),
         _buildSection(
           title: '⚙️ 通用设置',
           children: [
+            ListTile(
+              title: const Text('主题模式'),
+              trailing: SegmentedButton<int>(
+                segments: const [
+                  ButtonSegment(
+                      value: 0,
+                      icon: Icon(Icons.brightness_auto),
+                      label: Text('自动')),
+                  ButtonSegment(
+                      value: 1,
+                      icon: Icon(Icons.light_mode),
+                      label: Text('浅色')),
+                  ButtonSegment(
+                      value: 2, icon: Icon(Icons.dark_mode), label: Text('深色')),
+                ],
+                selected: {ref.watch(themeModeProvider)},
+                onSelectionChanged: (value) async {
+                  ref.read(themeModeProvider.notifier).state = value.first;
+                  await widget.settingsService!.setThemeMode(value.first);
+                },
+              ),
+            ),
             SwitchListTile(
               title: const Text('关闭按钮最小化到托盘'),
               subtitle: const Text('关闭时隐藏到系统托盘，而非退出程序'),

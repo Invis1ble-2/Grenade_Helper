@@ -44,6 +44,9 @@ dependencies:
   video_player_win: ^3.2.2
   chewie: ^1.13.0
   flutter_svg: ^2.0.10
+  http: ^1.2.0                    # 网络请求
+  package_info_plus: ^8.0.0       # 获取应用版本信息
+  url_launcher: ^6.2.4            # 打开浏览器
   
   # --- 桌面端功能 ---
   hotkey_manager: ^0.2.3       # 全局快捷键
