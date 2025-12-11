@@ -97,11 +97,12 @@ Future<void> _runMainWindow() async {
   // 2. 检查并预填充地图数据
   await _initMapData(isar);
 
+  // 2.5 初始化设置服务（所有平台）
+  globalSettingsService = SettingsService();
+  await globalSettingsService!.init();
+
   // 3. 初始化桌面端服务
   if (SettingsService.isDesktop) {
-    globalSettingsService = SettingsService();
-    await globalSettingsService!.init();
-
     globalHotkeyService = HotkeyService(globalSettingsService!);
     globalWindowService = WindowService(globalSettingsService!);
     globalOverlayState = OverlayStateService(isar);
