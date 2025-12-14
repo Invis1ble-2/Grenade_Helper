@@ -5,8 +5,8 @@
 ![CS2](https://img.shields.io/badge/Game-CS2-orange)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-**Grenade Helper** 是一款专为 **Counter-Strike 2** 玩家打造的现代化投掷物教学与辅助工具。不仅仅是简单的视频教学，更是你的实战好帮手。
-
+**Grenade Helper** 是一款专为 **Counter-Strike 2** 玩家打造的现代化投掷物教学与辅助工具。不仅仅是教学工具，更是你的实战好帮手。
+不用再在实战中慌乱的查找视频，不需要再进行繁琐无聊的跑图训练，只需要动动手指记录你在视频平台和其他地方看到的道具，就能实时调出直接投掷！
 核心亮点：**PC端独家 Overlay (画中画) 模式**，让你在游戏中一键呼出，无需切屏，即学即用！
 
 ---
@@ -18,7 +18,7 @@
 *   🎯 **全道具类型覆盖**: 烟雾弹 (Smoke)、燃烧瓶 (Molotov)、闪光弹 (Flash) 和手雷 (HE) 都包含在内。
 *   📱 **多端互通**: 
     *   **PC**: 排位实战神器，Overlay 助你掌控全场。
-    *   **Mobile (Android/iOS)**: 跑图练习、死斗模式时的最佳伴侣，躺在床上也能背道具。
+    *   **Mobile (Android/iOS)**: 掏出手机即可迅速查看道具，助你精准投掷所需道具，无需等待。
 *   📍 **出生点位 (Spawn Points)**: 全新功能！精准展示 CT/T 出生点位，帮助你开局扔道具快人一步。
 *   🔎 **点位搜索**: 快速查找整张地图的道具或者在主页查找全部的道具。
 *   🔗 **道具分享/导入**: 一键打包分享或者快捷导入他人分享的或者其他端的数据，方便又迅速，省去繁琐的手动添加。
@@ -46,7 +46,7 @@
 ### iOS
 1.  **AltStore (推荐)**: 下载 `.ipa` 文件，使用 AltStore 签名安装。
 2.  **SideStore**: 支持免电脑续签。
-3.  *详细教程请参考官网 Wiki*
+3.  *详细教程请参考[官网 Wiki](https://grenade-helper.zeabur.app/docs.html#ios-sideload)*
 
 ---
 
