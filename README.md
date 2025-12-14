@@ -28,8 +28,7 @@
 
 ## 📸 预览 (Screenshots)
 
-| 桌面端悬浮窗 | 手机版预览 | 地图详情 | 道具详情 |
-| <img src="docs/overlay_preview.png" width="250" /> | <img src="docs/mobile_preview.png" width="250" /> | <img src="docs/map_screen.png" width="250" /> | <img src="docs/grenade_detail.png" width="250" /> |
+<img src="docs/overlay_preview.png" width="250" /><img src="docs/mobile_preview.png" width="250" /><img src="docs/map_screen.png" width="250" /><img src="docs/grenade_detail.png" width="250" /> 
 
 ---
 
