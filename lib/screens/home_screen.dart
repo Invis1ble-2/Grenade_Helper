@@ -9,6 +9,7 @@ import 'grenade_detail_screen.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'share_screen.dart';
 import 'settings_screen.dart';
+import 'about_screen.dart';
 
 // 全局搜索逻辑
 class GlobalSearchDelegate extends SearchDelegate {
@@ -136,6 +137,17 @@ class HomeScreen extends ConsumerWidget {
                       },
                     ),
                   ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text("关于"),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AboutScreen()),
                 );
               },
             ),
