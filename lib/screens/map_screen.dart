@@ -526,13 +526,21 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                               ),
                                             );
                                             if (confirm == true) {
+                                              // 收集要删除的道具
+                                              final toDelete = <Grenade>[];
                                               for (final id in selectedIds) {
                                                 final g = grenades.firstWhere(
                                                     (g) => g.id == id,
                                                     orElse: () =>
                                                         grenades.first);
-                                                _deleteGrenade(g);
+                                                if (!toDelete
+                                                    .any((x) => x.id == g.id)) {
+                                                  toDelete.add(g);
+                                                }
                                               }
+                                              // 在单个事务中批量删除
+                                              await _deleteGrenadesInBatch(
+                                                  toDelete);
                                               setModalState(() {
                                                 grenades.removeWhere((g) =>
                                                     selectedIds.contains(g.id));
@@ -757,16 +765,32 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 GrenadeDetailScreen(grenadeId: id, isEditing: true)));
   }
 
-  void _deleteGrenade(Grenade g) async {
+  /// 批量删除道具（在单个事务中完成，避免嵌套事务错误）
+  Future<void> _deleteGrenadesInBatch(List<Grenade> grenades) async {
+    if (grenades.isEmpty) return;
     final isar = ref.read(isarProvider);
-    g.steps.loadSync();
-    await isar.writeTxn(() async {
+
+    // 先加载所有必要的数据
+    for (final g in grenades) {
+      g.steps.loadSync();
       for (final step in g.steps) {
         step.medias.loadSync();
-        await isar.stepMedias.deleteAll(step.medias.map((m) => m.id).toList());
       }
-      await isar.grenadeSteps.deleteAll(g.steps.map((s) => s.id).toList());
-      await isar.grenades.delete(g.id);
+    }
+
+    // 在单个事务中执行所有删除操作
+    await isar.writeTxn(() async {
+      for (final g in grenades) {
+        // 删除所有媒体
+        for (final step in g.steps) {
+          await isar.stepMedias
+              .deleteAll(step.medias.map((m) => m.id).toList());
+        }
+        // 删除所有步骤
+        await isar.grenadeSteps.deleteAll(g.steps.map((s) => s.id).toList());
+        // 删除道具
+        await isar.grenades.delete(g.id);
+      }
     });
   }
 
