@@ -102,6 +102,9 @@ class SettingsService {
   static const String _keyOverlayX = 'overlay_x';
   static const String _keyOverlayY = 'overlay_y';
   static const String _keyThemeMode = 'theme_mode'; // 0=system, 1=light, 2=dark
+  static const String _keyMarkerMoveMode = 'marker_move_mode'; // 0=长按选定, 1=摇杆
+  static const String _keyJoystickOpacity = 'joystick_opacity'; // 0.3-1.0
+  static const String _keyJoystickSpeed = 'joystick_speed'; // 1-5档
 
   SharedPreferences? _prefs;
 
@@ -232,4 +235,19 @@ class SettingsService {
   /// 检查是否是桌面平台
   static bool get isDesktop =>
       Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+
+  /// 标点移动模式 (0=长按选定, 1=摇杆) - 仅移动端
+  int getMarkerMoveMode() => _prefs?.getInt(_keyMarkerMoveMode) ?? 0;
+  Future<void> setMarkerMoveMode(int value) async =>
+      await _prefs?.setInt(_keyMarkerMoveMode, value);
+
+  /// 摇杆透明度 (0.3-1.0)
+  double getJoystickOpacity() => _prefs?.getDouble(_keyJoystickOpacity) ?? 0.8;
+  Future<void> setJoystickOpacity(double value) async =>
+      await _prefs?.setDouble(_keyJoystickOpacity, value);
+
+  /// 摇杆移动速度 (1=慢, 5=快)
+  int getJoystickSpeed() => _prefs?.getInt(_keyJoystickSpeed) ?? 3;
+  Future<void> setJoystickSpeed(int value) async =>
+      await _prefs?.setInt(_keyJoystickSpeed, value);
 }
