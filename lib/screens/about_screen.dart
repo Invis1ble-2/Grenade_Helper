@@ -149,10 +149,10 @@ class _AboutScreenState extends State<AboutScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   child: Row(
                     children: [
-                      const CircleAvatar(
+                      CircleAvatar(
                         radius: 20,
-                        backgroundColor: Colors.orange,
-                        child: Icon(Icons.person, color: Colors.white),
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        child: const Icon(Icons.person, color: Colors.white),
                       ),
                       const SizedBox(width: 12),
                       Column(
@@ -160,6 +160,43 @@ class _AboutScreenState extends State<AboutScreen> {
                         children: [
                           const Text(
                             'Invis1ble',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          Text(
+                            '独立开发者',
+                            style: TextStyle(
+                              color: theme.colorScheme.onSurface
+                                  .withValues(alpha: 0.6),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  margin: const EdgeInsets.symmetric(vertical: 4),
+                  height: 1,
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.1),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 20,
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        child: const Icon(Icons.person, color: Colors.white),
+                      ),
+                      const SizedBox(width: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'MaiMing',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w600,
@@ -229,7 +266,7 @@ class _AboutScreenState extends State<AboutScreen> {
         children: [
           Row(
             children: [
-              Icon(icon, size: 20, color: Colors.orange),
+              Icon(icon, size: 20, color: theme.colorScheme.primary),
               const SizedBox(width: 8),
               Text(
                 title,
@@ -268,18 +305,20 @@ class _LinkItem extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
         child: Row(
           children: [
-            Icon(icon, size: 18, color: Colors.blue),
+            Icon(icon, size: 18, color: Theme.of(context).colorScheme.primary),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
                 text,
-                style: const TextStyle(fontSize: 14, color: Colors.blue),
+                style: TextStyle(
+                    fontSize: 14, color: Theme.of(context).colorScheme.primary),
               ),
             ),
             Icon(
               Icons.open_in_new,
               size: 16,
-              color: Colors.blue.withValues(alpha: 0.6),
+              color:
+                  Theme.of(context).colorScheme.primary.withValues(alpha: 0.6),
             ),
           ],
         ),

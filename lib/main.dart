@@ -649,7 +649,8 @@ class _MainAppState extends ConsumerState<MainApp> {
       builder: (context) => AlertDialog(
         title: Row(
           children: [
-            const Icon(Icons.system_update, color: Colors.orange),
+            Icon(Icons.system_update,
+                color: Theme.of(context).colorScheme.primary),
             const SizedBox(width: 8),
             const Text('发现新版本'),
           ],
@@ -726,7 +727,7 @@ class _MainAppState extends ConsumerState<MainApp> {
             icon: const Icon(Icons.download, size: 18),
             label: const Text('官方下载'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.orange,
+              backgroundColor: Theme.of(context).colorScheme.primary,
               foregroundColor: Colors.white,
             ),
           ),
@@ -770,10 +771,10 @@ class _MainAppState extends ConsumerState<MainApp> {
       // 浅色主题 - 使用柔和的奶白色，增强文字对比度
       theme: ThemeData(
         brightness: Brightness.light,
-        primarySwatch: Colors.orange,
+        primarySwatch: Colors.blue,
         colorScheme: ColorScheme.light(
-          primary: Colors.orange,
-          secondary: Colors.orangeAccent,
+          primary: Colors.blue,
+          secondary: Colors.blueAccent,
           surface: const Color.fromARGB(255, 248, 239, 225), // 奶白色卡片背景
           onSurface: const Color(0xFF1A1A1A), // 深色文字
         ),

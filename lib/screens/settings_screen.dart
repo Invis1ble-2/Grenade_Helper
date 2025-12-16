@@ -25,6 +25,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late Map<HotkeyAction, HotkeyConfig> _hotkeys;
   late double _overlayOpacity;
   late bool _closeToTray;
+  // 摇杆相关设置（仅移动端）
+  late int _markerMoveMode;
+  late double _joystickOpacity;
+  late int _joystickSpeed;
 
   bool get _isDesktop =>
       Platform.isWindows || Platform.isMacOS || Platform.isLinux;
@@ -40,11 +44,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _hotkeys = widget.settingsService!.getHotkeys();
       _overlayOpacity = widget.settingsService!.getOverlayOpacity();
       _closeToTray = widget.settingsService!.getCloseToTray();
+      _markerMoveMode = widget.settingsService!.getMarkerMoveMode();
+      _joystickOpacity = widget.settingsService!.getJoystickOpacity();
+      _joystickSpeed = widget.settingsService!.getJoystickSpeed();
     } else {
       // 默认值
       _hotkeys = {};
       _overlayOpacity = 0.9;
       _closeToTray = true;
+      _markerMoveMode = 0;
+      _joystickOpacity = 0.8;
+      _joystickSpeed = 3;
     }
   }
 
@@ -93,25 +103,71 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ],
         ),
-        const SizedBox(height: 24),
-        Center(
-          child: Column(
-            children: [
-              Icon(
-                Icons.desktop_windows,
-                size: 60,
-                color: Colors.grey[600],
+        const SizedBox(height: 16),
+        _buildSection(
+          title: '📍 标点操作',
+          children: [
+            ListTile(
+              title: const Text('移动模式'),
+              subtitle:
+                  Text(_markerMoveMode == 0 ? '长按选定后点击目标位置' : '长按选定后使用摇杆'),
+              trailing: SegmentedButton<int>(
+                segments: const [
+                  ButtonSegment(value: 0, label: Text('长按选定')),
+                  ButtonSegment(value: 1, label: Text('摇杆移动')),
+                ],
+                selected: {_markerMoveMode},
+                onSelectionChanged: (value) async {
+                  setState(() => _markerMoveMode = value.first);
+                  if (widget.settingsService != null) {
+                    await widget.settingsService!
+                        .setMarkerMoveMode(value.first);
+                  }
+                },
               ),
-              const SizedBox(height: 16),
-              Text(
-                '快捷键、悬浮窗等功能仅在桌面端可用',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[500],
+            ),
+            if (_markerMoveMode == 1) ...[
+              ListTile(
+                title: const Text('摇杆透明度'),
+                subtitle: Text('${(_joystickOpacity * 100).toInt()}%'),
+                trailing: SizedBox(
+                  width: 150,
+                  child: Slider(
+                    value: _joystickOpacity,
+                    min: 0.1,
+                    max: 1.0,
+                    divisions: 9,
+                    onChanged: (value) async {
+                      setState(() => _joystickOpacity = value);
+                      if (widget.settingsService != null) {
+                        await widget.settingsService!.setJoystickOpacity(value);
+                      }
+                    },
+                  ),
+                ),
+              ),
+              ListTile(
+                title: const Text('移动速度'),
+                subtitle: Text('$_joystickSpeed 档'),
+                trailing: SizedBox(
+                  width: 150,
+                  child: Slider(
+                    value: _joystickSpeed.toDouble(),
+                    min: 1,
+                    max: 5,
+                    divisions: 4,
+                    onChanged: (value) async {
+                      setState(() => _joystickSpeed = value.toInt());
+                      if (widget.settingsService != null) {
+                        await widget.settingsService!
+                            .setJoystickSpeed(value.toInt());
+                      }
+                    },
+                  ),
                 ),
               ),
             ],
-          ),
+          ],
         ),
       ],
     );
@@ -390,11 +446,16 @@ class _HotkeyEditorDialogState extends State<_HotkeyEditorDialog> {
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
                   color: _isListening
-                      ? Colors.orange.withOpacity(0.1)
-                      : Colors.grey.withOpacity(0.1),
+                      ? Theme.of(context)
+                          .colorScheme
+                          .primary
+                          .withValues(alpha: 0.1)
+                      : Colors.grey.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: _isListening ? Colors.orange : Colors.grey,
+                    color: _isListening
+                        ? Theme.of(context).colorScheme.primary
+                        : Colors.grey,
                     width: 2,
                   ),
                 ),
@@ -403,7 +464,9 @@ class _HotkeyEditorDialogState extends State<_HotkeyEditorDialog> {
                     Icon(
                       _isListening ? Icons.keyboard : Icons.touch_app,
                       size: 40,
-                      color: _isListening ? Colors.orange : Colors.grey,
+                      color: _isListening
+                          ? Theme.of(context).colorScheme.primary
+                          : Colors.grey,
                     ),
                     const SizedBox(height: 12),
                     Text(
@@ -413,7 +476,9 @@ class _HotkeyEditorDialogState extends State<_HotkeyEditorDialog> {
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w500,
-                        color: _isListening ? Colors.orange : null,
+                        color: _isListening
+                            ? Theme.of(context).colorScheme.primary
+                            : null,
                       ),
                     ),
                   ],

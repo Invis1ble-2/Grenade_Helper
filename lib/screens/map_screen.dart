@@ -1,13 +1,16 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:isar_community/isar.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models.dart';
 import '../providers.dart';
 import '../main.dart';
 import '../spawn_point_data.dart';
+import '../widgets/joystick_widget.dart';
 import 'grenade_detail_screen.dart';
 
 // --- 页面级状态管理 ---
@@ -115,6 +118,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   final GlobalKey _stackKey = GlobalKey(); // 添加 GlobalKey
   bool _isSpawnSidebarExpanded = true; // 出生点侧边栏展开状态
 
+  // 摇杆模式相关状态
+  GrenadeCluster? _joystickCluster; // 摇杆模式下选中的标点
+  Offset? _joystickOriginalOffset; // 摇杆移动前的原始位置
+
   @override
   void initState() {
     super.initState();
@@ -136,6 +143,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     // 通知独立悬浮窗清除地图
     _notifyOverlayWindowClearMap();
     super.dispose();
+  }
+
+  /// 比较两个 Cluster 是否相同（基于第一个 Grenade 的 ID）
+  bool _isSameCluster(GrenadeCluster? c1, GrenadeCluster? c2) {
+    if (c1 == null || c2 == null) return false;
+    if (c1 == c2) return true;
+    if (c1.grenades.isEmpty || c2.grenades.isEmpty) return false;
+    return c1.grenades.first.id == c2.grenades.first.id;
   }
 
   /// 计算 BoxFit.contain 模式下正方形图片的实际显示区域
@@ -952,6 +967,89 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     });
   }
 
+  /// 显示摇杆底部弹窗
+  Future<void> _showJoystickSheet(GrenadeCluster cluster) async {
+    // 从 SharedPreferences 读取摇杆设置
+    final prefs = await SharedPreferences.getInstance();
+    final opacity = prefs.getDouble('joystick_opacity') ?? 0.8;
+    final speed = prefs.getInt('joystick_speed') ?? 3;
+
+    setState(() {
+      _joystickCluster = cluster;
+      _joystickOriginalOffset = Offset(cluster.xRatio, cluster.yRatio);
+      _dragOffset = Offset(cluster.xRatio, cluster.yRatio);
+    });
+
+    if (!mounted) return;
+
+    await showJoystickBottomSheet(
+      context: context,
+      barrierColor: Colors.transparent, // 移除背景变暗
+      opacity: opacity,
+      speedLevel: speed,
+      clusterName:
+          cluster.grenades.isNotEmpty ? cluster.grenades.first.title : null,
+      onMove: (direction) => _handleJoystickMove(direction, speed),
+      onConfirm: _confirmJoystickMove,
+      onCancel: _cancelJoystickMove,
+    );
+  }
+
+  /// 处理摇杆移动
+  void _handleJoystickMove(Offset direction, int speedLevel) {
+    if (_joystickCluster == null || _dragOffset == null) return;
+
+    // 根据速度档位计算移动步长 (1档=0.0005, 5档=0.0025)
+    final step = 0.0005 + (speedLevel - 1) * 0.0005;
+
+    final newX = (_dragOffset!.dx + direction.dx * step).clamp(0.0, 1.0);
+    final newY = (_dragOffset!.dy + direction.dy * step).clamp(0.0, 1.0);
+
+    setState(() {
+      _dragOffset = Offset(newX, newY);
+    });
+  }
+
+  /// 确认摇杆移动
+  void _confirmJoystickMove() {
+    if (_joystickCluster == null || _dragOffset == null) {
+      _cancelJoystickMove();
+      return;
+    }
+
+    final isar = ref.read(isarProvider);
+    isar.writeTxnSync(() {
+      for (final g in _joystickCluster!.grenades) {
+        g.xRatio = _dragOffset!.dx;
+        g.yRatio = _dragOffset!.dy;
+        g.updatedAt = DateTime.now();
+        isar.grenades.putSync(g);
+      }
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text("✓ 点位已移动"),
+      backgroundColor: Colors.green,
+      duration: Duration(seconds: 1),
+    ));
+
+    setState(() {
+      _joystickCluster = null;
+      _joystickOriginalOffset = null;
+      _dragOffset = null;
+    });
+  }
+
+  /// 取消摇杆移动
+  void _cancelJoystickMove() {
+    setState(() {
+      _dragOffset = _joystickOriginalOffset;
+      _joystickCluster = null;
+      _joystickOriginalOffset = null;
+      _dragOffset = null;
+    });
+  }
+
   /// 处理鼠标滚轮缩放（以鼠标指针为中心）
   void _handleMouseWheelZoom(
       PointerScrollEvent event, BoxConstraints constraints) {
@@ -1140,11 +1238,21 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     const double baseHalfSize = 10.0;
 
     // 计算标记在 Stack 中的实际位置（考虑图片偏移）
+    // 如果正在拖动或使用摇杆，使用 _dragOffset 中的实时位置
+    double effectiveX = cluster.xRatio;
+    double effectiveY = cluster.yRatio;
+
+    if ((_isSameCluster(_draggingCluster, cluster) ||
+            _isSameCluster(_joystickCluster, cluster)) &&
+        _dragOffset != null) {
+      effectiveX = _dragOffset!.dx;
+      effectiveY = _dragOffset!.dy;
+    }
+
     final left =
-        imageBounds.offsetX + cluster.xRatio * imageBounds.width - baseHalfSize;
-    final top = imageBounds.offsetY +
-        cluster.yRatio * imageBounds.height -
-        baseHalfSize;
+        imageBounds.offsetX + effectiveX * imageBounds.width - baseHalfSize;
+    final top =
+        imageBounds.offsetY + effectiveY * imageBounds.height - baseHalfSize;
 
     return Positioned(
       left: left,
@@ -1155,7 +1263,19 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         child: GestureDetector(
           onTap: () => _handleClusterTap(cluster, layerId),
           onLongPressStart: isEditMode
-              ? (details) {
+              ? (details) async {
+                  // 移动端检查是否使用摇杆模式
+                  if (Platform.isAndroid || Platform.isIOS) {
+                    final prefs = await SharedPreferences.getInstance();
+                    final markerMoveMode =
+                        prefs.getInt('marker_move_mode') ?? 0;
+                    if (markerMoveMode == 1) {
+                      // 摇杆模式：弹出摇杆底部弹窗
+                      _showJoystickSheet(cluster);
+                      return;
+                    }
+                  }
+                  // 长按选定模式（桌面端或移动端选择此模式）
                   // 获取按下的触摸点位置（Ratio）
                   final touchRatio = _getLocalPosition(details.globalPosition);
                   if (touchRatio == null) return;
