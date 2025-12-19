@@ -257,4 +257,26 @@ class SettingsService {
   int getOverlayNavSpeed() => _prefs?.getInt(_keyOverlayNavSpeed) ?? 3;
   Future<void> setOverlayNavSpeed(int value) async =>
       await _prefs?.setInt(_keyOverlayNavSpeed, value);
+
+  // --- 应用启动计数与赞助提醒 ---
+  static const String _keyLaunchCount = 'app_launch_count';
+  static const String _keyDonationDialogShown = 'donation_dialog_shown';
+
+  /// 获取应用启动次数
+  int getLaunchCount() => _prefs?.getInt(_keyLaunchCount) ?? 0;
+
+  /// 增加启动次数并返回新值
+  Future<int> incrementLaunchCount() async {
+    final count = getLaunchCount() + 1;
+    await _prefs?.setInt(_keyLaunchCount, count);
+    return count;
+  }
+
+  /// 是否已显示过赞助提醒弹窗
+  bool isDonationDialogShown() =>
+      _prefs?.getBool(_keyDonationDialogShown) ?? false;
+
+  /// 标记已显示赞助提醒弹窗
+  Future<void> setDonationDialogShown() async =>
+      await _prefs?.setBool(_keyDonationDialogShown, true);
 }

@@ -134,6 +134,11 @@ class _AboutScreenState extends State<AboutScreen> {
                     text: '官方网站',
                     onTap: () =>
                         _launchUrl('https://grenade-helper.zeabur.app/')),
+                _LinkItem(
+                    icon: Icons.web,
+                    text: '哔哩哔哩',
+                    onTap: () =>
+                        _launchUrl('https://space.bilibili.com/39354678')),
               ],
             ),
 
@@ -213,6 +218,85 @@ class _AboutScreenState extends State<AboutScreen> {
                       ),
                     ],
                   ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 16),
+
+            // 支持开发者
+            _buildSection(
+              context,
+              icon: Icons.favorite,
+              title: '支持开发者',
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Column(
+                    children: [
+                      Text(
+                        '如果这个应用对你有帮助，欢迎在爱发电支持我们！',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: theme.colorScheme.onSurface
+                              .withValues(alpha: 0.8),
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 16),
+                      // 二维码图片
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.1),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Image.asset(
+                          'assets/icons/afdian_qr.png', // TODO: 替换为你的爱发电二维码
+                          width: 150,
+                          height: 150,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, __, ___) => Container(
+                            width: 150,
+                            height: 150,
+                            decoration: BoxDecoration(
+                              color: Colors.grey[200],
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.qr_code,
+                                    size: 50, color: Colors.grey[400]),
+                                const SizedBox(height: 8),
+                                Text(
+                                  '二维码占位符',
+                                  style: TextStyle(
+                                    color: Colors.grey[500],
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                  ),
+                ),
+                _LinkItem(
+                  icon: Icons.volunteer_activism,
+                  text: '前往爱发电支持',
+                  onTap: () => _launchUrl(
+                      'https://afdian.com/a/Invis1ble'), // TODO: 替换为你的爱发电链接
                 ),
               ],
             ),

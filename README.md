@@ -67,6 +67,15 @@
 
 ---
 
+## ❤️ 支持项目 (Support)
+
+如果这个项目对你有帮助，欢迎在爱发电支持我们！
+
+[![爱发电](https://img.shields.io/badge/爱发电-支持作者-ff69b4?logo=heart)](https://afdian.com/a/Invis1ble)
+
+
+---
+
 ## 🛠️ 开发与构建 (Development)
 
 如果你是开发者，想贡献代码：

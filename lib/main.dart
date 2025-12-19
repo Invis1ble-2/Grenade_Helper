@@ -468,8 +468,109 @@ class _MainAppState extends ConsumerState<MainApp> {
     Future.delayed(const Duration(seconds: 1), () {
       if (mounted) _checkForUpdates();
     });
+    // 检查赞助提醒（延迟2秒，避免与更新弹窗冲突）
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) _checkDonationReminder();
+    });
     // 加载保存的主题设置
     _loadThemeSetting();
+  }
+
+  /// 检查是否需要显示赞助提醒
+  Future<void> _checkDonationReminder() async {
+    if (globalSettingsService == null) return;
+
+    // 增加启动次数
+    final launchCount = await globalSettingsService!.incrementLaunchCount();
+
+    // 如果达到10次且未显示过提醒
+    if (launchCount >= 10 && !globalSettingsService!.isDonationDialogShown()) {
+      await globalSettingsService!.setDonationDialogShown();
+      _showDonationDialog();
+    }
+  }
+
+  /// 显示赞助提醒对话框
+  void _showDonationDialog() {
+    final navContext = _navigatorKey.currentContext;
+    if (navContext == null) return;
+
+    showDialog(
+      context: navContext,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.favorite, color: Colors.pink[400]),
+            const SizedBox(width: 8),
+            const Text('支持我们'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              '感谢你使用 Grenade Helper！',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '如果这个应用对你有帮助，欢迎在爱发电支持我们的开发工作，你的支持是我们持续更新的动力！',
+              style: TextStyle(
+                fontSize: 14,
+                color: Theme.of(context)
+                    .colorScheme
+                    .onSurface
+                    .withValues(alpha: 0.8),
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.purple.withValues(alpha: 0.1),
+                    Colors.pink.withValues(alpha: 0.1)
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.volunteer_activism,
+                      color: Colors.pink[400], size: 24),
+                  const SizedBox(width: 8),
+                  const Text(
+                    '爱发电 · 支持作者',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('下次再说'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _launchUrl('https://afdian.com/a/Invis1ble');
+            },
+            icon: const Icon(Icons.favorite, size: 18),
+            label: const Text('前往支持'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.pink[400],
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _loadThemeSetting() async {
