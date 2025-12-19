@@ -38,10 +38,15 @@ class WindowType {
 
 /// 发送命令给悬浮窗（通过 IPC）
 void sendOverlayCommand(String command, [Map<String, dynamic>? args]) {
+  print('[Main] sendOverlayCommand: $command, args: $args');
   if (overlayWindowController != null) {
-    overlayWindowController!.invokeMethod(command, args).catchError((_) {
+    print('[Main] overlayWindowController is not null, invoking $command');
+    overlayWindowController!.invokeMethod(command, args).catchError((e) {
       // 忽略通信错误（例如窗口已关闭）
+      print('[Main] IPC error for $command: $e');
     });
+  } else {
+    print('[Main] overlayWindowController is null, cannot send $command');
   }
 }
 
@@ -77,6 +82,22 @@ Future<void> main(List<String> args) async {
 
   // 主窗口逻辑
   await _runMainWindow();
+}
+
+/// 解析方向字符串
+NavigationDirection? _parseDirection(String? dirStr) {
+  switch (dirStr) {
+    case 'up':
+      return NavigationDirection.up;
+    case 'down':
+      return NavigationDirection.down;
+    case 'left':
+      return NavigationDirection.left;
+    case 'right':
+      return NavigationDirection.right;
+    default:
+      return null;
+  }
 }
 
 /// 运行主窗口
@@ -152,22 +173,29 @@ Future<void> _runMainWindow() async {
     globalHotkeyService!.registerHandler(HotkeyAction.toggleHE, () {
       sendOverlayCommand('toggle_he');
     });
-    // 方向键导航
+    // 方向键导航 - 改为平滑移动模式 (start/stop)
     globalHotkeyService!.registerHandler(HotkeyAction.navigateUp, () {
-      sendOverlayCommand('navigate_up');
+      sendOverlayCommand('start_navigation', {'direction': 'up'});
     });
     globalHotkeyService!.registerHandler(HotkeyAction.navigateDown, () {
-      sendOverlayCommand('navigate_down');
+      sendOverlayCommand('start_navigation', {'direction': 'down'});
     });
     globalHotkeyService!.registerHandler(HotkeyAction.navigateLeft, () {
-      sendOverlayCommand('navigate_left');
+      sendOverlayCommand('start_navigation', {'direction': 'left'});
     });
     globalHotkeyService!.registerHandler(HotkeyAction.navigateRight, () {
-      sendOverlayCommand('navigate_right');
+      sendOverlayCommand('start_navigation', {'direction': 'right'});
     });
     // 视频播放控制
     globalHotkeyService!.registerHandler(HotkeyAction.togglePlayPause, () {
       sendOverlayCommand('toggle_play_pause');
+    });
+    // 速度调节
+    globalHotkeyService!.registerHandler(HotkeyAction.increaseNavSpeed, () {
+      sendOverlayCommand('increase_nav_speed');
+    });
+    globalHotkeyService!.registerHandler(HotkeyAction.decreaseNavSpeed, () {
+      sendOverlayCommand('decrease_nav_speed');
     });
   }
 
@@ -251,13 +279,17 @@ Future<void> _runOverlayWindow(
     }
   }
 
+  // 创建 OverlayWindowApp 的 key，以便在 IPC 中访问其状态
+  final overlayAppKey = GlobalKey<OverlayWindowAppState>();
+
   // 设置窗口方法处理器（接收主窗口的命令）
   await controller.setWindowMethodHandler((call) async {
     switch (call.method) {
       case 'set_map':
         // 从主窗口接收当前地图信息
-        final mapId = call.arguments['map_id'] as int?;
-        final layerId = call.arguments['layer_id'] as int?;
+        final args = call.arguments as Map?;
+        final mapId = args?['map_id'] as int?;
+        final layerId = args?['layer_id'] as int?;
         if (mapId != null && layerId != null) {
           final map = await isar.gameMaps.get(mapId);
           final layer = await isar.mapLayers.get(layerId);
@@ -300,7 +332,7 @@ Future<void> _runOverlayWindow(
       case 'toggle_he':
         overlayState.toggleFilter(GrenadeType.he);
         return 'ok';
-      // 方向键导航
+      // 方向键导航 - 兼容旧版步进移动指令
       case 'navigate_up':
         overlayState.navigateDirection(NavigationDirection.up);
         return 'ok';
@@ -312,6 +344,25 @@ Future<void> _runOverlayWindow(
         return 'ok';
       case 'navigate_right':
         overlayState.navigateDirection(NavigationDirection.right);
+        return 'ok';
+      // 方向键导航 - 新版平滑移动指令 (start/stop)
+      case 'start_navigation':
+        final args = call.arguments as Map?;
+        final dirStr = args?['direction'] as String?;
+        final dir = _parseDirection(dirStr);
+        print('[Overlay] start_navigation: $dirStr -> $dir');
+        if (dir != null) overlayState.startNavigation(dir);
+        return 'ok';
+      case 'stop_navigation':
+        final args = call.arguments as Map?;
+        final dirStr = args?['direction'] as String?;
+        final dir = _parseDirection(dirStr);
+        print('[Overlay] stop_navigation: $dirStr -> $dir');
+        if (dir != null) overlayState.stopNavigation(dir);
+        return 'ok';
+      case 'stop_all_navigation':
+        print('[Overlay] stop_all_navigation');
+        overlayState.stopAllNavigation();
         return 'ok';
       // 视频播放控制
       case 'toggle_play_pause':
@@ -328,6 +379,54 @@ Future<void> _runOverlayWindow(
         final speedValue = call.arguments?['speed'];
         final speed = (speedValue is num) ? speedValue.round() : 3;
         overlayState.setNavSpeedLevel(speed);
+        return 'ok';
+      // 增加导航速度
+      case 'increase_nav_speed':
+        overlayState.increaseNavSpeed();
+        // 保存到设置
+        await settingsService.setOverlayNavSpeed(overlayState.navSpeedLevel);
+        return 'ok';
+      // 减少导航速度
+      case 'decrease_nav_speed':
+        overlayState.decreaseNavSpeed();
+        // 保存到设置
+        await settingsService.setOverlayNavSpeed(overlayState.navSpeedLevel);
+        return 'ok';
+      // 重新加载热键配置
+      case 'reload_hotkeys':
+        try {
+          // 从 IPC 接收热键配置，需要处理类型转换
+          final rawHotkeys = call.arguments?['hotkeys'];
+          print(
+              '[Overlay] reload_hotkeys - rawHotkeys type: ${rawHotkeys.runtimeType}');
+
+          if (rawHotkeys != null) {
+            // 将 Map<Object?, Object?> 转换为 Map<String, dynamic>
+            final hotkeysJson = Map<String, dynamic>.from(rawHotkeys as Map);
+
+            // 解析热键配置
+            final hotkeys = <HotkeyAction, HotkeyConfig>{};
+            for (final action in HotkeyAction.values) {
+              final actionKey = action.name;
+              if (hotkeysJson.containsKey(actionKey)) {
+                // 同样需要转换内部的Map
+                final configMap =
+                    Map<String, dynamic>.from(hotkeysJson[actionKey] as Map);
+                hotkeys[action] = HotkeyConfig.fromJson(configMap);
+              }
+            }
+            // 通知 OverlayWindow 更新热键配置和UI
+            overlayAppKey.currentState?.overlayWindowKey.currentState
+                ?.reloadHotkeys(hotkeys);
+            print(
+                '[Overlay] Hotkeys reloaded and UI updated with ${hotkeys.length} keys');
+          } else {
+            print('[Overlay] reload_hotkeys called without hotkeys data');
+          }
+        } catch (e, stack) {
+          print('[Overlay] Error reloading hotkeys: $e');
+          print('[Overlay] Stack trace: $stack');
+        }
         return 'ok';
       // 获取悬浮窗可见状态（供主窗口轮询）
       case 'get_visibility':
@@ -352,6 +451,7 @@ Future<void> _runOverlayWindow(
           useMaterial3: true,
         ),
         home: OverlayWindowApp(
+          key: overlayAppKey,
           settingsService: settingsService,
           overlayState: overlayState,
           onClose: () async {
@@ -940,7 +1040,7 @@ class _MainAppState extends ConsumerState<MainApp> {
 }
 
 /// 悬浮窗应用（独立窗口入口）
-class OverlayWindowApp extends StatelessWidget {
+class OverlayWindowApp extends StatefulWidget {
   final SettingsService settingsService;
   final OverlayStateService overlayState;
   final VoidCallback onClose;
@@ -955,14 +1055,22 @@ class OverlayWindowApp extends StatelessWidget {
   });
 
   @override
+  State<OverlayWindowApp> createState() => OverlayWindowAppState();
+}
+
+class OverlayWindowAppState extends State<OverlayWindowApp> {
+  final GlobalKey<OverlayWindowState> overlayWindowKey = GlobalKey();
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: OverlayWindow(
-        settingsService: settingsService,
-        overlayState: overlayState,
-        onClose: onClose,
-        onMinimize: onMinimize,
+        key: overlayWindowKey,
+        settingsService: widget.settingsService,
+        overlayState: widget.overlayState,
+        onClose: widget.onClose,
+        onMinimize: widget.onMinimize,
         onStartDrag: () async {
           await windowManager.startDragging();
         },

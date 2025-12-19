@@ -44,8 +44,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _loadSettings();
   }
 
+  @override
+  void didUpdateWidget(SettingsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 每次设置界面重新激活时重新加载设置，确保显示最新值
+    _loadSettings();
+  }
+
   void _loadSettings() {
     if (widget.settingsService != null) {
+      // 重新从设置服务加载，确保获取最新值
+      widget.settingsService!.reload();
       _hotkeys = widget.settingsService!.getHotkeys();
       _overlayOpacity = widget.settingsService!.getOverlayOpacity();
       _closeToTray = widget.settingsService!.getCloseToTray();
@@ -66,6 +75,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _markerMoveMode = 0;
       _joystickOpacity = 0.8;
       _joystickSpeed = 3;
+    }
+    // 更新UI
+    if (mounted) {
+      setState(() {});
     }
   }
 
@@ -223,6 +236,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             _buildHotkeyTile(HotkeyAction.toggleFlash, '闪光弹过滤开关'),
             _buildHotkeyTile(HotkeyAction.toggleMolotov, '燃烧弹过滤开关'),
             _buildHotkeyTile(HotkeyAction.toggleHE, '手雷过滤开关'),
+            const Divider(height: 1),
+            _buildHotkeyTile(HotkeyAction.increaseNavSpeed, '增加导航速度'),
+            _buildHotkeyTile(HotkeyAction.decreaseNavSpeed, '减少导航速度'),
           ],
         ),
         const SizedBox(height: 16),
@@ -516,6 +532,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           setState(() => _hotkeys[action] = newConfig);
           await widget.settingsService!.saveHotkey(action, newConfig);
           widget.onHotkeyChanged?.call(action, newConfig);
+
+          // 通知悬浮窗重新加载热键配置，传递完整的热键配置
+          final hotkeys = widget.settingsService!.getHotkeys();
+          final hotkeysJson = <String, dynamic>{};
+          for (final entry in hotkeys.entries) {
+            hotkeysJson[entry.key.name] = entry.value.toJson();
+          }
+          sendOverlayCommand('reload_hotkeys', {'hotkeys': hotkeysJson});
+          print('[Settings] Hotkey changed, notified overlay to reload');
         },
       ),
     );

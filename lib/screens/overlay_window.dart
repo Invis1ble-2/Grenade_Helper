@@ -26,10 +26,10 @@ class OverlayWindow extends StatefulWidget {
   });
 
   @override
-  State<OverlayWindow> createState() => _OverlayWindowState();
+  State<OverlayWindow> createState() => OverlayWindowState();
 }
 
-class _OverlayWindowState extends State<OverlayWindow> {
+class OverlayWindowState extends State<OverlayWindow> {
   final FocusNode _focusNode = FocusNode();
   late Map<HotkeyAction, HotkeyConfig> _hotkeys;
   final GlobalKey<VideoPlayerWidgetState> _videoPlayerKey = GlobalKey();
@@ -57,12 +57,31 @@ class _OverlayWindowState extends State<OverlayWindow> {
     if (mounted) setState(() {});
   }
 
+  /// 重新加载热键配置
+  void reloadHotkeys([Map<HotkeyAction, HotkeyConfig>? newHotkeys]) {
+    print(
+        '[OverlayWindow] reloadHotkeys called, before reload: ${_hotkeys[HotkeyAction.navigateUp]?.toDisplayString()}');
+    setState(() {
+      // 如果提供了新的热键配置，直接使用；否则从 settingsService 加载
+      _hotkeys = newHotkeys ?? widget.settingsService.getHotkeys();
+    });
+    print(
+        '[OverlayWindow] Hotkeys reloaded, after reload: ${_hotkeys[HotkeyAction.navigateUp]?.toDisplayString()}');
+    print('[OverlayWindow] Total hotkeys loaded: ${_hotkeys.length}');
+  }
+
   @override
   void dispose() {
     widget.overlayState.setVideoTogglePlayPauseCallback(null);
     widget.overlayState.removeListener(_onStateChanged);
     _focusNode.dispose();
     super.dispose();
+  }
+
+  String _getHotkeyLabel(HotkeyAction action) {
+    final config = _hotkeys[action];
+    final label = config?.toDisplayString() ?? '?';
+    return label;
   }
 
   @override
@@ -366,16 +385,26 @@ class _OverlayWindowState extends State<OverlayWindow> {
 
     if (layer == null) return const SizedBox.shrink();
 
-    return RadarMiniMap(
-      mapAssetPath: layer.assetPath,
-      currentGrenade: state.currentGrenade,
-      allGrenades: state.filteredGrenades,
-      crosshairX: state.crosshairX,
-      crosshairY: state.crosshairY,
-      isSnapped: state.isSnapped,
-      width: 550, // 更宽
-      height: 140, // 更矮 - 长方形
-      zoomLevel: 1.3,
+    // 使用 LayoutBuilder 动态获取可用宽度，确保拉伸窗口后图标位置正确
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 使用可用宽度，高度保持固定比例
+        final availableWidth =
+            constraints.maxWidth > 0 ? constraints.maxWidth : 550.0;
+        final radarHeight = 140.0;
+
+        return RadarMiniMap(
+          mapAssetPath: layer.assetPath,
+          currentGrenade: state.currentGrenade,
+          allGrenades: state.filteredGrenades,
+          crosshairX: state.crosshairX,
+          crosshairY: state.crosshairY,
+          isSnapped: state.isSnapped,
+          width: availableWidth,
+          height: radarHeight,
+          zoomLevel: 1.3,
+        );
+      },
     );
   }
 
@@ -406,78 +435,22 @@ class _OverlayWindowState extends State<OverlayWindow> {
 
     final medias = currentStep.medias.toList();
 
-    if (medias.isEmpty) {
-      return Container(
-        height: 350,
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.3),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: const Center(
-          child: Icon(Icons.image_not_supported, size: 48, color: Colors.grey),
-        ),
-      );
-    }
-
-    final media = medias.first;
-
-    // 对于图片，检测是否为竖屏图片并动态调整高度
-    if (media.type == MediaType.image) {
-      return FutureBuilder<Size?>(
-        future: _getImageSize(media.localPath),
-        builder: (context, snapshot) {
-          // 根据图片比例决定高度：竖屏图片使用更大高度
-          double height = 350;
-          bool isPortrait = false;
-
-          if (snapshot.hasData && snapshot.data != null) {
-            final size = snapshot.data!;
-            // 只有高度超过宽度 200px 以上才判定为竖屏图片
-            isPortrait = size.height > size.width + 200;
-            if (isPortrait) {
-              // 竖屏图片使用更大的高度（减少裁切量）
-              height = 450;
-            }
-          }
-
-          return Container(
-            height: height,
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.3),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: _buildMediaView(media, isPortrait: isPortrait),
-          );
-        },
-      );
-    }
-
-    // 非图片（视频）使用默认高度
     return Container(
       height: 350,
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: _buildMediaView(media),
+      child: medias.isEmpty
+          ? const Center(
+              child:
+                  Icon(Icons.image_not_supported, size: 48, color: Colors.grey),
+            )
+          : _buildMediaView(medias.first),
     );
   }
 
-  /// 获取图片尺寸
-  Future<Size?> _getImageSize(String path) async {
-    try {
-      final file = File(path);
-      if (!file.existsSync()) return null;
-
-      final bytes = await file.readAsBytes();
-      final image = await decodeImageFromList(bytes);
-      return Size(image.width.toDouble(), image.height.toDouble());
-    } catch (e) {
-      return null;
-    }
-  }
-
-  Widget _buildMediaView(StepMedia media, {bool isPortrait = false}) {
+  Widget _buildMediaView(StepMedia media) {
     final file = File(media.localPath);
     if (!file.existsSync()) {
       return const Center(
@@ -486,28 +459,16 @@ class _OverlayWindowState extends State<OverlayWindow> {
     }
 
     if (media.type == MediaType.image) {
-      Widget imageWidget = Image.file(
-        file,
-        fit: BoxFit.contain,
-        width: double.infinity,
-        height: double.infinity,
-        errorBuilder: (_, __, ___) => const Center(
-          child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
-        ),
-      );
-
-      // 竖屏图片放大显示，使用 Transform.scale 控制放大比例
-      // 1.3 表示放大 30%，可以调整这个值来控制裁切量
-      if (isPortrait) {
-        imageWidget = Transform.scale(
-          scale: 1.5, // 调整此值：1.0=不放大, 1.5=放大50%
-          child: imageWidget,
-        );
-      }
-
       return ClipRRect(
         borderRadius: BorderRadius.circular(12),
-        child: imageWidget,
+        child: Image.file(
+          file,
+          fit: BoxFit.contain,
+          width: double.infinity,
+          errorBuilder: (_, __, ___) => const Center(
+            child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
+          ),
+        ),
       );
     }
 
@@ -542,7 +503,16 @@ class _OverlayWindowState extends State<OverlayWindow> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 步骤标题已移动到底部导航栏
+          if (currentStep.title.isNotEmpty)
+            Text(
+              currentStep.title,
+              style: const TextStyle(
+                color: Colors.orange,
+                fontWeight: FontWeight.bold,
+                fontSize: 10,
+              ),
+            ),
+          if (currentStep.title.isNotEmpty) const SizedBox(height: 4),
           Text(
             currentStep.description.isNotEmpty
                 ? currentStep.description
@@ -559,6 +529,18 @@ class _OverlayWindowState extends State<OverlayWindow> {
     final state = widget.overlayState;
 
     if (!state.hasMap || state.currentGrenade == null) {
+      // 动态构建提示文本
+      final navUpKey = _getHotkeyLabel(HotkeyAction.navigateUp);
+      final navDownKey = _getHotkeyLabel(HotkeyAction.navigateDown);
+      final navLeftKey = _getHotkeyLabel(HotkeyAction.navigateLeft);
+      final navRightKey = _getHotkeyLabel(HotkeyAction.navigateRight);
+      final increaseSpeedKey = _getHotkeyLabel(HotkeyAction.increaseNavSpeed);
+      final decreaseSpeedKey = _getHotkeyLabel(HotkeyAction.decreaseNavSpeed);
+      final prevGrenadeKey = _getHotkeyLabel(HotkeyAction.prevGrenade);
+      final nextGrenadeKey = _getHotkeyLabel(HotkeyAction.nextGrenade);
+      final prevStepKey = _getHotkeyLabel(HotkeyAction.prevStep);
+      final nextStepKey = _getHotkeyLabel(HotkeyAction.nextStep);
+
       return Container(
         height: 60,
         decoration: BoxDecoration(
@@ -566,10 +548,10 @@ class _OverlayWindowState extends State<OverlayWindow> {
           borderRadius:
               const BorderRadius.vertical(bottom: Radius.circular(14)),
         ),
-        child: const Center(
+        child: Center(
           child: Text(
-            '↑←↓→ 空间导航  |  PageUp/Down 切换道具  |  [ ] 切换步骤',
-            style: TextStyle(color: Colors.grey, fontSize: 11),
+            '$navUpKey$navLeftKey$navDownKey$navRightKey 导航  |  $increaseSpeedKey/$decreaseSpeedKey 调速 (${state.navSpeedLevel}/5)  |  $prevGrenadeKey/$nextGrenadeKey 道具  |  $prevStepKey/$nextStepKey 步骤',
+            style: const TextStyle(color: Colors.grey, fontSize: 11),
           ),
         ),
       );
@@ -601,19 +583,76 @@ class _OverlayWindowState extends State<OverlayWindow> {
                 color: Colors.orange,
               ),
 
-              // 步骤切换（显示步骤标题）
-              _buildStepNavRow(
-                steps: steps,
-                currentIndex: state.currentStepIndex,
+              // 步骤切换
+              _buildNavRow(
+                label: '步骤',
+                current: state.currentStepIndex + 1,
+                total: steps.length,
                 onPrev: state.prevStep,
                 onNext: state.nextStep,
+                color: Colors.blue,
               ),
             ],
           ),
           const SizedBox(height: 8),
-          Text(
-            '↑←↓→ 空间导航  |  7/8/9/0 过滤器  |  PageUp/Down 切换道具  |  [ ] 切换步骤',
-            style: TextStyle(color: Colors.grey[600], fontSize: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // 左侧：快捷键提示（动态获取）
+              Expanded(
+                child: Builder(builder: (context) {
+                  final navUpKey = _getHotkeyLabel(HotkeyAction.navigateUp);
+                  final navDownKey = _getHotkeyLabel(HotkeyAction.navigateDown);
+                  final navLeftKey = _getHotkeyLabel(HotkeyAction.navigateLeft);
+                  final navRightKey =
+                      _getHotkeyLabel(HotkeyAction.navigateRight);
+                  final smokeKey = _getHotkeyLabel(HotkeyAction.toggleSmoke);
+                  final flashKey = _getHotkeyLabel(HotkeyAction.toggleFlash);
+                  final molotovKey =
+                      _getHotkeyLabel(HotkeyAction.toggleMolotov);
+                  final heKey = _getHotkeyLabel(HotkeyAction.toggleHE);
+                  final prevGrenadeKey =
+                      _getHotkeyLabel(HotkeyAction.prevGrenade);
+                  final nextGrenadeKey =
+                      _getHotkeyLabel(HotkeyAction.nextGrenade);
+                  final prevStepKey = _getHotkeyLabel(HotkeyAction.prevStep);
+                  final nextStepKey = _getHotkeyLabel(HotkeyAction.nextStep);
+
+                  return Text(
+                    '$navUpKey$navLeftKey$navDownKey$navRightKey 导航  |  $smokeKey/$flashKey/$molotovKey/$heKey 过滤  |  $prevGrenadeKey/$nextGrenadeKey 道具  |  $prevStepKey/$nextStepKey 步骤',
+                    style: TextStyle(color: Colors.grey[600], fontSize: 10),
+                  );
+                }),
+              ),
+              // 右侧：速度档位显示（动态获取）
+              Builder(builder: (context) {
+                final increaseSpeedKey =
+                    _getHotkeyLabel(HotkeyAction.increaseNavSpeed);
+                final decreaseSpeedKey =
+                    _getHotkeyLabel(HotkeyAction.decreaseNavSpeed);
+
+                return Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(
+                      color: Colors.orange.withValues(alpha: 0.5),
+                      width: 1,
+                    ),
+                  ),
+                  child: Text(
+                    '速度: ${state.navSpeedLevel}/5  ($increaseSpeedKey/$decreaseSpeedKey)',
+                    style: const TextStyle(
+                      color: Colors.orange,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                );
+              }),
+            ],
           ),
         ],
       ),
@@ -653,43 +692,6 @@ class _OverlayWindowState extends State<OverlayWindow> {
     );
   }
 
-  /// 步骤导航（显示步骤标题）
-  Widget _buildStepNavRow({
-    required List<GrenadeStep> steps,
-    required int currentIndex,
-    required VoidCallback onPrev,
-    required VoidCallback onNext,
-  }) {
-    final currentStep =
-        currentIndex < steps.length ? steps[currentIndex] : null;
-    final title = currentStep?.title ?? '';
-    final displayTitle = title.isEmpty ? '步骤' : title;
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        IconButton(
-          icon: const Icon(Icons.chevron_left, size: 22),
-          color: Colors.blue,
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-          onPressed: onPrev,
-        ),
-        Text(
-          '$displayTitle ${currentIndex + 1}/${steps.length}',
-          style: const TextStyle(color: Colors.white, fontSize: 13),
-        ),
-        IconButton(
-          icon: const Icon(Icons.chevron_right, size: 22),
-          color: Colors.blue,
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-          onPressed: onNext,
-        ),
-      ],
-    );
-  }
-
   // === 快捷键处理 ===
 
   // === 快捷键处理 ===
@@ -719,12 +721,17 @@ class _OverlayWindowState extends State<OverlayWindow> {
     final hasCtrl = HardwareKeyboard.instance.isControlPressed;
     final hasShift = HardwareKeyboard.instance.isShiftPressed;
 
+    // 调试日志：打印按键信息
+    print(
+        '[OverlayWindow] Key pressed: ${key.keyLabel} (keyId: ${key.keyId}), Alt: $hasAlt, Ctrl: $hasCtrl, Shift: $hasShift');
+
     // 检查每个动作
     for (final entry in _hotkeys.entries) {
       // 跳过方向键动作（已在上面处理）
       if (_isNavigationAction(entry.key)) continue;
 
       if (_matchesHotkey(key, hasAlt, hasCtrl, hasShift, entry.value)) {
+        print('[OverlayWindow] Hotkey matched: ${entry.key}');
         _executeAction(entry.key);
         return;
       }
@@ -737,12 +744,27 @@ class _OverlayWindowState extends State<OverlayWindow> {
     }
   }
 
-  /// 获取按键对应的导航方向
+  /// 获取按键对应的导航方向（根据用户配置的热键判断）
   NavigationDirection? _getNavigationDirection(LogicalKeyboardKey key) {
-    if (key == LogicalKeyboardKey.arrowUp) return NavigationDirection.up;
-    if (key == LogicalKeyboardKey.arrowDown) return NavigationDirection.down;
-    if (key == LogicalKeyboardKey.arrowLeft) return NavigationDirection.left;
-    if (key == LogicalKeyboardKey.arrowRight) return NavigationDirection.right;
+    // 根据用户配置的热键来判断方向
+    final upConfig = _hotkeys[HotkeyAction.navigateUp];
+    final downConfig = _hotkeys[HotkeyAction.navigateDown];
+    final leftConfig = _hotkeys[HotkeyAction.navigateLeft];
+    final rightConfig = _hotkeys[HotkeyAction.navigateRight];
+
+    // 使用 keyId 比较
+    if (upConfig != null && key.keyId == upConfig.key.keyId) {
+      return NavigationDirection.up;
+    }
+    if (downConfig != null && key.keyId == downConfig.key.keyId) {
+      return NavigationDirection.down;
+    }
+    if (leftConfig != null && key.keyId == leftConfig.key.keyId) {
+      return NavigationDirection.left;
+    }
+    if (rightConfig != null && key.keyId == rightConfig.key.keyId) {
+      return NavigationDirection.right;
+    }
     return null;
   }
 
@@ -849,6 +871,12 @@ class _OverlayWindowState extends State<OverlayWindow> {
         } else {
           print('togglePlayPause: no video player state available');
         }
+        break;
+      case HotkeyAction.increaseNavSpeed:
+        state.increaseNavSpeed();
+        break;
+      case HotkeyAction.decreaseNavSpeed:
+        state.decreaseNavSpeed();
         break;
     }
   }

@@ -33,7 +33,6 @@ class OverlayStateService extends ChangeNotifier {
   bool _isSnapped = false;
 
   // 准星移动常量
-  static const double _snapThreshold = 0.02; // 吸附阈值
   static const int _moveIntervalMs = 16; // 约60fps
 
   // 速度档位配置 (1-5档对应的速度值)
@@ -43,6 +42,15 @@ class OverlayStateService extends ChangeNotifier {
     0.004, // 3档 - 当前默认
     0.0045, // 4档
     0.005, // 5档 - 最快
+  ];
+
+  // 吸附步长档位配置 (1-5档对应的吸附阈值)
+  static const List<double> _snapThresholdLevels = [
+    0.015, // 1档 - 吸附范围最小
+    0.018, // 2档
+    0.02, // 3档 - 默认
+    0.022, // 4档
+    0.025, // 5档 - 吸附范围最大
   ];
 
   // 当前速度档位 (1-5)
@@ -55,7 +63,7 @@ class OverlayStateService extends ChangeNotifier {
   void setNavSpeedLevel(int level) {
     _navSpeedLevel = level.clamp(1, 5);
     print(
-        '[OverlayStateService] setNavSpeedLevel: $level -> $_navSpeedLevel, speed: ${_speedLevels[_navSpeedLevel - 1]}');
+        '[OverlayStateService] setNavSpeedLevel: $level -> $_navSpeedLevel, speed: ${_speedLevels[_navSpeedLevel - 1]}, snapThreshold: ${_snapThresholdLevels[_navSpeedLevel - 1]}');
   }
 
   /// 获取当前速度值
@@ -64,9 +72,35 @@ class OverlayStateService extends ChangeNotifier {
     return speed;
   }
 
+  /// 获取当前吸附阈值（根据速度档位动态调整）
+  double get _snapThreshold {
+    return _snapThresholdLevels[_navSpeedLevel - 1];
+  }
+
+  /// 增加导航速度档位
+  void increaseNavSpeed() {
+    if (_navSpeedLevel < 5) {
+      setNavSpeedLevel(_navSpeedLevel + 1);
+      print('[OverlayStateService] Speed increased to $_navSpeedLevel');
+      notifyListeners();
+    }
+  }
+
+  /// 减少导航速度档位
+  void decreaseNavSpeed() {
+    if (_navSpeedLevel > 1) {
+      setNavSpeedLevel(_navSpeedLevel - 1);
+      print('[OverlayStateService] Speed decreased to $_navSpeedLevel');
+      notifyListeners();
+    }
+  }
+
   // 连续移动状态
   final Set<NavigationDirection> _activeDirections = {};
+  // 心跳包记录（用于 Windows 全局热键，因为没有 keyUp 事件，通过连续的 keyDown 心跳维持移动）
+  final Map<NavigationDirection, DateTime> _lastHeartbeat = {};
   Timer? _moveTimer;
+  Timer? _heartbeatTimer;
 
   // 记忆：最后查看的道具 ID（按地图分组）
   final Map<int, int> _lastViewedGrenadeByMap = {};
@@ -363,8 +397,8 @@ class OverlayStateService extends ChangeNotifier {
     }
   }
 
-  /// 检查并吸附到最近的点位
-  void _checkAndSnapToPoint() {
+  /// 检查点位吸附（支持平滑移动避让）
+  void _checkAndSnapToPointEx({bool ignoreCurrent = false}) {
     if (_filteredGrenades.isEmpty) {
       _isSnapped = false;
       return;
@@ -373,7 +407,12 @@ class OverlayStateService extends ChangeNotifier {
     Grenade? nearest;
     double minDist = double.infinity;
 
+    final currentTargetId = currentGrenade?.id;
+
     for (final g in _filteredGrenades) {
+      // 如果要求忽略当前点位（用于逃离吸附），则跳过
+      if (ignoreCurrent && g.id == currentTargetId) continue;
+
       final dx = g.xRatio - _crosshairX;
       final dy = g.yRatio - _crosshairY;
       final dist = dx * dx + dy * dy;
@@ -400,8 +439,23 @@ class OverlayStateService extends ChangeNotifier {
 
   /// 开始向指定方向移动（按下按键时调用）
   void startNavigation(NavigationDirection direction) {
+    final now = DateTime.now();
     _activeDirections.add(direction);
+
+    // 关键修复：当收到任何方向的心跳时，刷新所有活跃方向的心跳
+    // 这是为了解决 Windows 全局热键的限制：
+    // 当同时按两个键时，第一个键会停止自动重复，
+    // 但只要第二个键在重复，就应该保持第一个方向也活跃
+    for (final dir in _activeDirections) {
+      _lastHeartbeat[dir] = now;
+    }
+
+    // 调试日志：显示当前活跃的方向
+    print(
+        '[OverlayState] Active directions: ${_activeDirections.length} - ${_activeDirections.map((d) => d.name).join(', ')}');
+
     _startMoveTimer();
+    _startHeartbeatTimer();
   }
 
   /// 停止向指定方向移动（松开按键时调用）
@@ -409,6 +463,9 @@ class OverlayStateService extends ChangeNotifier {
     _activeDirections.remove(direction);
     if (_activeDirections.isEmpty) {
       _stopMoveTimer();
+      // 停止移动时，尝试吸附到最近的点（此时不再忽略当前点）
+      _checkAndSnapToPointEx(ignoreCurrent: false);
+      notifyListeners();
     }
   }
 
@@ -416,6 +473,8 @@ class OverlayStateService extends ChangeNotifier {
   void stopAllNavigation() {
     _activeDirections.clear();
     _stopMoveTimer();
+    _checkAndSnapToPointEx(ignoreCurrent: false);
+    notifyListeners();
   }
 
   /// 启动移动定时器
@@ -434,6 +493,41 @@ class OverlayStateService extends ChangeNotifier {
   void _stopMoveTimer() {
     _moveTimer?.cancel();
     _moveTimer = null;
+  }
+
+  /// 启动心跳检查定时器（针对 Windows 全局热键）
+  void _startHeartbeatTimer() {
+    if (_heartbeatTimer != null) return;
+
+    _heartbeatTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
+      final now = DateTime.now();
+      final toStop = <NavigationDirection>[];
+
+      // 动态超时：
+      // - 单个方向时使用短超时（80ms），最小化漂移
+      // - 多个方向时使用长超时（500ms），支持斜向移动
+      final timeout = _activeDirections.length > 1 ? 500 : 80;
+
+      for (final dir in _activeDirections) {
+        final last = _lastHeartbeat[dir];
+        if (last != null) {
+          if (now.difference(last).inMilliseconds > timeout) {
+            toStop.add(dir);
+          }
+        }
+      }
+
+      if (toStop.isNotEmpty) {
+        for (final dir in toStop) {
+          stopNavigation(dir);
+        }
+      }
+
+      if (_activeDirections.isEmpty) {
+        _heartbeatTimer?.cancel();
+        _heartbeatTimer = null;
+      }
+    });
   }
 
   /// 更新准星位置（每帧调用）
@@ -478,8 +572,8 @@ class OverlayStateService extends ChangeNotifier {
     _crosshairX = (_crosshairX + dx).clamp(0.0, 1.0);
     _crosshairY = (_crosshairY + dy).clamp(0.0, 1.0);
 
-    // 检查并吸附到最近点位
-    _checkAndSnapToPoint();
+    // 检查并吸附到最近点位（移动时忽略当前已吸附的点位，以便能顺利移开）
+    _checkAndSnapToPointEx(ignoreCurrent: true);
     notifyListeners();
   }
 
@@ -508,7 +602,7 @@ class OverlayStateService extends ChangeNotifier {
         break;
     }
 
-    _checkAndSnapToPoint();
+    _checkAndSnapToPointEx(ignoreCurrent: false);
     notifyListeners();
   }
 
