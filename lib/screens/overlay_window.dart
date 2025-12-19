@@ -238,7 +238,7 @@ class _OverlayWindowState extends State<OverlayWindow> {
     }
 
     // 没有道具
-    if (state.currentGrenade == null) {
+    if (state.filteredGrenades.isEmpty) {
       return _buildNoGrenadePrompt();
     }
 
@@ -246,16 +246,21 @@ class _OverlayWindowState extends State<OverlayWindow> {
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
-          // 雷达小地图
+          // 雷达小地图（始终显示）
           _buildRadarMap(),
           const SizedBox(height: 16),
 
-          // 道具媒体区域
-          _buildMediaArea(),
-          const SizedBox(height: 12),
+          // 根据吸附状态显示内容
+          if (state.isSnapped && state.currentGrenade != null) ...[
+            // 道具媒体区域
+            _buildMediaArea(),
+            const SizedBox(height: 12),
 
-          // 步骤说明
-          _buildDescription(),
+            // 步骤说明
+            _buildDescription(),
+          ] else
+            // 未吸附提示
+            _buildNavigationHint(),
         ],
       ),
     );
@@ -312,6 +317,49 @@ class _OverlayWindowState extends State<OverlayWindow> {
     );
   }
 
+  Widget _buildNavigationHint() {
+    return Container(
+      height: 350,
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.1),
+          width: 1,
+        ),
+      ),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.gps_not_fixed,
+              size: 48,
+              color: Colors.white.withValues(alpha: 0.5),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              '使用方向键移动准星',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '靠近点位时会自动吸附并显示道具信息',
+              style: TextStyle(
+                color: Colors.grey[500],
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildRadarMap() {
     final state = widget.overlayState;
     final layer = state.currentLayer;
@@ -322,6 +370,9 @@ class _OverlayWindowState extends State<OverlayWindow> {
       mapAssetPath: layer.assetPath,
       currentGrenade: state.currentGrenade,
       allGrenades: state.filteredGrenades,
+      crosshairX: state.crosshairX,
+      crosshairY: state.crosshairY,
+      isSnapped: state.isSnapped,
       width: 550, // 更宽
       height: 140, // 更矮 - 长方形
       zoomLevel: 1.3,
@@ -550,34 +601,36 @@ class _OverlayWindowState extends State<OverlayWindow> {
   // === 快捷键处理 ===
 
   void _handleKeyEvent(KeyEvent event) {
-    if (event is! KeyDownEvent) return;
-
     final key = event.logicalKey;
 
     // 忽略单独的修饰键事件
     if (_isModifierKey(key)) return;
 
-    // 简单的修饰键检查，仅依赖当前事件
-    // 由于多窗口环境下 HardwareKeyboard 状态不可靠，这里不再强制检查全局状态
-    // 而且我们已经将常用快捷键改为不依赖修饰键 (7/8/9/0)
+    // 处理方向键的连续移动
+    final navDirection = _getNavigationDirection(key);
+    if (navDirection != null) {
+      if (event is KeyDownEvent) {
+        widget.overlayState.startNavigation(navDirection);
+      } else if (event is KeyUpEvent) {
+        widget.overlayState.stopNavigation(navDirection);
+      }
+      return;
+    }
+
+    // 其他按键只处理 KeyDownEvent
+    if (event is! KeyDownEvent) return;
+
+    // 简单的修饰键检查
     final hasAlt = HardwareKeyboard.instance.isAltPressed;
     final hasCtrl = HardwareKeyboard.instance.isControlPressed;
     final hasShift = HardwareKeyboard.instance.isShiftPressed;
 
-    // 调试输出
-    print(
-        'Overlay Key: ${key.keyLabel}, keyId: ${key.keyId}, Alt: $hasAlt, Ctrl: $hasCtrl, Shift: $hasShift');
-
     // 检查每个动作
     for (final entry in _hotkeys.entries) {
-      final config = entry.value;
-      // Debug: 检查 togglePlayPause 的配置
-      if (entry.key == HotkeyAction.togglePlayPause) {
-        print(
-            'Checking togglePlayPause: configKey=${config.key.keyId}, eventKey=${key.keyId}, configMods=${config.modifiers}');
-      }
+      // 跳过方向键动作（已在上面处理）
+      if (_isNavigationAction(entry.key)) continue;
+
       if (_matchesHotkey(key, hasAlt, hasCtrl, hasShift, entry.value)) {
-        print('Matched action: ${entry.key}');
         _executeAction(entry.key);
         return;
       }
@@ -585,12 +638,26 @@ class _OverlayWindowState extends State<OverlayWindow> {
 
     // 直接检查 Alt+P 用于视频播放/暂停 (备用方案)
     if (hasAlt && !hasCtrl && !hasShift && key == LogicalKeyboardKey.keyP) {
-      print('Direct match: Alt+P for video play/pause');
       _executeAction(HotkeyAction.togglePlayPause);
       return;
     }
+  }
 
-    print('No hotkey matched for key: ${key.keyLabel}');
+  /// 获取按键对应的导航方向
+  NavigationDirection? _getNavigationDirection(LogicalKeyboardKey key) {
+    if (key == LogicalKeyboardKey.arrowUp) return NavigationDirection.up;
+    if (key == LogicalKeyboardKey.arrowDown) return NavigationDirection.down;
+    if (key == LogicalKeyboardKey.arrowLeft) return NavigationDirection.left;
+    if (key == LogicalKeyboardKey.arrowRight) return NavigationDirection.right;
+    return null;
+  }
+
+  /// 判断是否是导航动作
+  bool _isNavigationAction(HotkeyAction action) {
+    return action == HotkeyAction.navigateUp ||
+        action == HotkeyAction.navigateDown ||
+        action == HotkeyAction.navigateLeft ||
+        action == HotkeyAction.navigateRight;
   }
 
   /// 判断是否是修饰键

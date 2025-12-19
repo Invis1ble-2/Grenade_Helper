@@ -213,6 +213,8 @@ Future<void> _runOverlayWindow(
   final overlayState = OverlayStateService(isar);
   // 设置初始透明度
   overlayState.setOpacity(settingsService.getOverlayOpacity());
+  // 设置初始导航速度
+  overlayState.setNavSpeedLevel(settingsService.getOverlayNavSpeed());
 
   // 从参数中加载初始地图信息（如果有的话）
   final initialMapId = args?['map_id'] as int?;
@@ -295,6 +297,13 @@ Future<void> _runOverlayWindow(
       case 'update_opacity':
         final opacity = call.arguments?['opacity'] as double? ?? 0.9;
         overlayState.setOpacity(opacity);
+        return 'ok';
+      // 更新导航速度（设置界面调整时，直接通过 IPC 传递值）
+      case 'update_nav_speed':
+        // JSON 序列化可能将 int 变成 num，使用 round() 避免精度问题
+        final speedValue = call.arguments?['speed'];
+        final speed = (speedValue is num) ? speedValue.round() : 3;
+        overlayState.setNavSpeedLevel(speed);
         return 'ok';
       // 获取悬浮窗可见状态（供主窗口轮询）
       case 'get_visibility':

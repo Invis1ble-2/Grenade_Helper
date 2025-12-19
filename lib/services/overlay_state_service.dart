@@ -27,6 +27,47 @@ class OverlayStateService extends ChangeNotifier {
     GrenadeType.he,
   };
 
+  // 准星位置 (0.0-1.0 比例坐标)
+  double _crosshairX = 0.5;
+  double _crosshairY = 0.5;
+  bool _isSnapped = false;
+
+  // 准星移动常量
+  static const double _snapThreshold = 0.02; // 吸附阈值
+  static const int _moveIntervalMs = 16; // 约60fps
+
+  // 速度档位配置 (1-5档对应的速度值)
+  static const List<double> _speedLevels = [
+    0.0025, // 1档 - 最慢
+    0.003, // 2档
+    0.004, // 3档 - 当前默认
+    0.0045, // 4档
+    0.005, // 5档 - 最快
+  ];
+
+  // 当前速度档位 (1-5)
+  int _navSpeedLevel = 3;
+
+  /// 获取当前速度档位
+  int get navSpeedLevel => _navSpeedLevel;
+
+  /// 设置速度档位 (1-5)
+  void setNavSpeedLevel(int level) {
+    _navSpeedLevel = level.clamp(1, 5);
+    print(
+        '[OverlayStateService] setNavSpeedLevel: $level -> $_navSpeedLevel, speed: ${_speedLevels[_navSpeedLevel - 1]}');
+  }
+
+  /// 获取当前速度值
+  double get _moveSpeed {
+    final speed = _speedLevels[_navSpeedLevel - 1];
+    return speed;
+  }
+
+  // 连续移动状态
+  final Set<NavigationDirection> _activeDirections = {};
+  Timer? _moveTimer;
+
   // 记忆：最后查看的道具 ID（按地图分组）
   final Map<int, int> _lastViewedGrenadeByMap = {};
 
@@ -66,6 +107,7 @@ class OverlayStateService extends ChangeNotifier {
 
   @override
   void dispose() {
+    _moveTimer?.cancel();
     _grenadeSubscription?.cancel();
     super.dispose();
   }
@@ -78,6 +120,11 @@ class OverlayStateService extends ChangeNotifier {
   int get currentGrenadeIndex => _currentGrenadeIndex;
   int get currentStepIndex => _currentStepIndex;
   Set<int> get activeFilters => _activeFilters;
+
+  // 准星位置 getters
+  double get crosshairX => _crosshairX;
+  double get crosshairY => _crosshairY;
+  bool get isSnapped => _isSnapped;
 
   Grenade? get currentGrenade {
     if (_filteredGrenades.isEmpty ||
@@ -141,6 +188,9 @@ class OverlayStateService extends ChangeNotifier {
       _currentGrenadeIndex = 0;
     }
     _currentStepIndex = 0;
+
+    // 初始化准星位置到当前道具位置
+    _initCrosshairPosition();
 
     notifyListeners();
   }
@@ -298,61 +348,168 @@ class OverlayStateService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 空间导航 - 向指定方向导航
-  void navigateDirection(NavigationDirection direction) {
-    if (currentGrenade == null || _filteredGrenades.isEmpty) return;
+  /// 初始化准星位置到当前道具位置
+  void _initCrosshairPosition() {
+    final grenade = currentGrenade;
+    if (grenade != null) {
+      _crosshairX = grenade.xRatio;
+      _crosshairY = grenade.yRatio;
+      _isSnapped = true;
+    } else {
+      // 无道具时准星在地图中心
+      _crosshairX = 0.5;
+      _crosshairY = 0.5;
+      _isSnapped = false;
+    }
+  }
 
-    final current = currentGrenade!;
+  /// 检查并吸附到最近的点位
+  void _checkAndSnapToPoint() {
+    if (_filteredGrenades.isEmpty) {
+      _isSnapped = false;
+      return;
+    }
+
     Grenade? nearest;
     double minDist = double.infinity;
 
-    for (int i = 0; i < _filteredGrenades.length; i++) {
-      if (i == _currentGrenadeIndex) continue;
-
-      final g = _filteredGrenades[i];
-      final dx = g.xRatio - current.xRatio;
-      final dy = g.yRatio - current.yRatio;
+    for (final g in _filteredGrenades) {
+      final dx = g.xRatio - _crosshairX;
+      final dy = g.yRatio - _crosshairY;
       final dist = dx * dx + dy * dy;
-      final absDx = dx.abs();
-      final absDy = dy.abs();
 
-      // 跳过同一个点位（cluster）内的道具
-      if (dist < _clusterThreshold * _clusterThreshold) continue;
-
-      // 检查是否在正确的方向上，并且主要偏向该方向（角度 < 45°）
-      bool isInDirection = false;
-      switch (direction) {
-        case NavigationDirection.up:
-          // 上方：dy < 0 且 |dy| > |dx|（主要是向上，不是斜向）
-          isInDirection = dy < -0.01 && absDy > absDx;
-          break;
-        case NavigationDirection.down:
-          // 下方：dy > 0 且 |dy| > |dx|
-          isInDirection = dy > 0.01 && absDy > absDx;
-          break;
-        case NavigationDirection.left:
-          // 左方：dx < 0 且 |dx| > |dy|
-          isInDirection = dx < -0.01 && absDx > absDy;
-          break;
-        case NavigationDirection.right:
-          // 右方：dx > 0 且 |dx| > |dy|
-          isInDirection = dx > 0.01 && absDx > absDy;
-          break;
-      }
-
-      if (isInDirection) {
-        if (dist < minDist) {
-          minDist = dist;
-          nearest = g;
-        }
+      if (dist < minDist) {
+        minDist = dist;
+        nearest = g;
       }
     }
 
-    if (nearest != null) {
+    // 检查是否在吸附范围内
+    if (nearest != null && minDist < _snapThreshold * _snapThreshold) {
+      // 吸附到点位
+      _crosshairX = nearest.xRatio;
+      _crosshairY = nearest.yRatio;
       _currentGrenadeIndex = _filteredGrenades.indexOf(nearest);
       _currentStepIndex = 0;
-      notifyListeners();
+      _isSnapped = true;
+    } else {
+      // 未吸附
+      _isSnapped = false;
     }
+  }
+
+  /// 开始向指定方向移动（按下按键时调用）
+  void startNavigation(NavigationDirection direction) {
+    _activeDirections.add(direction);
+    _startMoveTimer();
+  }
+
+  /// 停止向指定方向移动（松开按键时调用）
+  void stopNavigation(NavigationDirection direction) {
+    _activeDirections.remove(direction);
+    if (_activeDirections.isEmpty) {
+      _stopMoveTimer();
+    }
+  }
+
+  /// 停止所有方向移动
+  void stopAllNavigation() {
+    _activeDirections.clear();
+    _stopMoveTimer();
+  }
+
+  /// 启动移动定时器
+  void _startMoveTimer() {
+    if (_moveTimer != null) return;
+
+    _moveTimer = Timer.periodic(
+      Duration(milliseconds: _moveIntervalMs),
+      (_) => _updateCrosshairPosition(),
+    );
+    // 立即执行一次
+    _updateCrosshairPosition();
+  }
+
+  /// 停止移动定时器
+  void _stopMoveTimer() {
+    _moveTimer?.cancel();
+    _moveTimer = null;
+  }
+
+  /// 更新准星位置（每帧调用）
+  void _updateCrosshairPosition() {
+    if (_activeDirections.isEmpty) return;
+
+    double dx = 0;
+    double dy = 0;
+
+    // 计算移动向量（支持同时按多个方向键）
+    for (final dir in _activeDirections) {
+      switch (dir) {
+        case NavigationDirection.up:
+          dy -= _moveSpeed;
+          break;
+        case NavigationDirection.down:
+          dy += _moveSpeed;
+          break;
+        case NavigationDirection.left:
+          dx -= _moveSpeed;
+          break;
+        case NavigationDirection.right:
+          dx += _moveSpeed;
+          break;
+      }
+    }
+
+    // 对角线移动时归一化速度
+    if (dx != 0 && dy != 0) {
+      final factor = 0.707; // 1/sqrt(2)
+      dx *= factor;
+      dy *= factor;
+    }
+
+    // 如果当前已吸附，先解除吸附状态才能移动
+    // 否则每帧都会被 _checkAndSnapToPoint 拉回吸附点
+    if (_isSnapped) {
+      _isSnapped = false;
+    }
+
+    // 应用移动
+    _crosshairX = (_crosshairX + dx).clamp(0.0, 1.0);
+    _crosshairY = (_crosshairY + dy).clamp(0.0, 1.0);
+
+    // 检查并吸附到最近点位
+    _checkAndSnapToPoint();
+    notifyListeners();
+  }
+
+  /// 单次移动（兼容旧的单次按键调用，如全局热键）
+  void navigateDirection(NavigationDirection direction) {
+    // 单次移动步长根据速度档位动态调整（约等于按住80ms的移动量）
+    final singleMoveStep = _moveSpeed * 8;
+
+    // 如果当前已吸附，先解除吸附状态才能移动
+    if (_isSnapped) {
+      _isSnapped = false;
+    }
+
+    switch (direction) {
+      case NavigationDirection.up:
+        _crosshairY = (_crosshairY - singleMoveStep).clamp(0.0, 1.0);
+        break;
+      case NavigationDirection.down:
+        _crosshairY = (_crosshairY + singleMoveStep).clamp(0.0, 1.0);
+        break;
+      case NavigationDirection.left:
+        _crosshairX = (_crosshairX - singleMoveStep).clamp(0.0, 1.0);
+        break;
+      case NavigationDirection.right:
+        _crosshairX = (_crosshairX + singleMoveStep).clamp(0.0, 1.0);
+        break;
+    }
+
+    _checkAndSnapToPoint();
+    notifyListeners();
   }
 
   /// 直接设置道具索引

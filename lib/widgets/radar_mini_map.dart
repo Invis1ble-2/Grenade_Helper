@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import '../models.dart';
 
-/// 雷达小地图组件 - 以当前道具为中心显示放大的地图区域
-class RadarMiniMap extends StatelessWidget {
+/// 雷达小地图组件 - 以准星为中心显示放大的地图区域（带平滑动画）
+class RadarMiniMap extends StatefulWidget {
   final String mapAssetPath;
   final Grenade? currentGrenade;
   final List<Grenade> allGrenades;
@@ -10,21 +11,83 @@ class RadarMiniMap extends StatelessWidget {
   final double height;
   final double zoomLevel;
 
+  // 准星位置参数
+  final double crosshairX;
+  final double crosshairY;
+  final bool isSnapped;
+
   const RadarMiniMap({
     super.key,
     required this.mapAssetPath,
     required this.currentGrenade,
     required this.allGrenades,
-    this.width = 400, // 更宽
-    this.height = 150, // 更矮 - 长方形
+    required this.crosshairX,
+    required this.crosshairY,
+    required this.isSnapped,
+    this.width = 400,
+    this.height = 150,
     this.zoomLevel = 1.3,
   });
 
   @override
+  State<RadarMiniMap> createState() => _RadarMiniMapState();
+}
+
+class _RadarMiniMapState extends State<RadarMiniMap>
+    with SingleTickerProviderStateMixin {
+  late Ticker _ticker;
+
+  // 当前动画位置（每帧平滑插值）
+  double _animatedX = 0.5;
+  double _animatedY = 0.5;
+
+  // 平滑追踪速度（0.0-1.0，值越大追踪越快）
+  static const double _smoothFactor = 0.15;
+
+  @override
+  void initState() {
+    super.initState();
+    _animatedX = widget.crosshairX;
+    _animatedY = widget.crosshairY;
+
+    // 使用 Ticker 驱动每帧更新
+    _ticker = createTicker(_onTick)..start();
+  }
+
+  void _onTick(Duration elapsed) {
+    // 计算当前位置与目标位置的差距
+    final dx = widget.crosshairX - _animatedX;
+    final dy = widget.crosshairY - _animatedY;
+
+    // 如果差距很小，直接到达目标位置
+    if (dx.abs() < 0.0001 && dy.abs() < 0.0001) {
+      if (_animatedX != widget.crosshairX || _animatedY != widget.crosshairY) {
+        setState(() {
+          _animatedX = widget.crosshairX;
+          _animatedY = widget.crosshairY;
+        });
+      }
+      return;
+    }
+
+    // 平滑插值：每帧向目标位置移动一定比例
+    setState(() {
+      _animatedX += dx * _smoothFactor;
+      _animatedY += dy * _smoothFactor;
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Container(
-      width: width,
-      height: height,
+      width: widget.width,
+      height: widget.height,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
         border:
@@ -41,15 +104,15 @@ class RadarMiniMap extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
         child: Stack(
           children: [
-            // 地图背景（放大并居中于当前点位）
-            _buildZoomedMap(),
+            // 地图背景（放大并居中于准星位置）
+            _buildZoomedMap(_animatedX, _animatedY),
 
             // 其他道具点位
-            ..._buildOtherPoints(),
+            ..._buildOtherPoints(_animatedX, _animatedY),
 
-            // 当前道具点位（中心，带动画）
-            if (currentGrenade != null)
-              Center(
+            // 中心吸附点（仅在吸附时显示脉冲点）
+            if (widget.isSnapped)
+              const Center(
                 child: _PulsingDot(color: Colors.orange, size: 14),
               ),
 
@@ -58,16 +121,18 @@ class RadarMiniMap extends StatelessWidget {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
-                  color: Colors.orange.withValues(alpha: 0.3),
+                  color: widget.isSnapped
+                      ? Colors.orange.withValues(alpha: 0.3)
+                      : Colors.white.withValues(alpha: 0.2),
                   width: 1,
                 ),
               ),
             ),
 
-            // 十字准星
+            // 十字准星引导线
             CustomPaint(
-              size: Size(width, height),
-              painter: _CrosshairPainter(),
+              size: Size(widget.width, widget.height),
+              painter: _CrosshairPainter(isSnapped: widget.isSnapped),
             ),
           ],
         ),
@@ -75,48 +140,29 @@ class RadarMiniMap extends StatelessWidget {
     );
   }
 
-  Widget _buildZoomedMap() {
-    if (currentGrenade == null) {
-      return Image.asset(
-        mapAssetPath,
-        fit: BoxFit.cover,
-        width: width,
-        height: height,
-        errorBuilder: (_, __, ___) => Container(
-          color: Colors.grey[900],
-          child: const Center(
-            child: Icon(Icons.map, size: 48, color: Colors.grey),
-          ),
-        ),
-      );
-    }
-
-    // 计算偏移量使当前点位居中
-    final centerX = currentGrenade!.xRatio;
-    final centerY = currentGrenade!.yRatio;
-
+  Widget _buildZoomedMap(double centerX, double centerY) {
     // 使用方形地图尺寸，取宽高中较大者确保覆盖整个容器
-    final mapSize = width > height ? width : height;
+    final mapSize = widget.width > widget.height ? widget.width : widget.height;
 
-    // 计算偏移量：让当前点位位于容器中心
+    // 计算偏移量：让准星位置位于容器中心
     // 地图以容器中心为基准点进行偏移
-    final offsetX = (0.5 - centerX) * mapSize * zoomLevel;
-    final offsetY = (0.5 - centerY) * mapSize * zoomLevel;
+    final offsetX = (0.5 - centerX) * mapSize * widget.zoomLevel;
+    final offsetY = (0.5 - centerY) * mapSize * widget.zoomLevel;
 
     return SizedBox(
-      width: width,
-      height: height,
+      width: widget.width,
+      height: widget.height,
       child: ClipRect(
         child: OverflowBox(
-          maxWidth: mapSize * zoomLevel,
-          maxHeight: mapSize * zoomLevel,
+          maxWidth: mapSize * widget.zoomLevel,
+          maxHeight: mapSize * widget.zoomLevel,
           child: Transform.translate(
             offset: Offset(offsetX, offsetY),
             child: Image.asset(
-              mapAssetPath,
+              widget.mapAssetPath,
               fit: BoxFit.cover,
-              width: mapSize * zoomLevel,
-              height: mapSize * zoomLevel,
+              width: mapSize * widget.zoomLevel,
+              height: mapSize * widget.zoomLevel,
               errorBuilder: (_, __, ___) => Container(
                 color: Colors.grey[900],
               ),
@@ -160,40 +206,37 @@ class RadarMiniMap extends StatelessWidget {
     return clusters;
   }
 
-  List<Widget> _buildOtherPoints() {
-    if (currentGrenade == null) return [];
-
-    final centerX = currentGrenade!.xRatio;
-    final centerY = currentGrenade!.yRatio;
-
+  List<Widget> _buildOtherPoints(double centerX, double centerY) {
     // 使用与 _buildZoomedMap 一致的地图尺寸
-    final mapSize = width > height ? width : height;
+    final mapSize = widget.width > widget.height ? widget.width : widget.height;
 
-    // 过滤掉与当前道具在同一 cluster（位置相近）的所有道具
-    final otherGrenades = allGrenades.where((g) {
-      if (g.id == currentGrenade!.id) return false;
-      // 检查是否与当前道具位置相近（在同一 cluster）
-      final dx = (g.xRatio - centerX).abs();
-      final dy = (g.yRatio - centerY).abs();
-      return dx * dx + dy * dy >= _clusterThreshold * _clusterThreshold;
-    }).toList();
-    final clusters = _clusterGrenades(otherGrenades);
+    // 聚合所有点位
+    var clusters = _clusterGrenades(widget.allGrenades);
+
+    // 如果已吸附，过滤掉包含当前道具的cluster（避免与中心脉冲点重复）
+    if (widget.isSnapped && widget.currentGrenade != null) {
+      clusters = clusters.where((cluster) {
+        return !cluster.any((g) => g.id == widget.currentGrenade!.id);
+      }).toList();
+    }
 
     return clusters.map((cluster) {
       // 使用第一个道具的位置作为cluster中心
       final centerGrenade = cluster.first;
-      final relX = (centerGrenade.xRatio - centerX) * mapSize * zoomLevel;
-      final relY = (centerGrenade.yRatio - centerY) * mapSize * zoomLevel;
+      final relX =
+          (centerGrenade.xRatio - centerX) * mapSize * widget.zoomLevel;
+      final relY =
+          (centerGrenade.yRatio - centerY) * mapSize * widget.zoomLevel;
 
       // 转换为容器坐标（以容器中心为原点）
-      final screenX = width / 2 + relX;
-      final screenY = height / 2 + relY;
+      final screenX = widget.width / 2 + relX;
+      final screenY = widget.height / 2 + relY;
 
       // 如果超出容器可见范围，不显示
       if (screenX < -10 ||
-          screenX > width + 10 ||
+          screenX > widget.width + 10 ||
           screenY < -10 ||
-          screenY > height + 10) {
+          screenY > widget.height + 10) {
         return const SizedBox.shrink();
       }
 
@@ -260,7 +303,57 @@ class RadarMiniMap extends StatelessWidget {
   }
 }
 
-/// 脉冲动画点
+/// 十字准星绘制器
+class _CrosshairPainter extends CustomPainter {
+  final bool isSnapped;
+
+  _CrosshairPainter({this.isSnapped = false});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = isSnapped
+          ? Colors.orange.withValues(alpha: 0.4)
+          : Colors.white.withValues(alpha: 0.3)
+      ..strokeWidth = 1;
+
+    final centerX = size.width / 2;
+    final centerY = size.height / 2;
+    const gap = 20.0;
+    const length = 10.0;
+
+    // 上
+    canvas.drawLine(
+      Offset(centerX, centerY - gap - length),
+      Offset(centerX, centerY - gap),
+      paint,
+    );
+    // 下
+    canvas.drawLine(
+      Offset(centerX, centerY + gap),
+      Offset(centerX, centerY + gap + length),
+      paint,
+    );
+    // 左
+    canvas.drawLine(
+      Offset(centerX - gap - length, centerY),
+      Offset(centerX - gap, centerY),
+      paint,
+    );
+    // 右
+    canvas.drawLine(
+      Offset(centerX + gap, centerY),
+      Offset(centerX + gap + length, centerY),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _CrosshairPainter oldDelegate) =>
+      oldDelegate.isSnapped != isSnapped;
+}
+
+/// 脉冲动画点（吸附时显示）
 class _PulsingDot extends StatefulWidget {
   final Color color;
   final double size;
@@ -318,47 +411,4 @@ class _PulsingDotState extends State<_PulsingDot>
       },
     );
   }
-}
-
-/// 十字准星绘制器
-class _CrosshairPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.3)
-      ..strokeWidth = 1;
-
-    final centerX = size.width / 2;
-    final centerY = size.height / 2;
-    const gap = 20.0;
-    const length = 10.0;
-
-    // 上
-    canvas.drawLine(
-      Offset(centerX, centerY - gap - length),
-      Offset(centerX, centerY - gap),
-      paint,
-    );
-    // 下
-    canvas.drawLine(
-      Offset(centerX, centerY + gap),
-      Offset(centerX, centerY + gap + length),
-      paint,
-    );
-    // 左
-    canvas.drawLine(
-      Offset(centerX - gap - length, centerY),
-      Offset(centerX - gap, centerY),
-      paint,
-    );
-    // 右
-    canvas.drawLine(
-      Offset(centerX + gap, centerY),
-      Offset(centerX + gap + length, centerY),
-      paint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

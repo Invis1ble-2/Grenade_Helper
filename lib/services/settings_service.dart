@@ -105,6 +105,8 @@ class SettingsService {
   static const String _keyMarkerMoveMode = 'marker_move_mode'; // 0=长按选定, 1=摇杆
   static const String _keyJoystickOpacity = 'joystick_opacity'; // 0.3-1.0
   static const String _keyJoystickSpeed = 'joystick_speed'; // 1-5档
+  static const String _keyOverlayNavSpeed =
+      'overlay_nav_speed'; // 1-5档（桌面端悬浮窗导航速度）
 
   SharedPreferences? _prefs;
 
@@ -250,4 +252,9 @@ class SettingsService {
   int getJoystickSpeed() => _prefs?.getInt(_keyJoystickSpeed) ?? 3;
   Future<void> setJoystickSpeed(int value) async =>
       await _prefs?.setInt(_keyJoystickSpeed, value);
+
+  /// 悬浮窗导航速度 (1=慢, 5=快)，默认3档
+  int getOverlayNavSpeed() => _prefs?.getInt(_keyOverlayNavSpeed) ?? 3;
+  Future<void> setOverlayNavSpeed(int value) async =>
+      await _prefs?.setInt(_keyOverlayNavSpeed, value);
 }

@@ -25,6 +25,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late Map<HotkeyAction, HotkeyConfig> _hotkeys;
   late double _overlayOpacity;
   late bool _closeToTray;
+  late int _overlayNavSpeed; // 悬浮窗导航速度 (1-5)
   // 摇杆相关设置（仅移动端）
   late int _markerMoveMode;
   late double _joystickOpacity;
@@ -44,6 +45,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _hotkeys = widget.settingsService!.getHotkeys();
       _overlayOpacity = widget.settingsService!.getOverlayOpacity();
       _closeToTray = widget.settingsService!.getCloseToTray();
+      _overlayNavSpeed = widget.settingsService!.getOverlayNavSpeed();
       _markerMoveMode = widget.settingsService!.getMarkerMoveMode();
       _joystickOpacity = widget.settingsService!.getJoystickOpacity();
       _joystickSpeed = widget.settingsService!.getJoystickSpeed();
@@ -52,6 +54,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _hotkeys = {};
       _overlayOpacity = 0.9;
       _closeToTray = true;
+      _overlayNavSpeed = 3;
       _markerMoveMode = 0;
       _joystickOpacity = 0.8;
       _joystickSpeed = 3;
@@ -222,6 +225,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     await widget.settingsService!.setOverlayOpacity(value);
                     // 通知悬浮窗刷新透明度（直接传递值）
                     sendOverlayCommand('update_opacity', {'opacity': value});
+                  },
+                ),
+              ),
+            ),
+            ListTile(
+              title: const Text('导航速度'),
+              subtitle: Text('$_overlayNavSpeed 档'),
+              trailing: SizedBox(
+                width: 200,
+                child: Slider(
+                  value: _overlayNavSpeed.toDouble(),
+                  min: 1,
+                  max: 5,
+                  divisions: 4,
+                  label: '$_overlayNavSpeed 档',
+                  onChanged: (value) async {
+                    // 使用 round() 避免浮点精度问题（如 0.999... -> 1）
+                    final speedLevel = value.round();
+                    setState(() => _overlayNavSpeed = speedLevel);
+                    await widget.settingsService!
+                        .setOverlayNavSpeed(speedLevel);
+                    // 通知悬浮窗刷新导航速度
+                    sendOverlayCommand(
+                        'update_nav_speed', {'speed': speedLevel});
                   },
                 ),
               ),
