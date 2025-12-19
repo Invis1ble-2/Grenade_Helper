@@ -781,10 +781,14 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                       step.title.isNotEmpty
                           ? step.title
                           : "步骤 ${step.stepIndex + 1}",
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
-                          color: Colors.white70)),
+                          color: Theme.of(context)
+                              .textTheme
+                              .bodyLarge
+                              ?.color
+                              ?.withOpacity(0.7))),
                 ),
                 if (isEditing) ...[
                   IconButton(
@@ -819,7 +823,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
               ],
             ),
           ),
-          const Divider(color: Colors.white10),
+          Divider(color: Theme.of(context).dividerColor),
           if (step.medias.isNotEmpty)
             // 图片/视频垂直排列
             Column(
@@ -843,8 +847,10 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
             padding: const EdgeInsets.all(16),
             child: Text(
               step.description.isEmpty ? "（暂无文字说明）" : step.description,
-              style: const TextStyle(
-                  fontSize: 15, height: 1.5, color: Colors.white),
+              style: TextStyle(
+                  fontSize: 15,
+                  height: 1.5,
+                  color: Theme.of(context).textTheme.bodyMedium?.color),
             ),
           ),
         ],

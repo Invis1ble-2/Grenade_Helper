@@ -628,7 +628,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                           ],
                         ),
                       ),
-                      const Divider(color: Colors.white24, height: 1),
+                      Divider(color: Theme.of(context).dividerColor, height: 1),
                       // 道具列表
                       Expanded(
                         child: ListView.builder(

@@ -80,7 +80,8 @@ class HomeScreen extends ConsumerWidget {
             height: 40,
             padding: const EdgeInsets.symmetric(horizontal: 10),
             decoration: BoxDecoration(
-                color: Colors.white10, borderRadius: BorderRadius.circular(20)),
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(20)),
             child: const Row(
               children: [
                 Icon(Icons.search, color: Colors.grey),
