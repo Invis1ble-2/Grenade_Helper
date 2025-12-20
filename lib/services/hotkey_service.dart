@@ -66,6 +66,9 @@ class HotkeyService {
       HotkeyAction.navigateRight,
       // 视频播放控制
       HotkeyAction.togglePlayPause,
+      // 速度调节
+      HotkeyAction.increaseNavSpeed,
+      HotkeyAction.decreaseNavSpeed,
     ];
 
     for (final action in overlayActions) {
@@ -224,6 +227,9 @@ class HotkeyService {
       LogicalKeyboardKey.arrowDown.keyId: PhysicalKeyboardKey.arrowDown,
       LogicalKeyboardKey.arrowLeft.keyId: PhysicalKeyboardKey.arrowLeft,
       LogicalKeyboardKey.arrowRight.keyId: PhysicalKeyboardKey.arrowRight,
+      // 等号和减号键
+      LogicalKeyboardKey.equal.keyId: PhysicalKeyboardKey.equal,
+      LogicalKeyboardKey.minus.keyId: PhysicalKeyboardKey.minus,
     };
     return mapping[logical.keyId];
   }

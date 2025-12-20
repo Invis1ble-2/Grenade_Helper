@@ -49,6 +49,9 @@ class HotkeyConfig {
     if (key == LogicalKeyboardKey.digit2) return '2';
     if (key == LogicalKeyboardKey.digit3) return '3';
     if (key == LogicalKeyboardKey.digit4) return '4';
+    // 符号键
+    if (key == LogicalKeyboardKey.equal) return '=';
+    if (key == LogicalKeyboardKey.minus) return '-';
     // 其他
     return key.keyLabel.isNotEmpty
         ? key.keyLabel.toUpperCase()
@@ -91,6 +94,8 @@ enum HotkeyAction {
   toggleHE, // 切换手雷过滤
   hideOverlay, // 隐藏悬浮窗
   togglePlayPause, // 播放/暂停视频
+  increaseNavSpeed, // 增加导航速度
+  decreaseNavSpeed, // 减少导航速度
 }
 
 /// 设置服务 - 管理用户设置和快捷键配置
@@ -191,6 +196,12 @@ class SettingsService {
       HotkeyAction.togglePlayPause: HotkeyConfig(
         key: LogicalKeyboardKey.keyP,
         modifiers: {LogicalKeyboardKey.alt},
+      ),
+      HotkeyAction.increaseNavSpeed: HotkeyConfig(
+        key: LogicalKeyboardKey.equal, // = 键
+      ),
+      HotkeyAction.decreaseNavSpeed: HotkeyConfig(
+        key: LogicalKeyboardKey.minus, // - 键
       ),
     };
   }
