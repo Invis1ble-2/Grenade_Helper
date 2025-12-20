@@ -435,22 +435,78 @@ class OverlayWindowState extends State<OverlayWindow> {
 
     final medias = currentStep.medias.toList();
 
+    if (medias.isEmpty) {
+      return Container(
+        height: 350,
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.3),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Center(
+          child: Icon(Icons.image_not_supported, size: 48, color: Colors.grey),
+        ),
+      );
+    }
+
+    final media = medias.first;
+
+    // 对于图片，检测是否为竖屏图片并动态调整高度
+    if (media.type == MediaType.image) {
+      return FutureBuilder<Size?>(
+        future: _getImageSize(media.localPath),
+        builder: (context, snapshot) {
+          // 根据图片比例决定高度：竖屏图片使用更大高度
+          double height = 400;
+          bool isPortrait = false;
+
+          if (snapshot.hasData && snapshot.data != null) {
+            final size = snapshot.data!;
+            // 只有高度超过宽度 200px 以上才判定为竖屏图片
+            isPortrait = size.height > size.width + 200;
+            if (isPortrait) {
+              // 竖屏图片使用更大的高度
+              height = 450;
+            }
+          }
+
+          return Container(
+            height: height,
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.3),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: _buildMediaView(media, isPortrait: isPortrait),
+          );
+        },
+      );
+    }
+
+    // 非图片（视频）使用默认高度
     return Container(
-      height: 350,
+      height: 400,
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: medias.isEmpty
-          ? const Center(
-              child:
-                  Icon(Icons.image_not_supported, size: 48, color: Colors.grey),
-            )
-          : _buildMediaView(medias.first),
+      child: _buildMediaView(media),
     );
   }
 
-  Widget _buildMediaView(StepMedia media) {
+  /// 获取图片尺寸
+  Future<Size?> _getImageSize(String path) async {
+    try {
+      final file = File(path);
+      if (!file.existsSync()) return null;
+
+      final bytes = await file.readAsBytes();
+      final image = await decodeImageFromList(bytes);
+      return Size(image.width.toDouble(), image.height.toDouble());
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Widget _buildMediaView(StepMedia media, {bool isPortrait = false}) {
     final file = File(media.localPath);
     if (!file.existsSync()) {
       return const Center(
@@ -459,16 +515,27 @@ class OverlayWindowState extends State<OverlayWindow> {
     }
 
     if (media.type == MediaType.image) {
+      Widget imageWidget = Image.file(
+        file,
+        fit: BoxFit.contain,
+        width: double.infinity,
+        height: double.infinity,
+        errorBuilder: (_, __, ___) => const Center(
+          child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
+        ),
+      );
+
+      // 竖屏图片放大显示，使用 Transform.scale 控制放大比例
+      if (isPortrait) {
+        imageWidget = Transform.scale(
+          scale: 1.5, // 调整此值：1.0=不放大, 1.5=放大50%
+          child: imageWidget,
+        );
+      }
+
       return ClipRRect(
         borderRadius: BorderRadius.circular(12),
-        child: Image.file(
-          file,
-          fit: BoxFit.contain,
-          width: double.infinity,
-          errorBuilder: (_, __, ___) => const Center(
-            child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
-          ),
-        ),
+        child: imageWidget,
       );
     }
 
@@ -503,16 +570,7 @@ class OverlayWindowState extends State<OverlayWindow> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (currentStep.title.isNotEmpty)
-            Text(
-              currentStep.title,
-              style: const TextStyle(
-                color: Colors.orange,
-                fontWeight: FontWeight.bold,
-                fontSize: 10,
-              ),
-            ),
-          if (currentStep.title.isNotEmpty) const SizedBox(height: 4),
+          // 步骤标题已移动到底部导航栏
           Text(
             currentStep.description.isNotEmpty
                 ? currentStep.description
@@ -583,14 +641,12 @@ class OverlayWindowState extends State<OverlayWindow> {
                 color: Colors.orange,
               ),
 
-              // 步骤切换
-              _buildNavRow(
-                label: '步骤',
-                current: state.currentStepIndex + 1,
-                total: steps.length,
+              // 步骤切换（显示步骤标题）
+              _buildStepNavRow(
+                steps: steps,
+                currentIndex: state.currentStepIndex,
                 onPrev: state.prevStep,
                 onNext: state.nextStep,
-                color: Colors.blue,
               ),
             ],
           ),
@@ -692,6 +748,42 @@ class OverlayWindowState extends State<OverlayWindow> {
     );
   }
 
+  /// 步骤导航（显示步骤标题）
+  Widget _buildStepNavRow({
+    required List<GrenadeStep> steps,
+    required int currentIndex,
+    required VoidCallback onPrev,
+    required VoidCallback onNext,
+  }) {
+    final currentStep =
+        currentIndex < steps.length ? steps[currentIndex] : null;
+    final title = currentStep?.title ?? '';
+    final displayTitle = title.isEmpty ? '步骤' : title;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          icon: const Icon(Icons.chevron_left, size: 22),
+          color: Colors.blue,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          onPressed: onPrev,
+        ),
+        Text(
+          '$displayTitle ${currentIndex + 1}/${steps.length}',
+          style: const TextStyle(color: Colors.white, fontSize: 13),
+        ),
+        IconButton(
+          icon: const Icon(Icons.chevron_right, size: 22),
+          color: Colors.blue,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          onPressed: onNext,
+        ),
+      ],
+    );
+  }
   // === 快捷键处理 ===
 
   // === 快捷键处理 ===

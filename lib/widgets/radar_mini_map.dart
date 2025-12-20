@@ -42,7 +42,8 @@ class _RadarMiniMapState extends State<RadarMiniMap>
   double _animatedY = 0.5;
 
   // 平滑追踪速度（0.0-1.0，值越大追踪越快）
-  static const double _smoothFactor = 0.15;
+  // 0.35 提供快速但仍平滑的过渡
+  static const double _smoothFactor = 0.35;
 
   @override
   void initState() {
@@ -60,7 +61,7 @@ class _RadarMiniMapState extends State<RadarMiniMap>
     final dy = widget.crosshairY - _animatedY;
 
     // 如果差距很小，直接到达目标位置
-    if (dx.abs() < 0.0001 && dy.abs() < 0.0001) {
+    if (dx.abs() < 0.001 && dy.abs() < 0.001) {
       if (_animatedX != widget.crosshairX || _animatedY != widget.crosshairY) {
         setState(() {
           _animatedX = widget.crosshairX;
@@ -85,6 +86,14 @@ class _RadarMiniMapState extends State<RadarMiniMap>
 
   @override
   Widget build(BuildContext context) {
+    // 检查动画是否已到达目标位置（用于延迟显示脉冲点，避免动画过程中的抖动）
+    final dx = (widget.crosshairX - _animatedX).abs();
+    final dy = (widget.crosshairY - _animatedY).abs();
+    final animationSettled = dx < 0.005 && dy < 0.005;
+
+    // 只有在吸附状态且动画已到达目标时才显示脉冲点
+    final showPulsingDot = widget.isSnapped && animationSettled;
+
     return Container(
       width: widget.width,
       height: widget.height,
@@ -110,8 +119,8 @@ class _RadarMiniMapState extends State<RadarMiniMap>
             // 其他道具点位
             ..._buildOtherPoints(_animatedX, _animatedY),
 
-            // 中心吸附点（仅在吸附时显示脉冲点）
-            if (widget.isSnapped)
+            // 中心吸附点（仅在吸附且动画完成时显示脉冲点）
+            if (showPulsingDot)
               const Center(
                 child: _PulsingDot(color: Colors.orange, size: 14),
               ),

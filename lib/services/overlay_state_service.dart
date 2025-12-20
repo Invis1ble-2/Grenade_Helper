@@ -397,35 +397,99 @@ class OverlayStateService extends ChangeNotifier {
     }
   }
 
-  /// 检查点位吸附（支持平滑移动避让）
+  /// 将道具按位置聚合成 cluster（用于导航吸附逻辑）
+  /// 注意：使用 _snapThreshold（动态阈值）而非 _clusterThreshold（显示阈值）
+  /// 这样导航时的 cluster 分组与逃离阈值保持一致
+  List<List<Grenade>> _clusterGrenades() {
+    if (_filteredGrenades.isEmpty) return [];
+
+    final List<List<Grenade>> clusters = [];
+    final used = <int>{};
+
+    // 使用 _snapThreshold 作为导航用的 cluster 阈值
+    final clusterDist = _snapThreshold;
+
+    for (int i = 0; i < _filteredGrenades.length; i++) {
+      if (used.contains(i)) continue;
+
+      final cluster = <Grenade>[_filteredGrenades[i]];
+      used.add(i);
+
+      for (int j = i + 1; j < _filteredGrenades.length; j++) {
+        if (used.contains(j)) continue;
+
+        final dx =
+            (_filteredGrenades[i].xRatio - _filteredGrenades[j].xRatio).abs();
+        final dy =
+            (_filteredGrenades[i].yRatio - _filteredGrenades[j].yRatio).abs();
+        if (dx * dx + dy * dy < clusterDist * clusterDist) {
+          cluster.add(_filteredGrenades[j]);
+          used.add(j);
+        }
+      }
+
+      clusters.add(cluster);
+    }
+
+    return clusters;
+  }
+
+  /// 检查点位吸附（基于 cluster 中心点）
+  /// [ignoreCurrent] - 如果为 true，则忽略当前 cluster（用于逃离吸附）
+  /// 注意：cluster 的逃离阈值使用 _snapThreshold（动态，基于速度档位），
+  /// 而不是 _clusterThreshold（固定，仅用于视觉显示聚合）
   void _checkAndSnapToPointEx({bool ignoreCurrent = false}) {
     if (_filteredGrenades.isEmpty) {
       _isSnapped = false;
       return;
     }
 
-    Grenade? nearest;
+    final clusters = _clusterGrenades();
+    if (clusters.isEmpty) {
+      _isSnapped = false;
+      return;
+    }
+
+    // 获取当前 cluster 的中心坐标（用于忽略判断）
+    final currentX = currentGrenade?.xRatio;
+    final currentY = currentGrenade?.yRatio;
+
+    List<Grenade>? nearestCluster;
     double minDist = double.infinity;
 
-    final currentTargetId = currentGrenade?.id;
+    for (final cluster in clusters) {
+      // 使用 cluster 第一个元素作为中心（与 _clusterGrenades 的构建逻辑和 RadarMiniMap 的显示逻辑保持一致）
+      // 之前使用平均值会导致吸附点（first）与引力中心（average）不重合，导致移动时可能反而更靠近引力中心而无法逃离
+      final centerPoint = cluster.first;
+      final centerX = centerPoint.xRatio;
+      final centerY = centerPoint.yRatio;
 
-    for (final g in _filteredGrenades) {
-      // 如果要求忽略当前点位（用于逃离吸附），则跳过
-      if (ignoreCurrent && g.id == currentTargetId) continue;
+      // 如果要求忽略当前 cluster，检查是否是当前所在的 cluster
+      // 使用 _snapThreshold（动态阈值）而不是 _clusterThreshold（显示阈值）
+      if (ignoreCurrent && currentX != null && currentY != null) {
+        final clusterDx = (centerX - currentX).abs();
+        final clusterDy = (centerY - currentY).abs();
+        if (clusterDx * clusterDx + clusterDy * clusterDy <
+            _snapThreshold * _snapThreshold) {
+          continue; // 跳过当前 cluster
+        }
+      }
 
-      final dx = g.xRatio - _crosshairX;
-      final dy = g.yRatio - _crosshairY;
+      // 计算准星到 cluster 中心的距离
+      final dx = centerX - _crosshairX;
+      final dy = centerY - _crosshairY;
       final dist = dx * dx + dy * dy;
 
       if (dist < minDist) {
         minDist = dist;
-        nearest = g;
+        nearestCluster = cluster;
       }
     }
 
     // 检查是否在吸附范围内
-    if (nearest != null && minDist < _snapThreshold * _snapThreshold) {
-      // 吸附到点位
+    if (nearestCluster != null && minDist < _snapThreshold * _snapThreshold) {
+      // 吸附到 cluster 的第一个道具（作为代表）
+      final nearest = nearestCluster.first;
       _crosshairX = nearest.xRatio;
       _crosshairY = nearest.yRatio;
       _currentGrenadeIndex = _filteredGrenades.indexOf(nearest);
@@ -562,9 +626,11 @@ class OverlayStateService extends ChangeNotifier {
       dy *= factor;
     }
 
-    // 如果当前已吸附，先解除吸附状态才能移动
-    // 否则每帧都会被 _checkAndSnapToPoint 拉回吸附点
+    // 如果当前已吸附，开始逃离时减速（增加吸附粘性）
+    // 减速因子 0.8 意味着刚开始移动时只有 80% 的速度
     if (_isSnapped) {
+      dx *= 0.5;
+      dy *= 0.5;
       _isSnapped = false;
     }
 
@@ -579,8 +645,20 @@ class OverlayStateService extends ChangeNotifier {
 
   /// 单次移动（兼容旧的单次按键调用，如全局热键）
   void navigateDirection(NavigationDirection direction) {
-    // 单次移动步长根据速度档位动态调整（约等于按住80ms的移动量）
-    final singleMoveStep = _moveSpeed * 8;
+    // 记录移动前是否处于吸附状态
+    final wasSnapped = _isSnapped;
+
+    // 基础移动步长
+    double step = _moveSpeed * 8;
+
+    // 如果是从吸附状态开始移动，强制步长大于吸附阈值，确保逃离
+    if (wasSnapped) {
+      // 1.5倍吸附阈值，确保一步移出引力圈（_checkAndSnapToPointEx 判断距离 < _snapThreshold）
+      final escapeStep = _snapThreshold * 1.5;
+      if (step < escapeStep) {
+        step = escapeStep;
+      }
+    }
 
     // 如果当前已吸附，先解除吸附状态才能移动
     if (_isSnapped) {
@@ -589,20 +667,22 @@ class OverlayStateService extends ChangeNotifier {
 
     switch (direction) {
       case NavigationDirection.up:
-        _crosshairY = (_crosshairY - singleMoveStep).clamp(0.0, 1.0);
+        _crosshairY = (_crosshairY - step).clamp(0.0, 1.0);
         break;
       case NavigationDirection.down:
-        _crosshairY = (_crosshairY + singleMoveStep).clamp(0.0, 1.0);
+        _crosshairY = (_crosshairY + step).clamp(0.0, 1.0);
         break;
       case NavigationDirection.left:
-        _crosshairX = (_crosshairX - singleMoveStep).clamp(0.0, 1.0);
+        _crosshairX = (_crosshairX - step).clamp(0.0, 1.0);
         break;
       case NavigationDirection.right:
-        _crosshairX = (_crosshairX + singleMoveStep).clamp(0.0, 1.0);
+        _crosshairX = (_crosshairX + step).clamp(0.0, 1.0);
         break;
     }
 
-    _checkAndSnapToPointEx(ignoreCurrent: false);
+    // 如果之前是吸附状态，忽略当前 cluster 以便能逃离
+    // 如果之前不是吸附状态，则正常检测所有点位
+    _checkAndSnapToPointEx(ignoreCurrent: wasSnapped);
     notifyListeners();
   }
 
