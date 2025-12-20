@@ -231,13 +231,18 @@ class SettingsService {
 
   /// 获取悬浮窗尺寸像素值
   (double width, double height) getOverlaySizePixels() {
-    switch (getOverlaySize()) {
+    return calculateSizePixels(getOverlaySize());
+  }
+
+  /// 静态方法：根据尺寸索引计算像素值
+  static (double width, double height) calculateSizePixels(int sizeIndex) {
+    switch (sizeIndex) {
       case 0:
-        return (350.0, 300.0); // 小
+        return (450.0, 760.0); // 小（窄长）
       case 2:
-        return (550.0, 500.0); // 大
+        return (600.0, 950.0); // 大
       default:
-        return (450.0, 400.0); // 中（默认）
+        return (500.0, 820.0); // 中（默认，窄长）
     }
   }
 

@@ -97,10 +97,6 @@ class OverlayWindowState extends State<OverlayWindow> {
           color: const Color(0xFF1B1E23),
           child: Container(
             // 移除固定尺寸，让容器填满窗口
-            constraints: const BoxConstraints(
-              minWidth: 600,
-              minHeight: 750,
-            ),
             decoration: BoxDecoration(
               color: const Color(0xFF1B1E23),
               borderRadius: BorderRadius.circular(16),

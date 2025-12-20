@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:isar_community/isar.dart';
+import 'package:window_manager/window_manager.dart';
 import '../models.dart';
+import 'settings_service.dart';
 
 /// 悬浮窗状态服务 - 管理悬浮窗与主窗口的状态同步
 class OverlayStateService extends ChangeNotifier {
@@ -136,6 +139,23 @@ class OverlayStateService extends ChangeNotifier {
   /// 设置悬浮窗透明度（由 IPC 调用）
   void setOpacity(double value) {
     _overlayOpacity = value;
+    notifyListeners();
+  }
+
+  // 悬浮窗尺寸索引 (0=小, 1=中, 2=大)
+  int _overlaySizeIndex = 1;
+  int get overlaySizeIndex => _overlaySizeIndex;
+
+  /// 设置悬浮窗尺寸并调整窗口大小（由 IPC 调用）
+  Future<void> setOverlaySize(int index) async {
+    _overlaySizeIndex = index;
+    final s = SettingsService.calculateSizePixels(index);
+    print('[OverlayStateService] Resizing window to: ${s.$1}x${s.$2}');
+    try {
+      await windowManager.setSize(Size(s.$1, s.$2));
+    } catch (e) {
+      print('[OverlayStateService] Error resizing window: $e');
+    }
     notifyListeners();
   }
 

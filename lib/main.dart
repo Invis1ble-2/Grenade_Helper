@@ -213,13 +213,20 @@ Future<void> _runMainWindow() async {
 /// 运行悬浮窗（作为独立窗口）
 Future<void> _runOverlayWindow(
     WindowController controller, Map<String, dynamic>? args) async {
-  // 初始化窗口管理器
+  // 1. 确保窗口管理器已初始化
   await windowManager.ensureInitialized();
 
-  // 配置无边框窗口
-  const windowOptions = WindowOptions(
-    size: Size(600, 750),
-    minimumSize: Size(500, 600),
+  // 2. 初始化设置服务 (需要先初始化以获取窗口尺寸)
+  final settingsService = SettingsService();
+  await settingsService.init();
+
+  // 2. 获取保存的尺寸
+  final size = settingsService.getOverlaySizePixels();
+
+  // 3. 配置无边框窗口
+  final windowOptions = WindowOptions(
+    size: Size(size.$1, size.$2),
+    minimumSize: const Size(300, 400),
     center: false,
     backgroundColor: Colors.transparent,
     skipTaskbar: true,
@@ -258,8 +265,7 @@ Future<void> _runOverlayWindow(
   );
 
   // 初始化设置服务
-  final settingsService = SettingsService();
-  await settingsService.init();
+  // 已在上方初始化
 
   // 初始化状态服务
   final overlayState = OverlayStateService(isar);
@@ -379,6 +385,12 @@ Future<void> _runOverlayWindow(
         final speedValue = call.arguments?['speed'];
         final speed = (speedValue is num) ? speedValue.round() : 3;
         overlayState.setNavSpeedLevel(speed);
+        return 'ok';
+      // 更新窗口尺寸
+      case 'update_size':
+        final sizeIndex = call.arguments?['sizeIndex'] as int? ?? 1;
+        print('[Overlay] Received update_size command with index: $sizeIndex');
+        overlayState.setOverlaySize(sizeIndex);
         return 'ok';
       // 增加导航速度
       case 'increase_nav_speed':

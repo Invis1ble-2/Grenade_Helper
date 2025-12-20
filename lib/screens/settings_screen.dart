@@ -25,6 +25,7 @@ class SettingsScreen extends ConsumerStatefulWidget {
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late Map<HotkeyAction, HotkeyConfig> _hotkeys;
   late double _overlayOpacity;
+  late int _overlaySize; // 悬浮窗尺寸 (0=小, 1=中, 2=大)
   late bool _closeToTray;
   late int _overlayNavSpeed; // 悬浮窗导航速度 (1-5)
   // 摇杆相关设置（仅移动端）
@@ -57,6 +58,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       widget.settingsService!.reload();
       _hotkeys = widget.settingsService!.getHotkeys();
       _overlayOpacity = widget.settingsService!.getOverlayOpacity();
+      _overlaySize = widget.settingsService!.getOverlaySize();
       _closeToTray = widget.settingsService!.getCloseToTray();
       _overlayNavSpeed = widget.settingsService!.getOverlayNavSpeed();
       _markerMoveMode = widget.settingsService!.getMarkerMoveMode();
@@ -70,6 +72,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       // 默认值
       _hotkeys = {};
       _overlayOpacity = 0.9;
+      _overlaySize = 1;
       _closeToTray = true;
       _overlayNavSpeed = 3;
       _markerMoveMode = 0;
@@ -262,6 +265,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     sendOverlayCommand('update_opacity', {'opacity': value});
                   },
                 ),
+              ),
+            ),
+            ListTile(
+              title: const Text('窗口尺寸'),
+              subtitle: Text(
+                  ['小 (350×700)', '中 (450×820)', '大 (600×950)'][_overlaySize]),
+              trailing: SegmentedButton<int>(
+                segments: const [
+                  ButtonSegment(value: 0, label: Text('小')),
+                  ButtonSegment(value: 1, label: Text('中')),
+                  ButtonSegment(value: 2, label: Text('大')),
+                ],
+                selected: {_overlaySize},
+                onSelectionChanged: (value) async {
+                  final newSize = value.first;
+                  setState(() => _overlaySize = newSize);
+                  await widget.settingsService!.setOverlaySize(newSize);
+                  // 通知悬浮窗刷新尺寸
+                  sendOverlayCommand('update_size', {'sizeIndex': newSize});
+                },
               ),
             ),
             ListTile(
