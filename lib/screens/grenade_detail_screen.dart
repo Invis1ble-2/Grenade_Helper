@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:pro_image_editor/pro_image_editor.dart';
+import 'package:pro_image_editor/designs/frosted_glass/frosted_glass.dart';
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
 import 'package:intl/intl.dart';
@@ -392,6 +393,230 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                 if (mounted) Navigator.pop(context);
               },
             ),
+            configs: ProImageEditorConfigs(
+              designMode: ImageEditorDesignMode.cupertino,
+              theme: ThemeData.dark().copyWith(
+                scaffoldBackgroundColor: Colors.black,
+                iconTheme: const IconThemeData(color: Colors.white),
+              ),
+              mainEditor: MainEditorConfigs(
+                tools: const [
+                  SubEditorMode.paint,
+                  SubEditorMode.text,
+                  SubEditorMode.cropRotate,
+                  SubEditorMode.tune,
+                  SubEditorMode.filter,
+                  SubEditorMode.blur,
+                  SubEditorMode.emoji,
+                  // SubEditorMode.sticker, // 已移除
+                ],
+                widgets: MainEditorWidgets(
+                  appBar: (editor, rebuildStream) => null,
+                  bottomBar: (editor, rebuildStream, key) => null,
+                  bodyItems: (editor, rebuildStream) => [
+                    ReactiveWidget(
+                      stream: rebuildStream,
+                      builder: (_) => FrostedGlassActionBar(
+                        editor: editor,
+                        openStickerEditor: () {},
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              paintEditor: PaintEditorConfigs(
+                widgets: PaintEditorWidgets(
+                  appBar: (paintEditor, rebuildStream) => null,
+                  bottomBar: (paintEditor, rebuildStream) => null,
+                  bodyItems: (paintEditor, rebuildStream) => [
+                    ReactiveWidget(
+                      stream: rebuildStream,
+                      builder: (_) => paintEditor.isActive
+                          ? const SizedBox.shrink()
+                          : FrostedGlassPaintAppbar(paintEditor: paintEditor),
+                    ),
+                    ReactiveWidget(
+                      stream: rebuildStream,
+                      builder: (_) =>
+                          FrostedGlassPaintBottomBar(paintEditor: paintEditor),
+                    ),
+                  ],
+                ),
+              ),
+              textEditor: TextEditorConfigs(
+                widgets: TextEditorWidgets(
+                  appBar: (textEditor, rebuildStream) => null,
+                  bottomBar: (textEditor, rebuildStream) => null,
+                  bodyItems: (textEditor, rebuildStream) => [
+                    ReactiveWidget(
+                      stream: rebuildStream,
+                      builder: (_) => const FrostedGlassEffect(
+                        radius: BorderRadius.zero,
+                        child: SizedBox.expand(),
+                      ),
+                    ),
+                    ReactiveWidget(
+                      stream: rebuildStream,
+                      builder: (_) =>
+                          FrostedGlassTextAppbar(textEditor: textEditor),
+                    ),
+                    ReactiveWidget(
+                      stream: rebuildStream,
+                      builder: (_) => FrostedGlassTextBottomBar(
+                        configs: textEditor.configs,
+                        initColor: textEditor.primaryColor,
+                        onColorChanged: (color) =>
+                            textEditor.primaryColor = color,
+                        selectedStyle: textEditor.selectedTextStyle,
+                        onFontChange: textEditor.setTextStyle,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              cropRotateEditor: CropRotateEditorConfigs(
+                widgets: CropRotateEditorWidgets(
+                  appBar: (cropRotateEditor, rebuildStream) => null,
+                  bottomBar: (cropRotateEditor, rebuildStream) =>
+                      ReactiveWidget(
+                    stream: rebuildStream,
+                    builder: (_) => FrostedGlassCropRotateToolbar(
+                      configs: cropRotateEditor.configs,
+                      onCancel: cropRotateEditor.close,
+                      onRotate: cropRotateEditor.rotate,
+                      onDone: cropRotateEditor.done,
+                      onReset: cropRotateEditor.reset,
+                      openAspectRatios: cropRotateEditor.openAspectRatioOptions,
+                    ),
+                  ),
+                ),
+              ),
+              filterEditor: FilterEditorConfigs(
+                widgets: FilterEditorWidgets(
+                  appBar: (filterEditor, rebuildStream) => null,
+                  bodyItems: (filterEditor, rebuildStream) => [
+                    ReactiveWidget(
+                      stream: rebuildStream,
+                      builder: (_) =>
+                          FrostedGlassFilterAppbar(filterEditor: filterEditor),
+                    ),
+                  ],
+                ),
+              ),
+              blurEditor: BlurEditorConfigs(
+                widgets: BlurEditorWidgets(
+                  appBar: (blurEditor, rebuildStream) => null,
+                  bodyItems: (blurEditor, rebuildStream) => [
+                    ReactiveWidget(
+                      stream: rebuildStream,
+                      builder: (_) =>
+                          FrostedGlassBlurAppbar(blurEditor: blurEditor),
+                    ),
+                  ],
+                ),
+              ),
+              tuneEditor: TuneEditorConfigs(
+                widgets: TuneEditorWidgets(
+                  appBar: (tuneEditor, rebuildStream) => null,
+                  bottomBar: (tuneEditor, rebuildStream) => null,
+                  bodyItems: (tuneEditor, rebuildStream) => [
+                    ReactiveWidget(
+                      stream: rebuildStream,
+                      builder: (_) =>
+                          FrostedGlassTuneAppbar(tuneEditor: tuneEditor),
+                    ),
+                    ReactiveWidget(
+                      stream: rebuildStream,
+                      builder: (_) =>
+                          FrostedGlassTuneBottombar(tuneEditor: tuneEditor),
+                    ),
+                  ],
+                ),
+              ),
+              dialogConfigs: DialogConfigs(
+                widgets: DialogWidgets(
+                  loadingDialog: (message, configs) =>
+                      FrostedGlassLoadingDialog(
+                    message: message,
+                    configs: configs,
+                  ),
+                ),
+              ),
+              i18n: const I18n(
+                various: I18nVarious(
+                  loadingDialogMsg: '正在处理...',
+                  closeEditorWarningTitle: '确认关闭',
+                  closeEditorWarningMessage: '确定要关闭编辑器吗？未保存的更改将丢失',
+                  closeEditorWarningConfirmBtn: '确定',
+                  closeEditorWarningCancelBtn: '取消',
+                ),
+                paintEditor: I18nPaintEditor(
+                  bottomNavigationBarText: '画笔',
+                  freestyle: '自由线',
+                  arrow: '箭头',
+                  line: '直线',
+                  rectangle: '矩形',
+                  circle: '圆形',
+                  dashLine: '虚线',
+                  lineWidth: '线宽',
+                  toggleFill: '填充',
+                  undo: '撤销',
+                  redo: '重做',
+                  done: '完成',
+                  back: '返回',
+                ),
+                textEditor: I18nTextEditor(
+                  inputHintText: '输入文字',
+                  bottomNavigationBarText: '文字',
+                  done: '完成',
+                  back: '返回',
+                  textAlign: '对齐',
+                  backgroundMode: '背景模式',
+                ),
+                cropRotateEditor: I18nCropRotateEditor(
+                  bottomNavigationBarText: '裁剪',
+                  rotate: '旋转',
+                  ratio: '比例',
+                  back: '返回',
+                  done: '完成',
+                  reset: '重置',
+                  undo: '撤销',
+                  redo: '重做',
+                ),
+                filterEditor: I18nFilterEditor(
+                  bottomNavigationBarText: '滤镜',
+                  back: '返回',
+                  done: '完成',
+                ),
+                blurEditor: I18nBlurEditor(
+                  bottomNavigationBarText: '模糊',
+                  back: '返回',
+                  done: '完成',
+                ),
+                tuneEditor: I18nTuneEditor(
+                  bottomNavigationBarText: '调色',
+                  back: '返回',
+                  done: '完成',
+                  brightness: '亮度',
+                  contrast: '对比度',
+                  saturation: '饱和度',
+                  exposure: '曝光',
+                  hue: '色调',
+                  temperature: '色温',
+                  sharpness: '锐度',
+                  fade: '褪色',
+                  luminance: '明度',
+                ),
+                emojiEditor: I18nEmojiEditor(
+                  bottomNavigationBarText: '表情',
+                ),
+                cancel: '取消',
+                undo: '撤销',
+                redo: '重做',
+                done: '完成',
+                remove: '删除',
+              ),
+            ),
           ),
         ),
       );
@@ -563,6 +788,227 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                     duration: Duration(milliseconds: 800)));
               }
             },
+          ),
+          configs: ProImageEditorConfigs(
+            designMode: ImageEditorDesignMode.cupertino,
+            theme: ThemeData.dark().copyWith(
+              scaffoldBackgroundColor: Colors.black,
+              iconTheme: const IconThemeData(color: Colors.white),
+            ),
+            mainEditor: MainEditorConfigs(
+              tools: const [
+                SubEditorMode.paint,
+                SubEditorMode.text,
+                SubEditorMode.cropRotate,
+                SubEditorMode.tune,
+                SubEditorMode.filter,
+                SubEditorMode.blur,
+                SubEditorMode.emoji,
+              ],
+              widgets: MainEditorWidgets(
+                appBar: (editor, rebuildStream) => null,
+                bottomBar: (editor, rebuildStream, key) => null,
+                bodyItems: (editor, rebuildStream) => [
+                  ReactiveWidget(
+                    stream: rebuildStream,
+                    builder: (_) => FrostedGlassActionBar(
+                      editor: editor,
+                      openStickerEditor: () {},
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            paintEditor: PaintEditorConfigs(
+              widgets: PaintEditorWidgets(
+                appBar: (paintEditor, rebuildStream) => null,
+                bottomBar: (paintEditor, rebuildStream) => null,
+                bodyItems: (paintEditor, rebuildStream) => [
+                  ReactiveWidget(
+                    stream: rebuildStream,
+                    builder: (_) => paintEditor.isActive
+                        ? const SizedBox.shrink()
+                        : FrostedGlassPaintAppbar(paintEditor: paintEditor),
+                  ),
+                  ReactiveWidget(
+                    stream: rebuildStream,
+                    builder: (_) =>
+                        FrostedGlassPaintBottomBar(paintEditor: paintEditor),
+                  ),
+                ],
+              ),
+            ),
+            textEditor: TextEditorConfigs(
+              widgets: TextEditorWidgets(
+                appBar: (textEditor, rebuildStream) => null,
+                bottomBar: (textEditor, rebuildStream) => null,
+                bodyItems: (textEditor, rebuildStream) => [
+                  ReactiveWidget(
+                    stream: rebuildStream,
+                    builder: (_) => const FrostedGlassEffect(
+                      radius: BorderRadius.zero,
+                      child: SizedBox.expand(),
+                    ),
+                  ),
+                  ReactiveWidget(
+                    stream: rebuildStream,
+                    builder: (_) =>
+                        FrostedGlassTextAppbar(textEditor: textEditor),
+                  ),
+                  ReactiveWidget(
+                    stream: rebuildStream,
+                    builder: (_) => FrostedGlassTextBottomBar(
+                      configs: textEditor.configs,
+                      initColor: textEditor.primaryColor,
+                      onColorChanged: (color) =>
+                          textEditor.primaryColor = color,
+                      selectedStyle: textEditor.selectedTextStyle,
+                      onFontChange: textEditor.setTextStyle,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            cropRotateEditor: CropRotateEditorConfigs(
+              widgets: CropRotateEditorWidgets(
+                appBar: (cropRotateEditor, rebuildStream) => null,
+                bottomBar: (cropRotateEditor, rebuildStream) => ReactiveWidget(
+                  stream: rebuildStream,
+                  builder: (_) => FrostedGlassCropRotateToolbar(
+                    configs: cropRotateEditor.configs,
+                    onCancel: cropRotateEditor.close,
+                    onRotate: cropRotateEditor.rotate,
+                    onDone: cropRotateEditor.done,
+                    onReset: cropRotateEditor.reset,
+                    openAspectRatios: cropRotateEditor.openAspectRatioOptions,
+                  ),
+                ),
+              ),
+            ),
+            filterEditor: FilterEditorConfigs(
+              widgets: FilterEditorWidgets(
+                appBar: (filterEditor, rebuildStream) => null,
+                bodyItems: (filterEditor, rebuildStream) => [
+                  ReactiveWidget(
+                    stream: rebuildStream,
+                    builder: (_) =>
+                        FrostedGlassFilterAppbar(filterEditor: filterEditor),
+                  ),
+                ],
+              ),
+            ),
+            blurEditor: BlurEditorConfigs(
+              widgets: BlurEditorWidgets(
+                appBar: (blurEditor, rebuildStream) => null,
+                bodyItems: (blurEditor, rebuildStream) => [
+                  ReactiveWidget(
+                    stream: rebuildStream,
+                    builder: (_) =>
+                        FrostedGlassBlurAppbar(blurEditor: blurEditor),
+                  ),
+                ],
+              ),
+            ),
+            tuneEditor: TuneEditorConfigs(
+              widgets: TuneEditorWidgets(
+                appBar: (tuneEditor, rebuildStream) => null,
+                bottomBar: (tuneEditor, rebuildStream) => null,
+                bodyItems: (tuneEditor, rebuildStream) => [
+                  ReactiveWidget(
+                    stream: rebuildStream,
+                    builder: (_) =>
+                        FrostedGlassTuneAppbar(tuneEditor: tuneEditor),
+                  ),
+                  ReactiveWidget(
+                    stream: rebuildStream,
+                    builder: (_) =>
+                        FrostedGlassTuneBottombar(tuneEditor: tuneEditor),
+                  ),
+                ],
+              ),
+            ),
+            dialogConfigs: DialogConfigs(
+              widgets: DialogWidgets(
+                loadingDialog: (message, configs) => FrostedGlassLoadingDialog(
+                  message: message,
+                  configs: configs,
+                ),
+              ),
+            ),
+            i18n: const I18n(
+              various: I18nVarious(
+                loadingDialogMsg: '正在处理...',
+                closeEditorWarningTitle: '确认关闭',
+                closeEditorWarningMessage: '确定要关闭编辑器吗？未保存的更改将丢失',
+                closeEditorWarningConfirmBtn: '确定',
+                closeEditorWarningCancelBtn: '取消',
+              ),
+              paintEditor: I18nPaintEditor(
+                bottomNavigationBarText: '画笔',
+                freestyle: '自由线',
+                arrow: '箭头',
+                line: '直线',
+                rectangle: '矩形',
+                circle: '圆形',
+                dashLine: '虚线',
+                lineWidth: '线宽',
+                toggleFill: '填充',
+                undo: '撤销',
+                redo: '重做',
+                done: '完成',
+                back: '返回',
+              ),
+              textEditor: I18nTextEditor(
+                inputHintText: '输入文字',
+                bottomNavigationBarText: '文字',
+                done: '完成',
+                back: '返回',
+                textAlign: '对齐',
+                backgroundMode: '背景模式',
+              ),
+              cropRotateEditor: I18nCropRotateEditor(
+                bottomNavigationBarText: '裁剪',
+                rotate: '旋转',
+                ratio: '比例',
+                back: '返回',
+                done: '完成',
+                reset: '重置',
+                undo: '撤销',
+                redo: '重做',
+              ),
+              filterEditor: I18nFilterEditor(
+                bottomNavigationBarText: '滤镜',
+                back: '返回',
+                done: '完成',
+              ),
+              blurEditor: I18nBlurEditor(
+                bottomNavigationBarText: '模糊',
+                back: '返回',
+                done: '完成',
+              ),
+              tuneEditor: I18nTuneEditor(
+                bottomNavigationBarText: '调色',
+                back: '返回',
+                done: '完成',
+                brightness: '亮度',
+                contrast: '对比度',
+                saturation: '饱和度',
+                exposure: '曝光',
+                hue: '色调',
+                temperature: '色温',
+                sharpness: '锐度',
+                fade: '褪色',
+                luminance: '明度',
+              ),
+              emojiEditor: I18nEmojiEditor(
+                bottomNavigationBarText: '表情',
+              ),
+              cancel: '取消',
+              undo: '撤销',
+              redo: '重做',
+              done: '完成',
+              remove: '删除',
+            ),
           ),
         ),
       ),
