@@ -44,12 +44,12 @@ class OverlayWindowState extends State<OverlayWindow> {
   }
 
   void _handleVideoToggle() {
-    print('[OverlayWindow] _handleVideoToggle called');
+    // print('[OverlayWindow] _handleVideoToggle called');
     if (_videoPlayerKey.currentState != null) {
       _videoPlayerKey.currentState!.togglePlayPause();
-      print('[OverlayWindow] Video toggle called successfully');
+      // print('[OverlayWindow] Video toggle called successfully');
     } else {
-      print('[OverlayWindow] No video player state available');
+      // print('[OverlayWindow] No video player state available');
     }
   }
 
@@ -59,15 +59,15 @@ class OverlayWindowState extends State<OverlayWindow> {
 
   /// 重新加载热键配置
   void reloadHotkeys([Map<HotkeyAction, HotkeyConfig>? newHotkeys]) {
-    print(
-        '[OverlayWindow] reloadHotkeys called, before reload: ${_hotkeys[HotkeyAction.navigateUp]?.toDisplayString()}');
+    // print(
+    //     '[OverlayWindow] reloadHotkeys called, before reload: ${_hotkeys[HotkeyAction.navigateUp]?.toDisplayString()}');
     setState(() {
       // 如果提供了新的热键配置，直接使用；否则从 settingsService 加载
       _hotkeys = newHotkeys ?? widget.settingsService.getHotkeys();
     });
-    print(
-        '[OverlayWindow] Hotkeys reloaded, after reload: ${_hotkeys[HotkeyAction.navigateUp]?.toDisplayString()}');
-    print('[OverlayWindow] Total hotkeys loaded: ${_hotkeys.length}');
+    // print(
+    //     '[OverlayWindow] Hotkeys reloaded, after reload: ${_hotkeys[HotkeyAction.navigateUp]?.toDisplayString()}');
+    // print('[OverlayWindow] Total hotkeys loaded: ${_hotkeys.length}');
   }
 
   @override
@@ -265,8 +265,8 @@ class OverlayWindowState extends State<OverlayWindow> {
           _buildRadarMap(),
           const SizedBox(height: 16),
 
-          // 根据吸附状态显示内容
-          if (state.isSnapped && state.currentGrenade != null) ...[
+          // 根据吸附确认状态显示内容（吸附后延迟 1.5 秒才显示）
+          if (state.isSnapConfirmed && state.currentGrenade != null) ...[
             // 道具媒体区域
             _buildMediaArea(),
             const SizedBox(height: 12),
@@ -274,7 +274,7 @@ class OverlayWindowState extends State<OverlayWindow> {
             // 步骤说明
             _buildDescription(),
           ] else
-            // 未吸附提示
+            // 未吸附或未确认提示
             _buildNavigationHint(),
         ],
       ),
@@ -810,8 +810,8 @@ class OverlayWindowState extends State<OverlayWindow> {
     final hasShift = HardwareKeyboard.instance.isShiftPressed;
 
     // 调试日志：打印按键信息
-    print(
-        '[OverlayWindow] Key pressed: ${key.keyLabel} (keyId: ${key.keyId}), Alt: $hasAlt, Ctrl: $hasCtrl, Shift: $hasShift');
+    // print(
+    //     '[OverlayWindow] Key pressed: ${key.keyLabel} (keyId: ${key.keyId}), Alt: $hasAlt, Ctrl: $hasCtrl, Shift: $hasShift');
 
     // 检查每个动作
     for (final entry in _hotkeys.entries) {
@@ -819,7 +819,7 @@ class OverlayWindowState extends State<OverlayWindow> {
       if (_isNavigationAction(entry.key)) continue;
 
       if (_matchesHotkey(key, hasAlt, hasCtrl, hasShift, entry.value)) {
-        print('[OverlayWindow] Hotkey matched: ${entry.key}');
+        // print('[OverlayWindow] Hotkey matched: ${entry.key}');
         _executeAction(entry.key);
         return;
       }
@@ -951,13 +951,13 @@ class OverlayWindowState extends State<OverlayWindow> {
         state.toggleFilter(GrenadeType.he);
         break;
       case HotkeyAction.togglePlayPause:
-        print(
-            'togglePlayPause: currentState = ${_videoPlayerKey.currentState}');
+        // print(
+        //     'togglePlayPause: currentState = ${_videoPlayerKey.currentState}');
         if (_videoPlayerKey.currentState != null) {
           _videoPlayerKey.currentState!.togglePlayPause();
-          print('togglePlayPause: called successfully');
+          // print('togglePlayPause: called successfully');
         } else {
-          print('togglePlayPause: no video player state available');
+          // print('togglePlayPause: no video player state available');
         }
         break;
       case HotkeyAction.increaseNavSpeed:

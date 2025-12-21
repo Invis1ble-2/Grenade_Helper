@@ -39,15 +39,15 @@ class WindowType {
 
 /// 发送命令给悬浮窗（通过 IPC）
 void sendOverlayCommand(String command, [Map<String, dynamic>? args]) {
-  print('[Main] sendOverlayCommand: $command, args: $args');
+  // print('[Main] sendOverlayCommand: $command, args: $args');
   if (overlayWindowController != null) {
-    print('[Main] overlayWindowController is not null, invoking $command');
+    // print('[Main] overlayWindowController is not null, invoking $command');
     overlayWindowController!.invokeMethod(command, args).catchError((e) {
       // 忽略通信错误（例如窗口已关闭）
       print('[Main] IPC error for $command: $e');
     });
   } else {
-    print('[Main] overlayWindowController is null, cannot send $command');
+    // print('[Main] overlayWindowController is null, cannot send $command');
   }
 }
 

@@ -80,7 +80,7 @@ class HotkeyService {
     }
 
     _overlayHotkeysRegistered = true;
-    print('Overlay hotkeys registered: ${_overlayHotkeys.length} keys');
+    // print('Overlay hotkeys registered: ${_overlayHotkeys.length} keys');
   }
 
   /// 注销悬浮窗热键（悬浮窗隐藏时调用）
@@ -96,7 +96,7 @@ class HotkeyService {
     }
     _overlayHotkeys.clear();
     _overlayHotkeysRegistered = false;
-    print('Overlay hotkeys unregistered');
+    // print('Overlay hotkeys unregistered');
   }
 
   /// 注册单个快捷键
@@ -134,7 +134,7 @@ class HotkeyService {
     // 转换 LogicalKeyboardKey 到 PhysicalKeyboardKey
     final physicalKey = _logicalToPhysical(config.key);
     if (physicalKey == null) {
-      print('No physical key mapping for: ${config.key.keyLabel}');
+      // print('No physical key mapping for: ${config.key.keyLabel}');
       return;
     }
 
@@ -148,7 +148,7 @@ class HotkeyService {
       await hotKeyManager.register(
         hotKey,
         keyDownHandler: (hotKey) {
-          print('Global hotkey triggered: $action');
+          // print('Global hotkey triggered: $action');
           _handlers[action]?.call();
         },
       );

@@ -35,6 +35,10 @@ class OverlayStateService extends ChangeNotifier {
   double _crosshairY = 0.5;
   bool _isSnapped = false;
 
+  // 吸附确认状态（延迟 0.3 秒后才确认，用于显示道具步骤内容）
+  bool _isSnapConfirmed = false;
+  Timer? _snapConfirmTimer;
+
   // 准星移动常量
   static const int _moveIntervalMs = 16; // 约60fps
 
@@ -162,6 +166,7 @@ class OverlayStateService extends ChangeNotifier {
   @override
   void dispose() {
     _moveTimer?.cancel();
+    _snapConfirmTimer?.cancel();
     _grenadeSubscription?.cancel();
     super.dispose();
   }
@@ -179,6 +184,9 @@ class OverlayStateService extends ChangeNotifier {
   double get crosshairX => _crosshairX;
   double get crosshairY => _crosshairY;
   bool get isSnapped => _isSnapped;
+
+  /// 吸附是否已确认（0.3秒后），用于决定是否显示道具步骤内容
+  bool get isSnapConfirmed => _isSnapConfirmed;
 
   Grenade? get currentGrenade {
     if (_filteredGrenades.isEmpty ||
@@ -510,36 +518,74 @@ class OverlayStateService extends ChangeNotifier {
     if (nearestCluster != null && minDist < _snapThreshold * _snapThreshold) {
       // 吸附到 cluster 的第一个道具（作为代表）
       final nearest = nearestCluster.first;
+      final wasSnapped = _isSnapped;
+      final previousGrenadeId = currentGrenade?.id;
+
       _crosshairX = nearest.xRatio;
       _crosshairY = nearest.yRatio;
       _currentGrenadeIndex = _filteredGrenades.indexOf(nearest);
       _currentStepIndex = 0;
       _isSnapped = true;
+
+      // 如果是新吸附到不同的道具，重置确认状态并启动延迟确认定时器
+      if (!wasSnapped || previousGrenadeId != nearest.id) {
+        _isSnapConfirmed = false;
+        _snapConfirmTimer?.cancel();
+        _snapConfirmTimer = Timer(const Duration(milliseconds: 100), () {
+          if (_isSnapped && currentGrenade?.id == nearest.id) {
+            _isSnapConfirmed = true;
+            notifyListeners();
+          }
+        });
+      }
     } else {
-      // 未吸附
+      // 未吸附，取消确认状态
       _isSnapped = false;
+      _isSnapConfirmed = false;
+      _snapConfirmTimer?.cancel();
     }
   }
 
   /// 开始向指定方向移动（按下按键时调用）
   void startNavigation(NavigationDirection direction) {
     final now = DateTime.now();
+
+    // 关键修复：当按下新方向时，如果有相反方向在活动，先移除相反方向
+    // 这样可以避免相反方向同时激活导致的不移动问题
+    final opposite = _getOppositeDirection(direction);
+    if (_activeDirections.contains(opposite)) {
+      _activeDirections.remove(opposite);
+      _lastHeartbeat.remove(opposite);
+      // print('[OverlayState] Removed opposite direction: ${opposite!.name}');
+    }
+
     _activeDirections.add(direction);
 
-    // 关键修复：当收到任何方向的心跳时，刷新所有活跃方向的心跳
-    // 这是为了解决 Windows 全局热键的限制：
-    // 当同时按两个键时，第一个键会停止自动重复，
-    // 但只要第二个键在重复，就应该保持第一个方向也活跃
+    // 刷新所有活跃方向的心跳（支持斜向移动时的键盘重复限制）
     for (final dir in _activeDirections) {
       _lastHeartbeat[dir] = now;
     }
 
     // 调试日志：显示当前活跃的方向
-    print(
-        '[OverlayState] Active directions: ${_activeDirections.length} - ${_activeDirections.map((d) => d.name).join(', ')}');
+    // print(
+    //     '[OverlayState] Active directions: ${_activeDirections.length} - ${_activeDirections.map((d) => d.name).join(', ')}');
 
     _startMoveTimer();
     _startHeartbeatTimer();
+  }
+
+  /// 获取相反方向
+  NavigationDirection? _getOppositeDirection(NavigationDirection dir) {
+    switch (dir) {
+      case NavigationDirection.up:
+        return NavigationDirection.down;
+      case NavigationDirection.down:
+        return NavigationDirection.up;
+      case NavigationDirection.left:
+        return NavigationDirection.right;
+      case NavigationDirection.right:
+        return NavigationDirection.left;
+    }
   }
 
   /// 停止向指定方向移动（松开按键时调用）
@@ -587,10 +633,8 @@ class OverlayStateService extends ChangeNotifier {
       final now = DateTime.now();
       final toStop = <NavigationDirection>[];
 
-      // 动态超时：
-      // - 单个方向时使用短超时（80ms），最小化漂移
-      // - 多个方向时使用长超时（500ms），支持斜向移动
-      final timeout = _activeDirections.length > 1 ? 500 : 80;
+      // 使用固定短超时（80ms），保证响应跟手
+      const timeout = 80;
 
       for (final dir in _activeDirections) {
         final last = _lastHeartbeat[dir];
@@ -603,7 +647,15 @@ class OverlayStateService extends ChangeNotifier {
 
       if (toStop.isNotEmpty) {
         for (final dir in toStop) {
-          stopNavigation(dir);
+          _activeDirections.remove(dir);
+          _lastHeartbeat.remove(dir);
+          // print('[OverlayState] Heartbeat timeout for: ${dir.name}');
+        }
+
+        if (_activeDirections.isEmpty) {
+          _stopMoveTimer();
+          _checkAndSnapToPointEx(ignoreCurrent: false);
+          notifyListeners();
         }
       }
 
