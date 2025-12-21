@@ -138,8 +138,15 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     setState(() {});
   }
 
+  /// 默认作者名
+  static const String _defaultAuthor = '匿名作者';
+
   void _updateGrenade(
-      {String? title, int? type, int? team, bool? isFavorite}) async {
+      {String? title,
+      int? type,
+      int? team,
+      bool? isFavorite,
+      String? author}) async {
     if (grenade == null) return;
     final isar = ref.read(isarProvider);
 
@@ -147,6 +154,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     if (type != null) grenade!.type = type;
     if (team != null) grenade!.team = team;
     if (isFavorite != null) grenade!.isFavorite = isFavorite;
+    if (author != null) grenade!.author = author.isEmpty ? null : author;
 
     grenade!.updatedAt = DateTime.now();
     await isar.writeTxn(() async {
@@ -863,17 +871,100 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     );
   }
 
+  void _editAuthor() {
+    final authorController = TextEditingController(text: grenade?.author ?? '');
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+            top: 20,
+            left: 20,
+            right: 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text("编辑作者",
+                style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(ctx).textTheme.bodyLarge?.color)),
+            const SizedBox(height: 15),
+            TextField(
+              controller: authorController,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: "作者名",
+                hintText: "留空则使用默认: $_defaultAuthor",
+                border: const OutlineInputBorder(),
+                filled: true,
+                fillColor: Theme.of(ctx).colorScheme.surfaceContainerHighest,
+              ),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _updateGrenade(author: authorController.text.trim());
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text("作者已更新"),
+                    duration: Duration(milliseconds: 800)));
+              },
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  padding: const EdgeInsets.symmetric(vertical: 14)),
+              child: const Text("保存",
+                  style: TextStyle(
+                      color: Colors.black, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildFooterInfo() {
     if (grenade == null) return const SizedBox();
     final fmt = DateFormat('yyyy-MM-dd HH:mm');
+    final authorText =
+        grenade!.author?.isNotEmpty == true ? grenade!.author! : _defaultAuthor;
+    final isEditing = widget.isEditing;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 20, top: 10),
       child: Column(
         children: [
-          Text("创建于: ${fmt.format(grenade!.createdAt)}",
-              style: const TextStyle(color: Colors.grey, fontSize: 10)),
-          Text("最后编辑: ${fmt.format(grenade!.updatedAt)}",
-              style: const TextStyle(color: Colors.grey, fontSize: 10)),
+          GestureDetector(
+            onTap: isEditing ? _editAuthor : null,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text("作者: $authorText",
+                    style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                if (isEditing) ...[
+                  const SizedBox(width: 4),
+                  const Icon(Icons.edit, size: 12, color: Colors.grey),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text("创建: ${fmt.format(grenade!.createdAt)}",
+                  style: const TextStyle(color: Colors.grey, fontSize: 10)),
+              const Text("  |  ",
+                  style: TextStyle(color: Colors.grey, fontSize: 10)),
+              Text("最后编辑: ${fmt.format(grenade!.updatedAt)}",
+                  style: const TextStyle(color: Colors.grey, fontSize: 10)),
+            ],
+          ),
         ],
       ),
     );

@@ -69,6 +69,7 @@ class DataService {
         'title': g.title,
         'type': g.type,
         'team': g.team,
+        'author': g.author,
         'x': g.xRatio,
         'y': g.yRatio,
         'steps': stepsData,
@@ -319,6 +320,7 @@ class DataService {
     existing.title = item['title'];
     existing.type = item['type'];
     existing.team = item['team'];
+    existing.author = item['author'] as String?;
     existing.xRatio = (item['x'] as num).toDouble();
     existing.yRatio = (item['y'] as num).toDouble();
     existing.updatedAt = DateTime.fromMillisecondsSinceEpoch(item['updatedAt']);
@@ -402,6 +404,7 @@ class DataService {
           ? DateTime.fromMillisecondsSinceEpoch(item['updatedAt'])
           : DateTime.now(),
     );
+    g.author = item['author'] as String?;
     await isar.grenades.put(g);
 
     // 设置关联

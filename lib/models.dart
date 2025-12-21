@@ -80,6 +80,9 @@ class Grenade {
   double xRatio;
   double yRatio;
 
+  /// 作者名称
+  String? author;
+
   /// 唯一标识符，用于跨设备同步和去重
   @Index()
   String? uniqueId;
