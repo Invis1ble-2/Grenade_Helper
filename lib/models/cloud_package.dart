@@ -52,16 +52,25 @@ class CloudPackage {
 /// 云端仓库索引
 class CloudPackageIndex {
   final int version;
+  final String? updated; // 索引最后更新日期
+  final List<String> sources; // 贡献者 JSON 文件列表
   final List<CloudPackage> packages;
 
   CloudPackageIndex({
     required this.version,
+    this.updated,
+    this.sources = const [],
     required this.packages,
   });
 
   factory CloudPackageIndex.fromJson(Map<String, dynamic> json) {
     return CloudPackageIndex(
       version: json['version'] as int? ?? 1,
+      updated: json['updated'] as String?,
+      sources: (json['sources'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList() ??
+          [],
       packages: (json['packages'] as List<dynamic>?)
               ?.map((e) => CloudPackage.fromJson(e as Map<String, dynamic>))
               .toList() ??

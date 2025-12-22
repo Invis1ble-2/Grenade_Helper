@@ -7,9 +7,9 @@ import '../models/cloud_package.dart';
 
 /// 云端道具包服务
 class CloudPackageService {
-  // TODO: 替换为你的 GitHub 仓库地址
+  // 格式: https://raw.githubusercontent.com/用户名/仓库名/main/
   static const String kRepoBaseUrl =
-      'https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/grenade_packs/';
+      'https://raw.githubusercontent.com/Invis1ble-2/grenades_repo/main/';
 
   static const String _lastImportedKey = 'cloud_package_last_imported';
 

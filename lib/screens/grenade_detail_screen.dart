@@ -10,6 +10,7 @@ import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
 import 'package:intl/intl.dart';
 import 'package:photo_view/photo_view.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models.dart';
 import '../providers.dart';
@@ -124,9 +125,10 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
   void initState() {
     super.initState();
     _loadData();
+    _loadAuthorHistory();
   }
 
-  void _loadData() async {
+  void _loadData({bool resetTitle = true}) async {
     final isar = ref.read(isarProvider);
     grenade = await isar.grenades.get(widget.grenadeId);
     if (grenade != null) {
@@ -134,13 +136,37 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
       for (var step in grenade!.steps) {
         step.medias.loadSync();
       }
-      _titleController.text = grenade!.title;
+      if (resetTitle) {
+        _titleController.text = grenade!.title;
+      }
     }
     setState(() {});
   }
 
   /// 默认作者名
   static const String _defaultAuthor = '匿名作者';
+  static const String _authorHistoryKey = 'author_history';
+  List<String> _authorHistory = [];
+
+  /// 加载作者历史
+  Future<void> _loadAuthorHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    _authorHistory = prefs.getStringList(_authorHistoryKey) ?? [];
+  }
+
+  /// 保存作者到历史
+  Future<void> _saveAuthorToHistory(String author) async {
+    if (author.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    // 移除重复，添加到开头
+    _authorHistory.remove(author);
+    _authorHistory.insert(0, author);
+    // 最多保留 10 个
+    if (_authorHistory.length > 10) {
+      _authorHistory = _authorHistory.sublist(0, 10);
+    }
+    await prefs.setStringList(_authorHistoryKey, _authorHistory);
+  }
 
   /// 标记道具已进行本地实质性编辑
   Future<void> _markAsLocallyEdited() async {
@@ -171,7 +197,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     await isar.writeTxn(() async {
       await isar.grenades.put(grenade!);
     });
-    _loadData();
+    _loadData(resetTitle: false);
   }
 
   void _deleteGrenade() {
@@ -1339,50 +1365,81 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Theme.of(context).colorScheme.surface,
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
-            top: 20,
-            left: 20,
-            right: 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text("编辑作者",
-                style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(ctx).textTheme.bodyLarge?.color)),
-            const SizedBox(height: 15),
-            TextField(
-              controller: authorController,
-              autofocus: true,
-              decoration: InputDecoration(
-                labelText: "作者名",
-                hintText: "留空则使用默认: $_defaultAuthor",
-                border: const OutlineInputBorder(),
-                filled: true,
-                fillColor: Theme.of(ctx).colorScheme.surfaceContainerHighest,
-              ),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                _updateGrenade(author: authorController.text.trim());
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text("作者已更新"),
-                    duration: Duration(milliseconds: 800)));
-              },
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange,
-                  padding: const EdgeInsets.symmetric(vertical: 14)),
-              child: const Text("保存",
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => Padding(
+          padding: EdgeInsets.only(
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+              top: 20,
+              left: 20,
+              right: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text("编辑作者",
                   style: TextStyle(
-                      color: Colors.black, fontWeight: FontWeight.bold)),
-            ),
-          ],
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(ctx).textTheme.bodyLarge?.color)),
+              const SizedBox(height: 15),
+              // 历史作者选择
+              if (_authorHistory.isNotEmpty) ...[
+                const Text("历史作者",
+                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _authorHistory
+                      .map((author) => ActionChip(
+                            label: Text(author),
+                            onPressed: () {
+                              setModalState(() {
+                                authorController.text = author;
+                              });
+                            },
+                            backgroundColor: authorController.text == author
+                                ? Colors.orange.withOpacity(0.3)
+                                : null,
+                          ))
+                      .toList(),
+                ),
+                const SizedBox(height: 15),
+              ],
+              TextField(
+                controller: authorController,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: "作者名",
+                  hintText: "留空则使用默认: $_defaultAuthor",
+                  border: const OutlineInputBorder(),
+                  filled: true,
+                  fillColor: Theme.of(ctx).colorScheme.surfaceContainerHighest,
+                ),
+                onChanged: (_) => setModalState(() {}),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: () async {
+                  final author = authorController.text.trim();
+                  Navigator.pop(ctx);
+                  _updateGrenade(author: author);
+                  if (author.isNotEmpty) {
+                    await _saveAuthorToHistory(author);
+                  }
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text("作者已更新"),
+                      duration: Duration(milliseconds: 800)));
+                },
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange,
+                    padding: const EdgeInsets.symmetric(vertical: 14)),
+                child: const Text("保存",
+                    style: TextStyle(
+                        color: Colors.black, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
         ),
       ),
     );

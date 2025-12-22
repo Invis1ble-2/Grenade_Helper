@@ -446,22 +446,47 @@ class OverlayWindowState extends State<OverlayWindow> {
 
     final media = medias.first;
 
-    // 对于图片，检测是否为竖屏图片并动态调整高度
+    // 对于图片，检测图片类型并动态调整显示
     if (media.type == MediaType.image) {
       return FutureBuilder<Size?>(
         future: _getImageSize(media.localPath),
         builder: (context, snapshot) {
-          // 根据图片比例决定高度：竖屏图片使用更大高度
+          // 等待加载时显示占位符，避免先显示原比例再缩放的闪烁
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Container(
+              height: 400,
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Center(
+                child: CircularProgressIndicator(
+                  color: Colors.orange,
+                  strokeWidth: 2,
+                ),
+              ),
+            );
+          }
+
+          // 根据图片比例决定高度和显示方式
           double height = 400;
-          bool isPortrait = false;
+          // 0: 正方形, 1: 竖屏, 2: 横版
+          int imageType = 0;
 
           if (snapshot.hasData && snapshot.data != null) {
             final size = snapshot.data!;
-            // 只有高度超过宽度 200px 以上才判定为竖屏图片
-            isPortrait = size.height > size.width + 200;
-            if (isPortrait) {
-              // 竖屏图片使用更大的高度
+            final diff = (size.height - size.width).abs();
+
+            if (diff <= 400) {
+              // 宽高差值在200px内，判定为正方形
+              imageType = 0;
+            } else if (size.height > size.width) {
+              // 竖屏图片
+              imageType = 1;
               height = 450;
+            } else {
+              // 横版图片
+              imageType = 2;
             }
           }
 
@@ -471,7 +496,7 @@ class OverlayWindowState extends State<OverlayWindow> {
               color: Colors.black.withValues(alpha: 0.3),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: _buildMediaView(media, isPortrait: isPortrait),
+            child: _buildMediaView(media, imageType: imageType),
           );
         },
       );
@@ -502,7 +527,8 @@ class OverlayWindowState extends State<OverlayWindow> {
     }
   }
 
-  Widget _buildMediaView(StepMedia media, {bool isPortrait = false}) {
+  /// imageType: 0=正方形(正常显示), 1=竖屏(缩放), 2=横版(缩放)
+  Widget _buildMediaView(StepMedia media, {int imageType = 0}) {
     final file = File(media.localPath);
     if (!file.existsSync()) {
       return const Center(
@@ -511,6 +537,9 @@ class OverlayWindowState extends State<OverlayWindow> {
     }
 
     if (media.type == MediaType.image) {
+      // 正方形正常显示，竖屏和横版使用 contain 配合缩放
+      final bool needsScale = imageType != 0;
+
       Widget imageWidget = Image.file(
         file,
         fit: BoxFit.contain,
@@ -521,10 +550,12 @@ class OverlayWindowState extends State<OverlayWindow> {
         ),
       );
 
-      // 竖屏图片放大显示，使用 Transform.scale 控制放大比例
-      if (isPortrait) {
+      // 竖屏和横版图片使用不同的缩放比例
+      if (needsScale) {
+        // imageType 1=竖屏, 2=横版
+        final double scale = imageType == 1 ? 1.5 : 1.25; // 竖屏1.5倍，横版1.25倍
         imageWidget = Transform.scale(
-          scale: 1.5, // 调整此值：1.0=不放大, 1.5=放大50%
+          scale: scale,
           child: imageWidget,
         );
       }
