@@ -4259,8 +4259,13 @@ const StepMediaSchema = CollectionSchema(
       name: r'localPath',
       type: IsarType.string,
     ),
-    r'type': PropertySchema(
+    r'sortOrder': PropertySchema(
       id: 1,
+      name: r'sortOrder',
+      type: IsarType.long,
+    ),
+    r'type': PropertySchema(
+      id: 2,
       name: r'type',
       type: IsarType.long,
     )
@@ -4304,7 +4309,8 @@ void _stepMediaSerialize(
   Map<Type, List<int>> allOffsets,
 ) {
   writer.writeString(offsets[0], object.localPath);
-  writer.writeLong(offsets[1], object.type);
+  writer.writeLong(offsets[1], object.sortOrder);
+  writer.writeLong(offsets[2], object.type);
 }
 
 StepMedia _stepMediaDeserialize(
@@ -4315,7 +4321,8 @@ StepMedia _stepMediaDeserialize(
 ) {
   final object = StepMedia(
     localPath: reader.readString(offsets[0]),
-    type: reader.readLong(offsets[1]),
+    sortOrder: reader.readLongOrNull(offsets[1]) ?? 0,
+    type: reader.readLong(offsets[2]),
   );
   object.id = id;
   return object;
@@ -4331,6 +4338,8 @@ P _stepMediaDeserializeProp<P>(
     case 0:
       return (reader.readString(offset)) as P;
     case 1:
+      return (reader.readLongOrNull(offset) ?? 0) as P;
+    case 2:
       return (reader.readLong(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -4614,6 +4623,60 @@ extension StepMediaQueryFilter
     });
   }
 
+  QueryBuilder<StepMedia, StepMedia, QAfterFilterCondition> sortOrderEqualTo(
+      int value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'sortOrder',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<StepMedia, StepMedia, QAfterFilterCondition>
+      sortOrderGreaterThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'sortOrder',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<StepMedia, StepMedia, QAfterFilterCondition> sortOrderLessThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'sortOrder',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<StepMedia, StepMedia, QAfterFilterCondition> sortOrderBetween(
+    int lower,
+    int upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'sortOrder',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
   QueryBuilder<StepMedia, StepMedia, QAfterFilterCondition> typeEqualTo(
       int value) {
     return QueryBuilder.apply(this, (query) {
@@ -4700,6 +4763,18 @@ extension StepMediaQuerySortBy on QueryBuilder<StepMedia, StepMedia, QSortBy> {
     });
   }
 
+  QueryBuilder<StepMedia, StepMedia, QAfterSortBy> sortBySortOrder() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'sortOrder', Sort.asc);
+    });
+  }
+
+  QueryBuilder<StepMedia, StepMedia, QAfterSortBy> sortBySortOrderDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'sortOrder', Sort.desc);
+    });
+  }
+
   QueryBuilder<StepMedia, StepMedia, QAfterSortBy> sortByType() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'type', Sort.asc);
@@ -4739,6 +4814,18 @@ extension StepMediaQuerySortThenBy
     });
   }
 
+  QueryBuilder<StepMedia, StepMedia, QAfterSortBy> thenBySortOrder() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'sortOrder', Sort.asc);
+    });
+  }
+
+  QueryBuilder<StepMedia, StepMedia, QAfterSortBy> thenBySortOrderDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'sortOrder', Sort.desc);
+    });
+  }
+
   QueryBuilder<StepMedia, StepMedia, QAfterSortBy> thenByType() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'type', Sort.asc);
@@ -4761,6 +4848,12 @@ extension StepMediaQueryWhereDistinct
     });
   }
 
+  QueryBuilder<StepMedia, StepMedia, QDistinct> distinctBySortOrder() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'sortOrder');
+    });
+  }
+
   QueryBuilder<StepMedia, StepMedia, QDistinct> distinctByType() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'type');
@@ -4779,6 +4872,12 @@ extension StepMediaQueryProperty
   QueryBuilder<StepMedia, String, QQueryOperations> localPathProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'localPath');
+    });
+  }
+
+  QueryBuilder<StepMedia, int, QQueryOperations> sortOrderProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'sortOrder');
     });
   }
 

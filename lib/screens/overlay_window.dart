@@ -459,7 +459,8 @@ class OverlayWindowState extends State<OverlayWindow> {
         ? steps[state.currentStepIndex]
         : steps.first;
 
-    final medias = currentStep.medias.toList();
+    final medias = currentStep.medias.toList()
+      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
 
     if (medias.isEmpty) {
       return Container(

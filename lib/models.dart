@@ -145,6 +145,7 @@ class StepMedia {
 
   String localPath;
   int type; // MediaType
+  int sortOrder; // 排序索引
 
   // 反向链接到 GrenadeStep
   @Backlink(to: 'medias')
@@ -153,6 +154,7 @@ class StepMedia {
   StepMedia({
     required this.localPath,
     required this.type,
+    this.sortOrder = 0,
   });
 }
 

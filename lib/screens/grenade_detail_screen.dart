@@ -353,7 +353,8 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
       await step.grenade.save();
 
       if (mediaPath != null && mediaType != null) {
-        final media = StepMedia(localPath: mediaPath, type: mediaType);
+        final media =
+            StepMedia(localPath: mediaPath, type: mediaType, sortOrder: 0);
         await isar.stepMedias.put(media);
         media.step.value = step;
         await media.step.save();
@@ -384,8 +385,17 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     final path = await _pickAndProcessMedia(isImage);
     if (path != null) {
       final isar = ref.read(isarProvider);
+      // 计算新媒体的排序索引（追加到末尾）
+      final maxSortOrder = step.medias.isEmpty
+          ? -1
+          : step.medias
+              .toList()
+              .map((m) => m.sortOrder)
+              .reduce((a, b) => a > b ? a : b);
       final media = StepMedia(
-          localPath: path, type: isImage ? MediaType.image : MediaType.video);
+          localPath: path,
+          type: isImage ? MediaType.image : MediaType.video,
+          sortOrder: maxSortOrder + 1);
       await isar.writeTxn(() async {
         await isar.stepMedias.put(media);
         media.step.value = step;
@@ -1244,74 +1254,204 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
   }
 
   // 构建单个媒体项（图片或视频）
-  Widget _buildMediaItem(StepMedia media, bool isEditing) {
-    return Center(
-      child: Stack(
+  Widget _buildMediaItem(StepMedia media, bool isEditing,
+      {int? mediaIndex, int? totalMediaCount, GrenadeStep? step}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: MediaQuery.of(context).size.width - 48,
-            height: 250,
-            child: media.type == MediaType.image
-                ? GestureDetector(
-                    onTap: () => _showFullscreenImage(media.localPath),
-                    child: Image.file(
-                      File(media.localPath),
-                      fit: BoxFit.contain,
-                    ),
-                  )
-                : VideoPlayerWidget(file: File(media.localPath)),
-          ),
-          if (isEditing) ...[
-            // 编辑图片按钮
-            if (media.type == MediaType.image)
-              Positioned(
-                top: 5,
-                right: 40,
-                child: GestureDetector(
-                  onTap: () => _editImage(media),
-                  child: Container(
-                    width: 28,
-                    height: 28,
-                    decoration: const BoxDecoration(
-                      color: Colors.black54,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.edit,
-                        size: 14, color: Colors.orangeAccent),
+          // 左侧排序按钮（仅编辑模式且有多个媒体时显示）
+          if (isEditing && totalMediaCount != null && totalMediaCount > 1)
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 上移按钮
+                IconButton(
+                  icon: Icon(
+                    Icons.arrow_upward,
+                    size: 20,
+                    color: (mediaIndex != null && mediaIndex > 0)
+                        ? Colors.blueAccent
+                        : Colors.grey[600],
                   ),
+                  onPressed: (mediaIndex != null &&
+                          mediaIndex > 0 &&
+                          step != null)
+                      ? () => _swapMediaOrder(step, mediaIndex, mediaIndex - 1)
+                      : null,
+                  tooltip: '上移',
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 36, minHeight: 36),
                 ),
-              ),
-            // 删除按钮
-            Positioned(
-              top: 5,
-              right: 5,
-              child: GestureDetector(
-                onTap: () async {
-                  final isar = ref.read(isarProvider);
-                  await isar.writeTxn(() async {
-                    await isar.stepMedias.delete(media.id);
-                  });
-                  await _markAsLocallyEdited(); // 删除媒体算实质性编辑
-                  _loadData();
-                  // 通知悬浮窗刷新数据
-                  sendOverlayCommand('reload_data');
-                },
-                child: Container(
-                  width: 28,
-                  height: 28,
-                  decoration: const BoxDecoration(
-                    color: Colors.black54,
-                    shape: BoxShape.circle,
+                // 下移按钮
+                IconButton(
+                  icon: Icon(
+                    Icons.arrow_downward,
+                    size: 20,
+                    color:
+                        (mediaIndex != null && mediaIndex < totalMediaCount - 1)
+                            ? Colors.blueAccent
+                            : Colors.grey[600],
                   ),
-                  child: const Icon(Icons.delete,
-                      size: 14, color: Colors.redAccent),
+                  onPressed: (mediaIndex != null &&
+                          mediaIndex < totalMediaCount - 1 &&
+                          step != null)
+                      ? () => _swapMediaOrder(step, mediaIndex, mediaIndex + 1)
+                      : null,
+                  tooltip: '下移',
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 36, minHeight: 36),
                 ),
-              ),
+              ],
             ),
-          ]
+          // 媒体内容
+          Expanded(
+            child: Stack(
+              children: [
+                SizedBox(
+                  height: 250,
+                  child: media.type == MediaType.image
+                      ? GestureDetector(
+                          onTap: () => _showFullscreenImage(media.localPath),
+                          child: Image.file(
+                            File(media.localPath),
+                            fit: BoxFit.contain,
+                            width: double.infinity,
+                          ),
+                        )
+                      : VideoPlayerWidget(file: File(media.localPath)),
+                ),
+                if (isEditing) ...[
+                  // 编辑图片按钮
+                  if (media.type == MediaType.image)
+                    Positioned(
+                      top: 5,
+                      right: 40,
+                      child: GestureDetector(
+                        onTap: () => _editImage(media),
+                        child: Container(
+                          width: 28,
+                          height: 28,
+                          decoration: const BoxDecoration(
+                            color: Colors.black54,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.edit,
+                              size: 14, color: Colors.orangeAccent),
+                        ),
+                      ),
+                    ),
+                  // 删除按钮
+                  Positioned(
+                    top: 5,
+                    right: 5,
+                    child: GestureDetector(
+                      onTap: () => _confirmDeleteMedia(media),
+                      child: Container(
+                        width: 28,
+                        height: 28,
+                        decoration: const BoxDecoration(
+                          color: Colors.black54,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.delete,
+                            size: 14, color: Colors.redAccent),
+                      ),
+                    ),
+                  ),
+                ]
+              ],
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  /// 确认删除媒体
+  void _confirmDeleteMedia(StepMedia media) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('确认删除'),
+        content:
+            Text(media.type == MediaType.image ? '确定要删除这张图片吗？' : '确定要删除这个视频吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final isar = ref.read(isarProvider);
+              await isar.writeTxn(() async {
+                await isar.stepMedias.delete(media.id);
+              });
+              await _markAsLocallyEdited();
+              _loadData();
+              sendOverlayCommand('reload_data');
+            },
+            child: const Text('删除', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 交换媒体顺序
+  Future<void> _swapMediaOrder(
+      GrenadeStep step, int fromIndex, int toIndex) async {
+    final mediaList = step.medias.toList()
+      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+
+    if (fromIndex < 0 ||
+        fromIndex >= mediaList.length ||
+        toIndex < 0 ||
+        toIndex >= mediaList.length) {
+      return;
+    }
+
+    final isar = ref.read(isarProvider);
+
+    // 如果所有媒体的 sortOrder 都相同（默认值），先重新分配
+    final allSameSortOrder =
+        mediaList.every((m) => m.sortOrder == mediaList.first.sortOrder);
+    if (allSameSortOrder && mediaList.length > 1) {
+      // 重新分配 sortOrder
+      for (int i = 0; i < mediaList.length; i++) {
+        mediaList[i].sortOrder = i;
+      }
+      await isar.writeTxn(() async {
+        for (final m in mediaList) {
+          await isar.stepMedias.put(m);
+        }
+      });
+    }
+
+    // 现在交换 sortOrder 值
+    final fromMedia = mediaList[fromIndex];
+    final toMedia = mediaList[toIndex];
+    final tempOrder = fromMedia.sortOrder;
+    fromMedia.sortOrder = toMedia.sortOrder;
+    toMedia.sortOrder = tempOrder;
+
+    await isar.writeTxn(() async {
+      // 保存更新后的媒体
+      await isar.stepMedias.put(fromMedia);
+      await isar.stepMedias.put(toMedia);
+
+      // 更新道具的更新时间
+      grenade!.updatedAt = DateTime.now();
+      await isar.grenades.put(grenade!);
+    });
+
+    await _markAsLocallyEdited();
+    _loadData();
+    sendOverlayCommand('reload_data');
   }
 
   Widget _buildStepCard(GrenadeStep step, bool isEditing) {
@@ -1390,15 +1530,26 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
           ),
           Divider(color: Theme.of(context).dividerColor),
           if (step.medias.isNotEmpty)
-            // 图片/视频垂直排列
-            Column(
-              children: step.medias
-                  .map((media) => Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: _buildMediaItem(media, isEditing),
-                      ))
-                  .toList(),
-            )
+            // 图片/视频垂直排列（按 sortOrder 排序）
+            Builder(builder: (context) {
+              final sortedMedias = step.medias.toList()
+                ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+              return Column(
+                children: [
+                  for (int i = 0; i < sortedMedias.length; i++)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: _buildMediaItem(
+                        sortedMedias[i],
+                        isEditing,
+                        mediaIndex: i,
+                        totalMediaCount: sortedMedias.length,
+                        step: step,
+                      ),
+                    ),
+                ],
+              );
+            })
           else if (isEditing)
             Container(
               height: 60,
