@@ -135,6 +135,12 @@ class OverlayStateService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 强制重新加载数据（用于主窗口修改数据后通知悬浮窗刷新）
+  void reloadData() {
+    print('[OverlayStateService] reloadData called, reloading grenades...');
+    _loadGrenades(notify: true);
+  }
+
   // 悬浮窗透明度（用于跨进程 IPC 更新）
   double _overlayOpacity = 0.9;
   double get overlayOpacity => _overlayOpacity;

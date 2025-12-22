@@ -206,6 +206,13 @@ Future<void> _runMainWindow() async {
     globalHotkeyService!.registerHandler(HotkeyAction.decreaseNavSpeed, () {
       sendOverlayCommand('decrease_nav_speed');
     });
+    // 滚动控制
+    globalHotkeyService!.registerHandler(HotkeyAction.scrollUp, () {
+      sendOverlayCommand('scroll_up');
+    });
+    globalHotkeyService!.registerHandler(HotkeyAction.scrollDown, () {
+      sendOverlayCommand('scroll_down');
+    });
   }
 
   runApp(
@@ -413,6 +420,19 @@ Future<void> _runOverlayWindow(
         overlayState.decreaseNavSpeed();
         // 保存到设置
         await settingsService.setOverlayNavSpeed(overlayState.navSpeedLevel);
+        return 'ok';
+      // 滚动控制
+      case 'scroll_up':
+        overlayAppKey.currentState?.overlayWindowKey.currentState
+            ?.scrollContent(-300);
+        return 'ok';
+      case 'scroll_down':
+        overlayAppKey.currentState?.overlayWindowKey.currentState
+            ?.scrollContent(300);
+        return 'ok';
+      // 重新加载数据（主窗口修改数据后通知悬浮窗刷新）
+      case 'reload_data':
+        overlayState.reloadData();
         return 'ok';
       // 重新加载热键配置
       case 'reload_hotkeys':

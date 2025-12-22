@@ -33,6 +33,7 @@ class OverlayWindowState extends State<OverlayWindow> {
   final FocusNode _focusNode = FocusNode();
   late Map<HotkeyAction, HotkeyConfig> _hotkeys;
   final GlobalKey<VideoPlayerWidgetState> _videoPlayerKey = GlobalKey();
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
@@ -75,6 +76,7 @@ class OverlayWindowState extends State<OverlayWindow> {
     widget.overlayState.setVideoTogglePlayPauseCallback(null);
     widget.overlayState.removeListener(_onStateChanged);
     _focusNode.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -141,10 +143,6 @@ class OverlayWindowState extends State<OverlayWindow> {
         ),
         child: Row(
           children: [
-            // 拖动手柄图标
-            Icon(Icons.drag_indicator, color: Colors.grey[600], size: 20),
-            const SizedBox(width: 8),
-
             // 地图名称标签
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -175,6 +173,10 @@ class OverlayWindowState extends State<OverlayWindow> {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
+
+            // 速度档位显示
+            _buildSpeedIndicator(),
+            const SizedBox(width: 8),
 
             // 过滤器按钮
             _buildFilterButtons(),
@@ -227,6 +229,33 @@ class OverlayWindowState extends State<OverlayWindow> {
     );
   }
 
+  /// 速度档位显示（标题栏）
+  Widget _buildSpeedIndicator() {
+    final state = widget.overlayState;
+    final increaseSpeedKey = _getHotkeyLabel(HotkeyAction.increaseNavSpeed);
+    final decreaseSpeedKey = _getHotkeyLabel(HotkeyAction.decreaseNavSpeed);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(
+          color: Colors.orange.withValues(alpha: 0.5),
+          width: 1,
+        ),
+      ),
+      child: Text(
+        '速度:${state.navSpeedLevel}/5 ($decreaseSpeedKey/$increaseSpeedKey)',
+        style: const TextStyle(
+          color: Colors.orange,
+          fontSize: 10,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+    );
+  }
+
   Widget _buildFilterIcon(
       int type, IconData icon, Color color, OverlayStateService state) {
     final isActive = state.activeFilters.contains(type);
@@ -258,6 +287,7 @@ class OverlayWindowState extends State<OverlayWindow> {
     }
 
     return SingleChildScrollView(
+      controller: _scrollController,
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
@@ -444,8 +474,21 @@ class OverlayWindowState extends State<OverlayWindow> {
       );
     }
 
-    final media = medias.first;
+    // 显示所有媒体
+    return Column(
+      children: medias.asMap().entries.map((entry) {
+        final index = entry.key;
+        final media = entry.value;
+        return Padding(
+          padding: EdgeInsets.only(bottom: index < medias.length - 1 ? 8 : 0),
+          child: _buildSingleMediaItem(media),
+        );
+      }).toList(),
+    );
+  }
 
+  /// 构建单个媒体项
+  Widget _buildSingleMediaItem(StepMedia media) {
     // 对于图片，检测图片类型并动态调整显示
     if (media.type == MediaType.image) {
       return FutureBuilder<Size?>(
@@ -478,7 +521,7 @@ class OverlayWindowState extends State<OverlayWindow> {
             final diff = (size.height - size.width).abs();
 
             if (diff <= 400) {
-              // 宽高差值在200px内，判定为正方形
+              // 宽高差值在400px内，判定为正方形
               imageType = 0;
             } else if (size.height > size.width) {
               // 竖屏图片
@@ -553,7 +596,7 @@ class OverlayWindowState extends State<OverlayWindow> {
       // 竖屏和横版图片使用不同的缩放比例
       if (needsScale) {
         // imageType 1=竖屏, 2=横版
-        final double scale = imageType == 1 ? 1.5 : 1.25; // 竖屏1.5倍，横版1.25倍
+        final double scale = imageType == 1 ? 1.5 : 1.3; // 竖屏1.5倍，横版1.3倍
         imageWidget = Transform.scale(
           scale: scale,
           child: imageWidget,
@@ -619,12 +662,12 @@ class OverlayWindowState extends State<OverlayWindow> {
       final navDownKey = _getHotkeyLabel(HotkeyAction.navigateDown);
       final navLeftKey = _getHotkeyLabel(HotkeyAction.navigateLeft);
       final navRightKey = _getHotkeyLabel(HotkeyAction.navigateRight);
-      final increaseSpeedKey = _getHotkeyLabel(HotkeyAction.increaseNavSpeed);
-      final decreaseSpeedKey = _getHotkeyLabel(HotkeyAction.decreaseNavSpeed);
       final prevGrenadeKey = _getHotkeyLabel(HotkeyAction.prevGrenade);
       final nextGrenadeKey = _getHotkeyLabel(HotkeyAction.nextGrenade);
       final prevStepKey = _getHotkeyLabel(HotkeyAction.prevStep);
       final nextStepKey = _getHotkeyLabel(HotkeyAction.nextStep);
+      final scrollUpKey = _getHotkeyLabel(HotkeyAction.scrollUp);
+      final scrollDownKey = _getHotkeyLabel(HotkeyAction.scrollDown);
 
       return Container(
         height: 60,
@@ -635,7 +678,7 @@ class OverlayWindowState extends State<OverlayWindow> {
         ),
         child: Center(
           child: Text(
-            '$navUpKey$navLeftKey$navDownKey$navRightKey 导航  |  $increaseSpeedKey/$decreaseSpeedKey 调速 (${state.navSpeedLevel}/5)  |  $prevGrenadeKey/$nextGrenadeKey 道具  |  $prevStepKey/$nextStepKey 步骤',
+            '$navUpKey$navLeftKey$navDownKey$navRightKey 导航 | $prevGrenadeKey/$nextGrenadeKey 道具 | $prevStepKey/$nextStepKey 步骤 | $scrollUpKey/$scrollDownKey 滚动',
             style: const TextStyle(color: Colors.grey, fontSize: 11),
           ),
         ),
@@ -700,41 +743,16 @@ class OverlayWindowState extends State<OverlayWindow> {
                       _getHotkeyLabel(HotkeyAction.nextGrenade);
                   final prevStepKey = _getHotkeyLabel(HotkeyAction.prevStep);
                   final nextStepKey = _getHotkeyLabel(HotkeyAction.nextStep);
+                  final scrollUpKey = _getHotkeyLabel(HotkeyAction.scrollUp);
+                  final scrollDownKey =
+                      _getHotkeyLabel(HotkeyAction.scrollDown);
 
                   return Text(
-                    '$navUpKey$navLeftKey$navDownKey$navRightKey 导航  |  $smokeKey/$flashKey/$molotovKey/$heKey 过滤  |  $prevGrenadeKey/$nextGrenadeKey 道具  |  $prevStepKey/$nextStepKey 步骤',
+                    '$navUpKey$navLeftKey$navDownKey$navRightKey 导航 | $smokeKey/$flashKey/$molotovKey/$heKey 过滤 | $prevGrenadeKey/$nextGrenadeKey 道具 | $prevStepKey/$nextStepKey 步骤 | $scrollUpKey/$scrollDownKey 滚动',
                     style: TextStyle(color: Colors.grey[600], fontSize: 10),
                   );
                 }),
               ),
-              // 右侧：速度档位显示（动态获取）
-              Builder(builder: (context) {
-                final increaseSpeedKey =
-                    _getHotkeyLabel(HotkeyAction.increaseNavSpeed);
-                final decreaseSpeedKey =
-                    _getHotkeyLabel(HotkeyAction.decreaseNavSpeed);
-
-                return Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(
-                      color: Colors.orange.withValues(alpha: 0.5),
-                      width: 1,
-                    ),
-                  ),
-                  child: Text(
-                    '速度: ${state.navSpeedLevel}/5  ($increaseSpeedKey/$decreaseSpeedKey)',
-                    style: const TextStyle(
-                      color: Colors.orange,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                );
-              }),
             ],
           ),
         ],
@@ -997,6 +1015,26 @@ class OverlayWindowState extends State<OverlayWindow> {
       case HotkeyAction.decreaseNavSpeed:
         state.decreaseNavSpeed();
         break;
+      case HotkeyAction.scrollUp:
+        scrollContent(-300);
+        break;
+      case HotkeyAction.scrollDown:
+        scrollContent(300);
+        break;
     }
+  }
+
+  /// 滚动内容区域（公开方法，供 IPC 调用）
+  void scrollContent(double delta) {
+    if (!_scrollController.hasClients) return;
+    final newOffset = (_scrollController.offset + delta).clamp(
+      0.0,
+      _scrollController.position.maxScrollExtent,
+    );
+    _scrollController.animateTo(
+      newOffset,
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOut,
+    );
   }
 }

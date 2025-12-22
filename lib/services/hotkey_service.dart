@@ -69,6 +69,9 @@ class HotkeyService {
       // 速度调节
       HotkeyAction.increaseNavSpeed,
       HotkeyAction.decreaseNavSpeed,
+      // 滚动控制
+      HotkeyAction.scrollUp,
+      HotkeyAction.scrollDown,
     ];
 
     for (final action in overlayActions) {

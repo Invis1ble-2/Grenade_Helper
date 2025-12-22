@@ -14,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models.dart';
 import '../providers.dart';
+import '../main.dart' show sendOverlayCommand;
 
 // --- 视频播放小组件 ---
 class VideoPlayerWidget extends StatefulWidget {
@@ -120,6 +121,7 @@ class GrenadeDetailScreen extends ConsumerStatefulWidget {
 class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
   Grenade? grenade;
   final _titleController = TextEditingController();
+  String? _originalTitle; // 保存原始标题，用于检测未保存的修改
 
   @override
   void initState() {
@@ -138,6 +140,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
       }
       if (resetTitle) {
         _titleController.text = grenade!.title;
+        _originalTitle = grenade!.title; // 保存原始标题
       }
     }
     setState(() {});
@@ -187,7 +190,10 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     if (grenade == null) return;
     final isar = ref.read(isarProvider);
 
-    if (title != null) grenade!.title = title;
+    if (title != null) {
+      grenade!.title = title;
+      _originalTitle = title; // 更新原始标题，避免保存后仍提示未保存
+    }
     if (type != null) grenade!.type = type;
     if (team != null) grenade!.team = team;
     if (isFavorite != null) grenade!.isFavorite = isFavorite;
@@ -1041,106 +1047,163 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     );
   }
 
+  /// 检查标题是否有未保存的修改
+  bool _hasTitleChanges() {
+    if (!widget.isEditing) return false;
+    if (_originalTitle == null) return false;
+    return _titleController.text != _originalTitle;
+  }
+
+  /// 处理返回操作，检测未保存的标题修改
+  Future<bool> _onWillPop() async {
+    if (!_hasTitleChanges()) {
+      return true; // 没有修改，允许直接返回
+    }
+
+    // 有未保存的修改，弹出确认对话框
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('标题未保存'),
+        content: const Text('您修改了道具标题但尚未保存，要如何处理？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'cancel'),
+            child: const Text('继续编辑'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'discard'),
+            child: const Text('放弃修改', style: TextStyle(color: Colors.red)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'save'),
+            child: const Text('保存并退出', style: TextStyle(color: Colors.green)),
+          ),
+        ],
+      ),
+    );
+
+    if (result == 'save') {
+      _updateGrenade(title: _titleController.text);
+      return true;
+    } else if (result == 'discard') {
+      return true;
+    }
+    return false; // 取消或点击外部
+  }
+
   @override
   Widget build(BuildContext context) {
     if (grenade == null)
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     final isEditing = widget.isEditing;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: isEditing
-            ? TextField(
-                controller: _titleController,
-                style: TextStyle(
-                    color: Theme.of(context).appBarTheme.foregroundColor,
-                    fontSize: 18),
-                decoration: InputDecoration(
-                  border: InputBorder.none,
-                  hintText: "输入标题",
-                  hintStyle: TextStyle(color: Theme.of(context).hintColor),
-                  suffixIcon: IconButton(
-                    icon: const Icon(Icons.check_circle,
-                        color: Colors.greenAccent),
-                    tooltip: "保存标题",
-                    onPressed: () {
-                      FocusScope.of(context).unfocus();
-                      _updateGrenade(title: _titleController.text);
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                          content: Text("标题已更新"),
-                          duration: Duration(milliseconds: 500)));
-                    },
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        final shouldPop = await _onWillPop();
+        if (shouldPop && mounted) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: isEditing
+              ? TextField(
+                  controller: _titleController,
+                  style: TextStyle(
+                      color: Theme.of(context).appBarTheme.foregroundColor,
+                      fontSize: 18),
+                  decoration: InputDecoration(
+                    border: InputBorder.none,
+                    hintText: "输入标题",
+                    hintStyle: TextStyle(color: Theme.of(context).hintColor),
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.check_circle,
+                          color: Colors.greenAccent),
+                      tooltip: "保存标题",
+                      onPressed: () {
+                        FocusScope.of(context).unfocus();
+                        _updateGrenade(title: _titleController.text);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text("标题已更新"),
+                                duration: Duration(milliseconds: 500)));
+                      },
+                    ),
                   ),
-                ),
-                onSubmitted: (val) => _updateGrenade(title: val),
-              )
-            : Text(grenade!.title),
-        actions: [
-          IconButton(
-            icon: Icon(grenade!.isFavorite ? Icons.star : Icons.star_border,
-                color: Colors.yellowAccent),
-            onPressed: () => _updateGrenade(isFavorite: !grenade!.isFavorite),
-          ),
-          if (isEditing)
+                  onSubmitted: (val) => _updateGrenade(title: val),
+                )
+              : Text(grenade!.title),
+          actions: [
             IconButton(
-                icon: const Icon(Icons.delete_outline, color: Colors.red),
-                onPressed: _deleteGrenade),
-        ],
-      ),
-      body: Column(
-        children: [
-          if (isEditing)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              child: Row(
-                children: [
-                  DropdownButton<int>(
-                    value: grenade!.type,
-                    dropdownColor: Theme.of(context).colorScheme.surface,
-                    items: const [
-                      DropdownMenuItem(
-                          value: GrenadeType.smoke, child: Text("☁️ 烟雾")),
-                      DropdownMenuItem(
-                          value: GrenadeType.flash, child: Text("⚡ 闪光")),
-                      DropdownMenuItem(
-                          value: GrenadeType.molotov, child: Text("🔥 燃烧")),
-                      DropdownMenuItem(
-                          value: GrenadeType.he, child: Text("💣 手雷")),
-                    ],
-                    onChanged: (val) => _updateGrenade(type: val),
-                    underline: Container(),
-                  ),
-                  const Spacer(),
-                  DropdownButton<int>(
-                    value: grenade!.team,
-                    dropdownColor: Theme.of(context).colorScheme.surface,
-                    items: const [
-                      DropdownMenuItem(
-                          value: TeamType.all, child: Text("⚪ 通用")),
-                      DropdownMenuItem(
-                          value: TeamType.ct, child: Text("🔵 CT (警)")),
-                      DropdownMenuItem(
-                          value: TeamType.t, child: Text("🟡 T (匪)")),
-                    ],
-                    onChanged: (val) => _updateGrenade(team: val),
-                    underline: Container(),
-                  ),
-                ],
-              ),
+              icon: Icon(grenade!.isFavorite ? Icons.star : Icons.star_border,
+                  color: Colors.yellowAccent),
+              onPressed: () => _updateGrenade(isFavorite: !grenade!.isFavorite),
             ),
-          Expanded(child: _buildStepList(isEditing)),
-          _buildFooterInfo(),
-        ],
+            if (isEditing)
+              IconButton(
+                  icon: const Icon(Icons.delete_outline, color: Colors.red),
+                  onPressed: _deleteGrenade),
+          ],
+        ),
+        body: Column(
+          children: [
+            if (isEditing)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                child: Row(
+                  children: [
+                    DropdownButton<int>(
+                      value: grenade!.type,
+                      dropdownColor: Theme.of(context).colorScheme.surface,
+                      items: const [
+                        DropdownMenuItem(
+                            value: GrenadeType.smoke, child: Text("☁️ 烟雾")),
+                        DropdownMenuItem(
+                            value: GrenadeType.flash, child: Text("⚡ 闪光")),
+                        DropdownMenuItem(
+                            value: GrenadeType.molotov, child: Text("🔥 燃烧")),
+                        DropdownMenuItem(
+                            value: GrenadeType.he, child: Text("💣 手雷")),
+                      ],
+                      onChanged: (val) => _updateGrenade(type: val),
+                      underline: Container(),
+                    ),
+                    const Spacer(),
+                    DropdownButton<int>(
+                      value: grenade!.team,
+                      dropdownColor: Theme.of(context).colorScheme.surface,
+                      items: const [
+                        DropdownMenuItem(
+                            value: TeamType.all, child: Text("⚪ 通用")),
+                        DropdownMenuItem(
+                            value: TeamType.ct, child: Text("🔵 CT (警)")),
+                        DropdownMenuItem(
+                            value: TeamType.t, child: Text("🟡 T (匪)")),
+                      ],
+                      onChanged: (val) => _updateGrenade(team: val),
+                      underline: Container(),
+                    ),
+                  ],
+                ),
+              ),
+            Expanded(child: _buildStepList(isEditing)),
+            _buildFooterInfo(),
+          ],
+        ),
+        floatingActionButton: isEditing
+            ? FloatingActionButton.extended(
+                onPressed: _startAddStep,
+                icon: const Icon(Icons.add),
+                label: const Text("添加步骤"),
+                backgroundColor: Colors.orange,
+              )
+            : null,
       ),
-      floatingActionButton: isEditing
-          ? FloatingActionButton.extended(
-              onPressed: _startAddStep,
-              icon: const Icon(Icons.add),
-              label: const Text("添加步骤"),
-              backgroundColor: Colors.orange,
-            )
-          : null,
     );
   }
 
@@ -1230,6 +1293,8 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                   });
                   await _markAsLocallyEdited(); // 删除媒体算实质性编辑
                   _loadData();
+                  // 通知悬浮窗刷新数据
+                  sendOverlayCommand('reload_data');
                 },
                 child: Container(
                   width: 28,

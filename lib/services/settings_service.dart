@@ -98,6 +98,8 @@ enum HotkeyAction {
   togglePlayPause, // 播放/暂停视频
   increaseNavSpeed, // 增加导航速度
   decreaseNavSpeed, // 减少导航速度
+  scrollUp, // 向上滚动
+  scrollDown, // 向下滚动
 }
 
 /// 设置服务 - 管理用户设置和快捷键配置
@@ -210,6 +212,14 @@ class SettingsService {
       HotkeyAction.decreaseNavSpeed: HotkeyConfig(
         key: LogicalKeyboardKey.minus, // - 键
       ),
+      HotkeyAction.scrollUp: HotkeyConfig(
+        key: LogicalKeyboardKey.pageUp,
+        modifiers: {LogicalKeyboardKey.alt},
+      ),
+      HotkeyAction.scrollDown: HotkeyConfig(
+        key: LogicalKeyboardKey.pageDown,
+        modifiers: {LogicalKeyboardKey.alt},
+      ),
     };
   }
 
@@ -245,11 +255,11 @@ class SettingsService {
   static (double width, double height) calculateSizePixels(int sizeIndex) {
     switch (sizeIndex) {
       case 0:
-        return (450.0, 760.0); // 小（窄长）
+        return (500.0, 800.0); // 小（窄长）
       case 2:
         return (600.0, 950.0); // 大
       default:
-        return (500.0, 820.0); // 中（默认，窄长）
+        return (550.0, 850.0); // 中（默认，窄长）
     }
   }
 

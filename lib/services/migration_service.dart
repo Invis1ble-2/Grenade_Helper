@@ -20,8 +20,19 @@ class MigrationService {
     const uuid = Uuid();
     await isar.writeTxn(() async {
       for (final g in grenadesNeedingUuid) {
+        // 加载链接关系
+        await g.layer.load();
+        await g.steps.load();
+
+        // 生成 UUID
         g.uniqueId = uuid.v4();
+
+        // 保存道具
         await isar.grenades.put(g);
+
+        // 重新保存链接关系（确保不丢失）
+        await g.layer.save();
+        await g.steps.save();
       }
     });
 

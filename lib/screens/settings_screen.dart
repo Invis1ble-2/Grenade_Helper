@@ -283,7 +283,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ListTile(
               title: const Text('窗口尺寸'),
               subtitle: Text(
-                  ['小 (350×700)', '中 (450×820)', '大 (600×950)'][_overlaySize]),
+                  ['小 (500×800)', '中 (550×850)', '大 (600×950)'][_overlaySize]),
               trailing: SegmentedButton<int>(
                 segments: const [
                   ButtonSegment(value: 0, label: Text('小')),
