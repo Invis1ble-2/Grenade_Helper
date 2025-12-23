@@ -27,18 +27,36 @@ class CloudPackageService {
     return null;
   }
 
-  /// 从 URL 下载 .cs2pkg 文件
-  static Future<String?> downloadPackage(String url) async {
+  /// 从 URL 下载 .cs2pkg 文件（带进度回调）
+  /// [onProgress] 回调参数：(已下载字节数, 总字节数)
+  static Future<String?> downloadPackage(
+    String url, {
+    void Function(int received, int total)? onProgress,
+  }) async {
     try {
       // 如果是相对路径，拼接仓库基础地址
       final fullUrl = url.startsWith('http') ? url : '$kRepoBaseUrl$url';
 
-      final response = await http.get(Uri.parse(fullUrl));
+      final request = http.Request('GET', Uri.parse(fullUrl));
+      final response = await http.Client().send(request);
+
       if (response.statusCode == 200) {
+        final contentLength = response.contentLength ?? 0;
         final tempDir = await getTemporaryDirectory();
         final fileName = url.split('/').last;
         final filePath = '${tempDir.path}/$fileName';
-        await File(filePath).writeAsBytes(response.bodyBytes);
+
+        final file = File(filePath);
+        final sink = file.openWrite();
+        int received = 0;
+
+        await for (final chunk in response.stream) {
+          sink.add(chunk);
+          received += chunk.length;
+          onProgress?.call(received, contentLength);
+        }
+
+        await sink.close();
         return filePath;
       }
     } catch (e) {

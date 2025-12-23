@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import '../models/cloud_package.dart';
 import '../services/cloud_package_service.dart';
 import '../services/data_service.dart';
@@ -20,6 +22,9 @@ class _CloudPackagesScreenState extends ConsumerState<CloudPackagesScreen> {
   String _selectedMap = 'all'; // 'all' = 全部
   final Set<String> _downloadingIds = {};
   final Map<String, String?> _lastImportedDates = {};
+  final Map<String, double> _downloadProgress = {}; // 下载进度 0.0 - 1.0
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -53,11 +58,23 @@ class _CloudPackagesScreenState extends ConsumerState<CloudPackagesScreen> {
   }
 
   Future<void> _downloadAndImport(CloudPackage pkg) async {
-    setState(() => _downloadingIds.add(pkg.id));
+    setState(() {
+      _downloadingIds.add(pkg.id);
+      _downloadProgress[pkg.id] = 0.0;
+    });
 
     try {
-      // 下载文件
-      final filePath = await CloudPackageService.downloadPackage(pkg.url);
+      // 下载文件（带进度）
+      final filePath = await CloudPackageService.downloadPackage(
+        pkg.url,
+        onProgress: (received, total) {
+          if (total > 0) {
+            setState(() {
+              _downloadProgress[pkg.id] = received / total;
+            });
+          }
+        },
+      );
       if (filePath == null) {
         _showMessage('下载失败');
         return;
@@ -68,6 +85,11 @@ class _CloudPackagesScreenState extends ConsumerState<CloudPackagesScreen> {
       final dataService = DataService(isar);
       final resultMsg = await dataService.importFromPath(filePath);
 
+      // 删除临时文件
+      try {
+        await File(filePath).delete();
+      } catch (_) {}
+
       // 标记已导入（保存版本号）
       await CloudPackageService.markPackageImported(pkg.id, pkg.version);
       _lastImportedDates[pkg.id] = pkg.version;
@@ -76,7 +98,10 @@ class _CloudPackagesScreenState extends ConsumerState<CloudPackagesScreen> {
     } catch (e) {
       _showMessage('导入失败: $e');
     } finally {
-      setState(() => _downloadingIds.remove(pkg.id));
+      setState(() {
+        _downloadingIds.remove(pkg.id);
+        _downloadProgress.remove(pkg.id);
+      });
     }
   }
 
@@ -88,7 +113,18 @@ class _CloudPackagesScreenState extends ConsumerState<CloudPackagesScreen> {
 
   List<CloudPackage> get _filteredPackages {
     if (_packages == null) return [];
-    return CloudPackageService.filterByMap(_packages!, _selectedMap);
+    var result = CloudPackageService.filterByMap(_packages!, _selectedMap);
+    // 搜索过滤
+    if (_searchQuery.isNotEmpty) {
+      final query = _searchQuery.toLowerCase();
+      result = result
+          .where((p) =>
+              p.name.toLowerCase().contains(query) ||
+              p.description.toLowerCase().contains(query) ||
+              p.author.toLowerCase().contains(query))
+          .toList();
+    }
+    return result;
   }
 
   List<String> get _availableMaps {
@@ -106,6 +142,39 @@ class _CloudPackagesScreenState extends ConsumerState<CloudPackagesScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('在线道具库'),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(48),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: '搜索道具包...',
+                prefixIcon: const Icon(Icons.search, size: 20),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 18),
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() => _searchQuery = '');
+                        },
+                      )
+                    : null,
+                isDense: true,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  borderSide: BorderSide.none,
+                ),
+                filled: true,
+                fillColor:
+                    Theme.of(context).colorScheme.surfaceContainerHighest,
+              ),
+              onChanged: (value) => setState(() => _searchQuery = value),
+            ),
+          ),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -209,10 +278,16 @@ class _CloudPackagesScreenState extends ConsumerState<CloudPackagesScreen> {
                 color: Colors.orange.withOpacity(0.2),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Icon(
-                pkg.map == null ? Icons.public : Icons.map,
-                color: Colors.orange,
-              ),
+              child: pkg.map != null
+                  ? Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: SvgPicture.asset(
+                        'assets/icons/${pkg.map}_icon.svg',
+                        width: 36,
+                        height: 36,
+                      ),
+                    )
+                  : const Icon(Icons.public, color: Colors.orange),
             ),
             const SizedBox(width: 12),
             // 信息
@@ -270,21 +345,47 @@ class _CloudPackagesScreenState extends ConsumerState<CloudPackagesScreen> {
               ),
             ),
             const SizedBox(width: 8),
-            // 下载按钮
-            isDownloading
-                ? const SizedBox(
-                    width: 36,
-                    height: 36,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : IconButton(
-                    onPressed: () => _downloadAndImport(pkg),
-                    icon: Icon(
-                      isUpToDate ? Icons.check_circle : Icons.download,
-                      color: isUpToDate ? Colors.green : Colors.orange,
+            // 下载/重新下载按钮
+            if (isDownloading)
+              SizedBox(
+                width: 48,
+                height: 48,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    CircularProgressIndicator(
+                      value: _downloadProgress[pkg.id] ?? 0,
+                      strokeWidth: 3,
+                      backgroundColor: Colors.grey.withOpacity(0.3),
                     ),
-                    tooltip: isUpToDate ? '已是最新' : '下载',
-                  ),
+                    Text(
+                      '${((_downloadProgress[pkg.id] ?? 0) * 100).toInt()}%',
+                      style: const TextStyle(fontSize: 10),
+                    ),
+                  ],
+                ),
+              )
+            else ...[
+              // 已下载时显示重新下载按钮
+              if (lastImportedVersion != null)
+                IconButton(
+                  onPressed: () => _downloadAndImport(pkg),
+                  icon: const Icon(Icons.refresh, color: Colors.grey),
+                  tooltip: '重新下载',
+                  iconSize: 20,
+                  constraints:
+                      const BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+              // 主按钮：下载或已是最新
+              IconButton(
+                onPressed: isUpToDate ? null : () => _downloadAndImport(pkg),
+                icon: Icon(
+                  isUpToDate ? Icons.check_circle : Icons.download,
+                  color: isUpToDate ? Colors.green : Colors.orange,
+                ),
+                tooltip: isUpToDate ? '已是最新' : '下载',
+              ),
+            ],
           ],
         ),
       ),
