@@ -176,6 +176,51 @@ class _CloudPackagesScreenState extends ConsumerState<CloudPackagesScreen> {
           ),
         ),
         actions: [
+          // 源切换按钮
+          PopupMenuButton<bool>(
+            icon: Icon(
+              CloudPackageService.isUsingGitee
+                  ? Icons.cloud
+                  : Icons.cloud_outlined,
+            ),
+            tooltip: '切换下载源',
+            onSelected: (useGitee) {
+              CloudPackageService.switchSource(useGitee);
+              _loadPackages();
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: false,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.check,
+                      color: !CloudPackageService.isUsingGitee
+                          ? Colors.green
+                          : Colors.transparent,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text('GitHub'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: true,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.check,
+                      color: CloudPackageService.isUsingGitee
+                          ? Colors.green
+                          : Colors.transparent,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text('Gitee (国内加速)'),
+                  ],
+                ),
+              ),
+            ],
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: '刷新',

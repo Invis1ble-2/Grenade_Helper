@@ -7,16 +7,24 @@ import '../models/cloud_package.dart';
 
 /// 云端道具包服务
 class CloudPackageService {
-  // 格式: https://raw.githubusercontent.com/用户名/仓库名/main/
-  static const String kRepoBaseUrl =
+  // GitHub 源（主）
+  static const String kGitHubBaseUrl =
       'https://raw.githubusercontent.com/Invis1ble-2/grenades_repo/main/';
+  // Gitee 镜像源（备用）
+  static const String kGiteeBaseUrl =
+      'https://gitee.com/Invis1ble-2/grenades_repo/raw/main/';
+
+  // 当前使用的源
+  static String kRepoBaseUrl = kGitHubBaseUrl;
 
   static const String _lastImportedKey = 'cloud_package_last_imported';
 
   /// 获取云端道具包索引
   static Future<CloudPackageIndex?> fetchIndex() async {
     try {
-      final response = await http.get(Uri.parse('${kRepoBaseUrl}index.json'));
+      final response = await http
+          .get(Uri.parse('${kRepoBaseUrl}index.json'))
+          .timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
         return CloudPackageIndex.fromJson(json);
@@ -27,18 +35,34 @@ class CloudPackageService {
     return null;
   }
 
+  /// 切换源
+  static void switchSource(bool useGitee) {
+    kRepoBaseUrl = useGitee ? kGiteeBaseUrl : kGitHubBaseUrl;
+  }
+
+  /// 当前是否使用 Gitee
+  static bool get isUsingGitee => kRepoBaseUrl == kGiteeBaseUrl;
+
   /// 从 URL 下载 .cs2pkg 文件（带进度回调）
   /// [onProgress] 回调参数：(已下载字节数, 总字节数)
   static Future<String?> downloadPackage(
     String url, {
     void Function(int received, int total)? onProgress,
   }) async {
-    try {
-      // 如果是相对路径，拼接仓库基础地址
-      final fullUrl = url.startsWith('http') ? url : '$kRepoBaseUrl$url';
+    // 如果是相对路径，拼接当前源
+    final fullUrl = url.startsWith('http') ? url : '$kRepoBaseUrl$url';
+    return _downloadFromUrl(fullUrl, onProgress: onProgress);
+  }
 
-      final request = http.Request('GET', Uri.parse(fullUrl));
-      final response = await http.Client().send(request);
+  static Future<String?> _downloadFromUrl(
+    String url, {
+    void Function(int received, int total)? onProgress,
+  }) async {
+    try {
+      final request = http.Request('GET', Uri.parse(url));
+      final client = http.Client();
+      final response =
+          await client.send(request).timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
         final contentLength = response.contentLength ?? 0;
@@ -60,7 +84,7 @@ class CloudPackageService {
         return filePath;
       }
     } catch (e) {
-      print('下载失败: $e');
+      print('下载失败 ($url): $e');
     }
     return null;
   }
