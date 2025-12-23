@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/legacy.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:isar_community/isar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 import '../models.dart';
 import '../providers.dart';
 import '../main.dart';
@@ -308,6 +309,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       xRatio: _tempTapPosition!.dx,
       yRatio: _tempTapPosition!.dy,
       isNewImport: false,
+      uniqueId: const Uuid().v4(),
     );
     int id = 0;
     await isar.writeTxn(() async {
@@ -767,7 +769,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         team: TeamType.all,
         xRatio: cluster.xRatio,
         yRatio: cluster.yRatio,
-        isNewImport: false);
+        isNewImport: false,
+        uniqueId: const Uuid().v4());
     int id = 0;
     await isar.writeTxn(() async {
       id = await isar.grenades.put(grenade);

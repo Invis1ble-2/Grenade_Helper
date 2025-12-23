@@ -259,13 +259,13 @@ class _AboutScreenState extends State<AboutScreen> {
                           ],
                         ),
                         child: Image.asset(
-                          'assets/icons/afdian_qr.png', // TODO: 替换为你的爱发电二维码
-                          width: 150,
-                          height: 150,
+                          'assets/icons/afdian.jpg',
+                          width: 300,
+                          height: 300,
                           fit: BoxFit.contain,
                           errorBuilder: (_, __, ___) => Container(
-                            width: 150,
-                            height: 150,
+                            width: 300,
+                            height: 300,
                             decoration: BoxDecoration(
                               color: Colors.grey[200],
                               borderRadius: BorderRadius.circular(8),
