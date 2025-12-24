@@ -95,6 +95,13 @@ class HomeScreen extends ConsumerWidget {
             ),
           ),
         ),
+        // 圣诞灯带
+        bottom: seasonalTheme != null
+            ? const PreferredSize(
+                preferredSize: Size.fromHeight(24),
+                child: ChristmasLights(height: 24),
+              )
+            : null,
       ),
       drawer: Drawer(
         child: ListView(
