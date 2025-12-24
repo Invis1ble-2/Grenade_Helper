@@ -306,7 +306,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen>
                 );
               },
               icon: const Icon(Icons.cloud_download),
-              label: const Text("浏览在线道具库（开发中）", style: TextStyle(fontSize: 14)),
+              label: const Text("浏览在线道具库", style: TextStyle(fontSize: 14)),
               style: OutlinedButton.styleFrom(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 24, vertical: 12),

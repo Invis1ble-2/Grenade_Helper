@@ -324,3 +324,83 @@ class _LightsPainter extends CustomPainter {
   bool shouldRepaint(_LightsPainter oldDelegate) =>
       oldDelegate.animationValue != animationValue;
 }
+
+/// 圣诞帽组件
+class ChristmasHat extends StatelessWidget {
+  final double width;
+
+  const ChristmasHat({
+    super.key,
+    this.width = 50,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      height: width * 0.8,
+      child: CustomPaint(
+        painter: _ChristmasHatPainter(),
+      ),
+    );
+  }
+}
+
+class _ChristmasHatPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final width = size.width;
+    final height = size.height;
+
+    // 红色帽子主体（三角形）
+    final hatPath = Path();
+    hatPath.moveTo(width * 0.5, 0); // 顶点
+    hatPath.lineTo(width * 0.05, height * 0.75); // 左下
+    hatPath.quadraticBezierTo(
+        width * 0.5, height * 0.65, width * 0.95, height * 0.75); // 底部弧线
+    hatPath.close();
+
+    final hatPaint = Paint()
+      ..color = const Color(0xFFD42426)
+      ..style = PaintingStyle.fill;
+    canvas.drawPath(hatPath, hatPaint);
+
+    // 白色毛边
+    final furPath = Path();
+    furPath.moveTo(0, height * 0.75);
+    furPath.quadraticBezierTo(width * 0.5, height * 0.6, width, height * 0.75);
+    furPath.lineTo(width, height);
+    furPath.quadraticBezierTo(width * 0.5, height * 0.85, 0, height);
+    furPath.close();
+
+    final furPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    canvas.drawPath(furPath, furPaint);
+
+    // 毛边纹理（小圆点）
+    final dotPaint = Paint()
+      ..color = const Color(0xFFF5F5F5)
+      ..style = PaintingStyle.fill;
+    for (double x = width * 0.1; x < width * 0.9; x += width * 0.15) {
+      canvas.drawCircle(Offset(x, height * 0.88), width * 0.03, dotPaint);
+    }
+
+    // 顶部白色绒球
+    final pompomPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(
+        Offset(width * 0.5, height * 0.08), width * 0.12, pompomPaint);
+
+    // 绒球阴影
+    final pompomShadow = Paint()
+      ..color = const Color(0xFFE0E0E0)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(
+        Offset(width * 0.52, height * 0.1), width * 0.06, pompomShadow);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}

@@ -110,13 +110,26 @@ class HomeScreen extends ConsumerWidget {
                 child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                ClipOval(
-                  child: Image.asset(
-                    'assets/icons/app_icon.png',
-                    width: 80,
-                    height: 80,
-                    fit: BoxFit.cover,
-                  ),
+                // 带圣诞帽的 Logo
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    ClipOval(
+                      child: Image.asset(
+                        'assets/icons/app_icon.png',
+                        width: 80,
+                        height: 80,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                    // 圣诞帽（戴在 logo 顶部）
+                    if (seasonalTheme != null)
+                      const Positioned(
+                        top: -25,
+                        left: 5,
+                        child: ChristmasHat(width: 70),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 12),
                 Row(
