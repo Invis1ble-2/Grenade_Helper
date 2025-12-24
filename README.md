@@ -71,6 +71,10 @@
 
 如果这个项目对你有帮助，欢迎在爱发电支持我们！
 
+<p align="center">
+  <img src="assets/icons/afdian.jpg" alt="afdian qrcode" width="300">
+</p>
+
 [![爱发电](https://img.shields.io/badge/爱发电-支持作者-ff69b4?logo=heart)](https://afdian.com/a/Invis1ble)
 
 
@@ -78,7 +82,7 @@
 
 ## 🛠️ 开发与构建 (Development)
 
-如果你是开发者，想贡献代码：
+如果你想在本地开发这个项目，可以按照以下步骤进行构建：
 
 ```bash
 # Clone 仓库

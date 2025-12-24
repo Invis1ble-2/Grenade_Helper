@@ -132,8 +132,7 @@ class _AboutScreenState extends State<AboutScreen> {
                 _LinkItem(
                     icon: Icons.web,
                     text: '官方网站',
-                    onTap: () =>
-                        _launchUrl('https://grenade-helper.zeabur.app/')),
+                    onTap: () => _launchUrl('https://grenade-helper.top/')),
                 _LinkItem(
                     icon: Icons.web,
                     text: '哔哩哔哩',

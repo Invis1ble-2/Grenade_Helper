@@ -7,7 +7,7 @@ import { execSync } from 'child_process';
 const OWNER = 'Invis1ble-2';
 const REPO = 'Grenade_Helper';
 // 【重要】部署完 Zeabur 后，把这里改成你的真实域名
-const ZEABUR_URL = 'https://app-grenade-helper.zeabur.app';
+const ZEABUR_URL = 'https://cdn.grenade-helper.top:8443';
 
 // 支持的平台列表
 const SUPPORTED_PLATFORMS = ['android', 'windows', 'ios'];

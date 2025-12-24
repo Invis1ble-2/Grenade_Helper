@@ -38,13 +38,13 @@ class DownloadLinks {
 
   /// 官方下载链接（根据平台动态生成）
   static String getOfficialUrl(String platform) {
-    return 'https://app-grenade-helper.zeabur.app/download/$platform';
+    return 'https://cdn.grenade-helper.top:8443/download/$platform';
   }
 }
 
 /// 更新检测服务
 class UpdateService {
-  static const String _baseUrl = 'https://app-grenade-helper.zeabur.app';
+  static const String _baseUrl = 'https://cdn.grenade-helper.top:8443';
 
   /// 获取当前平台标识
   String get currentPlatform {
