@@ -6,8 +6,15 @@ import { execSync } from 'child_process';
 // === 配置区域 ===
 const OWNER = 'Invis1ble-2';
 const REPO = 'Grenade_Helper';
-// 【重要】部署完 Zeabur 后，把这里改成你的真实域名
-const ZEABUR_URL = 'https://cdn.grenade-helper.top:8443';
+
+// 【双服务器配置】同时向两个服务器上传，确保新旧版本App都能获取更新
+const SERVER_URLS = [
+  'https://cdn.grenade-helper.top:8443',  // 新服务器（日本VPS）
+  'https://app-grenade-helper.zeabur.app' // 旧服务器（Zeabur，兼容旧版App）
+];
+
+// 主服务器（用于检查版本）
+const PRIMARY_URL = SERVER_URLS[0];
 
 // 支持的平台列表
 const SUPPORTED_PLATFORMS = ['android', 'windows', 'ios'];
@@ -65,8 +72,8 @@ async function main() {
 
     if (!release) throw new Error("Could not fetch release info. Check Token/Permissions.");
 
-    // 2. 获取 Zeabur 当前版本
-    const currentStatus = await fetchJson(`${ZEABUR_URL}/update/${PLATFORM}`).catch(() => null);
+    // 2. 获取主服务器当前版本
+    const currentStatus = await fetchJson(`${PRIMARY_URL}/update/${PLATFORM}`).catch(() => null);
     const versionName = release.tag_name.replace(/^v/, '');
 
     // 3. 计算 VersionCode
@@ -151,24 +158,32 @@ async function main() {
       throw new Error("Downloaded file is too small, likely an auth error.");
     }
 
-    // 5. 上传到 Zeabur
-    console.log(`Uploading to Zeabur (Platform: ${PLATFORM})...`);
-
+    // 5. 上传到所有服务器（双服务器同步）
     const cleanContent = bodyText.replace(/(?:vc|versionCode)\s*[:=]?\s*(\d+)/ig, '').trim();
 
-    // 传递 platform 参数
-    const uploadCmd = [
-      `curl -X POST "${ZEABUR_URL}/upload"`,
-      `-H "Authorization: ${ADMIN_SECRET}"`,
-      `-F "file=@${tempFilePath}"`,
-      `-F "versionCode=${versionCode}"`,
-      `-F "versionName=${versionName}"`,
-      `-F "content=${cleanContent || 'Update'}"`,
-      `-F "platform=${PLATFORM}"`
-    ].join(' ');
+    for (const serverUrl of SERVER_URLS) {
+      console.log(`Uploading to ${serverUrl} (Platform: ${PLATFORM})...`);
 
-    execSync(uploadCmd);
-    console.log("Upload successful!");
+      const uploadCmd = [
+        `curl -X POST "${serverUrl}/upload"`,
+        `-H "Authorization: ${ADMIN_SECRET}"`,
+        `-F "file=@${tempFilePath}"`,
+        `-F "versionCode=${versionCode}"`,
+        `-F "versionName=${versionName}"`,
+        `-F "content=${cleanContent || 'Update'}"`,
+        `-F "platform=${PLATFORM}"`
+      ].join(' ');
+
+      try {
+        execSync(uploadCmd);
+        console.log(`✓ Upload to ${serverUrl} successful!`);
+      } catch (err) {
+        console.error(`✗ Upload to ${serverUrl} failed:`, err.message);
+        // 继续上传到下一个服务器，不中断流程
+      }
+    }
+
+    console.log("All servers sync completed!");
 
     fs.unlinkSync(tempFilePath);
 
