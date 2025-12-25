@@ -26,6 +26,9 @@ class _CloudPackagesScreenState extends ConsumerState<CloudPackagesScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
+  // 用于防止竞态条件：只有最新的请求才能更新 UI
+  int _loadRequestId = 0;
+
   @override
   void initState() {
     super.initState();
@@ -33,18 +36,34 @@ class _CloudPackagesScreenState extends ConsumerState<CloudPackagesScreen> {
   }
 
   Future<void> _loadPackages() async {
+    // 递增请求 ID，使之前的请求失效
+    final currentRequestId = ++_loadRequestId;
+
     setState(() {
       _isLoading = true;
       _error = null;
     });
 
     final index = await CloudPackageService.fetchIndex();
+
+    // 检查此请求是否仍然是最新的请求
+    // 如果用户已经切换到其他数据源，忽略此结果
+    if (currentRequestId != _loadRequestId) {
+      return;
+    }
+
     if (index != null) {
       // 获取每个包的上次导入版本
       for (final pkg in index.packages) {
         _lastImportedDates[pkg.id] =
             await CloudPackageService.getLastImportedVersion(pkg.id);
       }
+
+      // 再次检查请求是否仍然有效（在获取版本信息期间可能已切换）
+      if (currentRequestId != _loadRequestId) {
+        return;
+      }
+
       setState(() {
         _packages = index.packages;
         _isLoading = false;
