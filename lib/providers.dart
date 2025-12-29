@@ -41,7 +41,8 @@ final typeFilterProvider = StateProvider.autoDispose<Set<int>>((ref) => <int>{
       GrenadeType.smoke,
       GrenadeType.flash,
       GrenadeType.molotov,
-      GrenadeType.he
+      GrenadeType.he,
+      GrenadeType.wallbang
     });
 
 // 出生点显示开关（默认关闭）

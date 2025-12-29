@@ -1154,6 +1154,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         return Icons.local_fire_department;
       case GrenadeType.he:
         return Icons.trip_origin;
+      case GrenadeType.wallbang:
+        return Icons.apps; // 穿点使用网格图标表示墙体
       default:
         return Icons.circle;
     }
@@ -1169,6 +1171,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         return Colors.red;
       case GrenadeType.he:
         return Colors.green;
+      case GrenadeType.wallbang:
+        return Colors.cyan;
       default:
         return Colors.white;
     }
@@ -1195,6 +1199,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         return "燃烧";
       case GrenadeType.he:
         return "手雷";
+      case GrenadeType.wallbang:
+        return "穿点";
       default:
         return "";
     }
@@ -2138,27 +2144,33 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                   _buildTypeFilterBtn(
                                       selectedTypes,
                                       GrenadeType.smoke,
-                                      "烟雾",
+                                      "烟",
                                       Icons.cloud,
                                       Colors.grey),
                                   _buildTypeFilterBtn(
                                       selectedTypes,
                                       GrenadeType.flash,
-                                      "闪光",
+                                      "闪",
                                       Icons.flash_on,
                                       Colors.yellow),
                                   _buildTypeFilterBtn(
                                       selectedTypes,
                                       GrenadeType.molotov,
-                                      "燃烧",
+                                      "火",
                                       Icons.local_fire_department,
                                       Colors.red),
                                   _buildTypeFilterBtn(
                                       selectedTypes,
                                       GrenadeType.he,
-                                      "手雷",
+                                      "雷",
                                       Icons.trip_origin,
                                       Colors.green),
+                                  _buildTypeFilterBtn(
+                                      selectedTypes,
+                                      GrenadeType.wallbang,
+                                      "穿",
+                                      Icons.apps,
+                                      Colors.cyan),
                                 ])),
                         const SizedBox(height: 10),
                         /* Search bar moved to AppBar */

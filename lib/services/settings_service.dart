@@ -94,6 +94,7 @@ enum HotkeyAction {
   toggleFlash, // 切换闪光弹过滤
   toggleMolotov, // 切换燃烧弹过滤
   toggleHE, // 切换手雷过滤
+  toggleWallbang, // 切换穿点过滤
   hideOverlay, // 隐藏悬浮窗
   togglePlayPause, // 播放/暂停视频
   increaseNavSpeed, // 增加导航速度
@@ -394,6 +395,10 @@ class SettingsService {
       ),
       HotkeyAction.toggleHE: HotkeyConfig(
         key: LogicalKeyboardKey.digit0,
+      ),
+      HotkeyAction.toggleWallbang: HotkeyConfig(
+        key: LogicalKeyboardKey.digit0,
+        modifiers: {LogicalKeyboardKey.alt},
       ),
       HotkeyAction.hideOverlay: HotkeyConfig(key: LogicalKeyboardKey.escape),
       HotkeyAction.togglePlayPause: HotkeyConfig(

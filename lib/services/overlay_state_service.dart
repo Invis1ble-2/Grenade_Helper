@@ -27,6 +27,7 @@ class OverlayStateService extends ChangeNotifier {
     GrenadeType.flash,
     GrenadeType.molotov,
     GrenadeType.he,
+    GrenadeType.wallbang,
   };
 
   // 准星位置 (0.0-1.0 比例坐标)

@@ -59,6 +59,7 @@ class HotkeyService {
       HotkeyAction.toggleFlash,
       HotkeyAction.toggleMolotov,
       HotkeyAction.toggleHE,
+      HotkeyAction.toggleWallbang,
       // 方向键导航
       HotkeyAction.navigateUp,
       HotkeyAction.navigateDown,

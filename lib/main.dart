@@ -183,6 +183,9 @@ Future<void> _runMainWindow() async {
     globalHotkeyService!.registerHandler(HotkeyAction.toggleHE, () {
       sendOverlayCommand('toggle_he');
     });
+    globalHotkeyService!.registerHandler(HotkeyAction.toggleWallbang, () {
+      sendOverlayCommand('toggle_wallbang');
+    });
     // 方向键导航 - 改为平滑移动模式 (start/stop)
     globalHotkeyService!.registerHandler(HotkeyAction.navigateUp, () {
       sendOverlayCommand('start_navigation', {'direction': 'up'});
@@ -358,6 +361,9 @@ Future<void> _runOverlayWindow(
         return 'ok';
       case 'toggle_he':
         overlayState.toggleFilter(GrenadeType.he);
+        return 'ok';
+      case 'toggle_wallbang':
+        overlayState.toggleFilter(GrenadeType.wallbang);
         return 'ok';
       // 方向键导航 - 兼容旧版步进移动指令
       case 'navigate_up':

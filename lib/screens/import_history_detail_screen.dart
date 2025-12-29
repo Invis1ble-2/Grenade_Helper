@@ -58,6 +58,8 @@ class _ImportHistoryDetailScreenState
         return '🔥';
       case GrenadeType.he:
         return '💥';
+      case GrenadeType.wallbang:
+        return '🧱';
       default:
         return '❓';
     }

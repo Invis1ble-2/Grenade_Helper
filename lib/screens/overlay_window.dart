@@ -225,6 +225,7 @@ class OverlayWindowState extends State<OverlayWindow> {
         _buildFilterIcon(GrenadeType.molotov, Icons.local_fire_department,
             Colors.red, state),
         _buildFilterIcon(GrenadeType.he, Icons.circle, Colors.green, state),
+        _buildFilterIcon(GrenadeType.wallbang, Icons.apps, Colors.cyan, state),
       ],
     );
   }
@@ -999,6 +1000,9 @@ class OverlayWindowState extends State<OverlayWindow> {
         break;
       case HotkeyAction.toggleHE:
         state.toggleFilter(GrenadeType.he);
+        break;
+      case HotkeyAction.toggleWallbang:
+        state.toggleFilter(GrenadeType.wallbang);
         break;
       case HotkeyAction.togglePlayPause:
         // print(

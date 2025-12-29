@@ -9,6 +9,7 @@ class GrenadeType {
   static const int flash = 1;
   static const int molotov = 2;
   static const int he = 3;
+  static const int wallbang = 4; // 穿点
 }
 
 class TeamType {

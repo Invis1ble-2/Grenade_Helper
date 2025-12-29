@@ -1200,6 +1200,8 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                             value: GrenadeType.molotov, child: Text("🔥 燃烧")),
                         DropdownMenuItem(
                             value: GrenadeType.he, child: Text("💣 手雷")),
+                        DropdownMenuItem(
+                            value: GrenadeType.wallbang, child: Text("🧱 穿点")),
                       ],
                       onChanged: (val) => _updateGrenade(type: val),
                       underline: Container(),

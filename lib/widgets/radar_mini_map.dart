@@ -306,6 +306,8 @@ class _RadarMiniMapState extends State<RadarMiniMap>
         return Colors.red;
       case GrenadeType.he:
         return Colors.green;
+      case GrenadeType.wallbang:
+        return Colors.cyan;
       default:
         return Colors.white;
     }
