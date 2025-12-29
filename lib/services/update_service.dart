@@ -10,12 +10,14 @@ class UpdateInfo {
   final String versionName;
   final String content;
   final String downloadUrl;
+  final bool forceUpdate;
 
   UpdateInfo({
     required this.versionCode,
     required this.versionName,
     required this.content,
     required this.downloadUrl,
+    this.forceUpdate = false,
   });
 
   factory UpdateInfo.fromJson(Map<String, dynamic> json) {
@@ -24,6 +26,7 @@ class UpdateInfo {
       versionName: json['versionName'] ?? '',
       content: json['content'] ?? '',
       downloadUrl: json['downloadUrl'] ?? '',
+      forceUpdate: json['forceUpdate'] ?? false,
     );
   }
 }

@@ -934,93 +934,97 @@ class _MainAppState extends ConsumerState<MainApp> {
 
     showDialog(
       context: navContext,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.system_update,
-                color: Theme.of(context).colorScheme.primary),
-            const SizedBox(width: 8),
-            const Text('发现新版本'),
+      barrierDismissible: !updateInfo.forceUpdate,
+      builder: (context) => PopScope(
+        canPop: !updateInfo.forceUpdate,
+        child: AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.system_update,
+                  color: Theme.of(context).colorScheme.primary),
+              const SizedBox(width: 8),
+              const Text('发现新版本'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '新版本: ${updateInfo.versionName}',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              const SizedBox(height: 12),
+              const Text('更新内容:', style: TextStyle(fontWeight: FontWeight.w500)),
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.black26,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  updateInfo.content.isEmpty ? '优化和修复' : updateInfo.content,
+                  style: const TextStyle(fontSize: 13),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text('请选择下载方式:',
+                  style: TextStyle(fontSize: 13, color: Colors.grey)),
+            ],
+          ),
+          actions: [
+            // 稍后提醒（仅在非强制更新时显示）
+            if (!updateInfo.forceUpdate)
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('稍后提醒'),
+              ),
+            // 网盘下载
+            PopupMenuButton<String>(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.grey[800],
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.cloud_download, size: 18),
+                    SizedBox(width: 4),
+                    Text('网盘下载'),
+                    Icon(Icons.arrow_drop_down, size: 18),
+                  ],
+                ),
+              ),
+              onSelected: (url) {
+                _launchUrl(url);
+                // 不关闭对话框，让用户可以继续选择其他下载方式
+              },
+              itemBuilder: (context) => DownloadLinks.panLinks.entries
+                  .map((e) => PopupMenuItem(
+                        value: e.value,
+                        child: Text(e.key),
+                      ))
+                  .toList(),
+            ),
+            const SizedBox(width: 4),
+            // 官方下载
+            ElevatedButton.icon(
+              onPressed: () {
+                _launchUrl(DownloadLinks.getOfficialUrl(platform));
+                // 不关闭对话框，让用户可以继续选择其他下载方式
+              },
+              icon: const Icon(Icons.download, size: 18),
+              label: const Text('官方下载'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                foregroundColor: Colors.white,
+              ),
+            ),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '新版本: ${updateInfo.versionName}',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            ),
-            const SizedBox(height: 12),
-            const Text('更新内容:', style: TextStyle(fontWeight: FontWeight.w500)),
-            const SizedBox(height: 4),
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.black26,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                updateInfo.content.isEmpty ? '优化和修复' : updateInfo.content,
-                style: const TextStyle(fontSize: 13),
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text('请选择下载方式:',
-                style: TextStyle(fontSize: 13, color: Colors.grey)),
-          ],
-        ),
-        actions: [
-          // 稍后提醒
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('稍后提醒'),
-          ),
-          // 网盘下载
-          PopupMenuButton<String>(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.grey[800],
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.cloud_download, size: 18),
-                  SizedBox(width: 4),
-                  Text('网盘下载'),
-                  Icon(Icons.arrow_drop_down, size: 18),
-                ],
-              ),
-            ),
-            onSelected: (url) {
-              _launchUrl(url);
-              // 不关闭对话框，让用户可以继续选择其他下载方式
-            },
-            itemBuilder: (context) => DownloadLinks.panLinks.entries
-                .map((e) => PopupMenuItem(
-                      value: e.value,
-                      child: Text(e.key),
-                    ))
-                .toList(),
-          ),
-          const SizedBox(width: 4),
-          // 官方下载
-          ElevatedButton.icon(
-            onPressed: () {
-              _launchUrl(DownloadLinks.getOfficialUrl(platform));
-              // 不关闭对话框，让用户可以继续选择其他下载方式
-            },
-            icon: const Icon(Icons.download, size: 18),
-            label: const Text('官方下载'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.primary,
-              foregroundColor: Colors.white,
-            ),
-          ),
-        ],
       ),
     );
   }
