@@ -6,11 +6,28 @@ import { execSync } from 'child_process';
 // === 配置区域 ===
 const OWNER = 'Invis1ble-2';
 const REPO = 'Grenade_Helper';
-// 【重要】部署完 Zeabur 后，把这里改成你的真实域名
-const ZEABUR_URL = 'https://cdn.grenade-helper.top:8443';
 
-// 当前脚本服务的平台
-const PLATFORM = 'android';
+// 【双服务器配置】同时向两个服务器上传，确保新旧版本App都能获取更新
+const SERVER_URLS = [
+  'https://cdn.grenade-helper.top:8443',  // 新服务器（日本VPS）
+  'https://app-grenade-helper.zeabur.app' // 旧服务器（Zeabur，兼容旧版App）
+];
+
+// 主服务器（用于检查版本）
+const PRIMARY_URL = SERVER_URLS[0];
+
+// 支持的平台列表
+const SUPPORTED_PLATFORMS = ['android', 'windows', 'ios'];
+
+// 从命令行参数获取平台，默认 android
+const PLATFORM = process.argv[2] || 'android';
+
+if (!SUPPORTED_PLATFORMS.includes(PLATFORM)) {
+  console.error(`Error: Unsupported platform '${PLATFORM}'. Supported: ${SUPPORTED_PLATFORMS.join(', ')}`);
+  process.exit(1);
+}
+
+console.log(`=== Running for platform: ${PLATFORM} ===`);
 
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
@@ -43,6 +60,31 @@ function fetchJson(url, headers = {}) {
   });
 }
 
+/**
+ * 根据平台查找对应的 asset
+ * @param {Array} assets - release assets 列表
+ * @param {string} platform - 目标平台
+ * @returns {Object|null} asset 对象
+ */
+function findAssetForPlatform(assets, platform) {
+  switch (platform) {
+    case 'android':
+      // Android: 筛选 arm64-v8a 且是 apk
+      return assets.find(asset =>
+        asset.name.includes('arm64-v8a') && asset.name.endsWith('.apk')
+      );
+    case 'windows':
+      // Windows: 优先 .exe 安装程序，其次 .msix
+      return assets.find(asset => asset.name.endsWith('.exe')) ||
+        assets.find(asset => asset.name.endsWith('.msix'));
+    case 'ios':
+      // iOS: .ipa 文件
+      return assets.find(asset => asset.name.endsWith('.ipa'));
+    default:
+      return null;
+  }
+}
+
 async function main() {
   try {
     console.log(`Fetching release info for ${OWNER}/${REPO}...`);
@@ -55,8 +97,8 @@ async function main() {
 
     if (!release) throw new Error("Could not fetch release info. Check Token/Permissions.");
 
-    // 2. 获取 Zeabur 当前版本
-    const currentStatus = await fetchJson(`${ZEABUR_URL}/update/${PLATFORM}`).catch(() => null);
+    // 2. 获取主服务器当前版本
+    const currentStatus = await fetchJson(`${PRIMARY_URL}/update/${PLATFORM}`).catch(() => null);
     const versionName = release.tag_name.replace(/^v/, '');
 
     // 3. 计算 VersionCode
@@ -83,68 +125,73 @@ async function main() {
       return;
     }
 
-    // 4. 筛选并下载 APK (私有仓库 + v8a 适配)
-    console.log(`Looking for 'arm64-v8a' apk...`);
+    // 4. 根据平台筛选对应的安装包
+    console.log(`Looking for ${PLATFORM} release asset...`);
 
-    // 【关键】筛选 arm64-v8a 且是 apk
-    const apkAsset = release.assets.find(asset =>
-      asset.name.includes('arm64-v8a') && asset.name.endsWith('.apk')
-    );
+    const targetAsset = findAssetForPlatform(release.assets, PLATFORM);
 
-    if (!apkAsset) {
-      console.error("Assets found:", release.assets.map(a => a.name));
-      throw new Error("Target APK (arm64-v8a) not found in release!");
+    if (!targetAsset) {
+      console.error("Available assets:", release.assets.map(a => a.name));
+      throw new Error(`Target asset for platform '${PLATFORM}' not found in release!`);
     }
 
-    const tempApkPath = path.join(process.cwd(), `temp_${apkAsset.name}`);
+    const tempFilePath = path.join(process.cwd(), `temp_${targetAsset.name}`);
 
     // 【关键】私有仓库下载必须使用 API URL (asset.url) + Accept header
     // 不能使用 browser_download_url
-    console.log(`Downloading ${apkAsset.name} from private repo...`);
+    console.log(`Downloading ${targetAsset.name} from private repo...`);
 
     const downloadCmd = [
       `curl -L`,
       `-H "Authorization: token ${GITHUB_TOKEN}"`, // 认证
       `-H "Accept: application/octet-stream"`,     // 告诉 GitHub 我们要二进制流
-      `-o "${tempApkPath}"`,
-      `"${apkAsset.url}"`                           // 使用 API URL
+      `-o "${tempFilePath}"`,
+      `"${targetAsset.url}"`                        // 使用 API URL
     ].join(' ');
 
     execSync(downloadCmd);
 
     // 验证文件大小
-    const stats = fs.statSync(tempApkPath);
+    const stats = fs.statSync(tempFilePath);
     if (stats.size < 1000) { // 如果文件小于 1KB，很可能是下载到了报错 JSON
-      const content = fs.readFileSync(tempApkPath, 'utf8');
+      const content = fs.readFileSync(tempFilePath, 'utf8');
       console.error("Download content preview:", content);
       throw new Error("Downloaded file is too small, likely an auth error.");
     }
 
-    // 5. 上传到 Zeabur
-    console.log(`Uploading to Zeabur (Platform: ${PLATFORM})...`);
-
+    // 5. 上传到所有服务器（双服务器同步）
     const cleanContent = bodyText.replace(/(?:vc|versionCode)\s*[:=]?\s*(\d+)/ig, '').trim();
 
     // 检测是否需要强制更新 (支持 force: true, forceUpdate: true 等格式)
     const forceMatch = bodyText.match(/\b(?:force|forceUpdate)\s*[:=]\s*(true|1|yes)/i);
     const forceUpdate = forceMatch ? 'true' : 'false';
 
-    // 传递 platform 参数
-    const uploadCmd = [
-      `curl -X POST "${ZEABUR_URL}/upload"`,
-      `-H "Authorization: ${ADMIN_SECRET}"`,
-      `-F "file=@${tempApkPath}"`,
-      `-F "versionCode=${versionCode}"`,
-      `-F "versionName=${versionName}"`,
-      `-F "content=${cleanContent || 'Update'}"`,
-      `-F "platform=${PLATFORM}"`,
-      `-F "forceUpdate=${forceUpdate}"`
-    ].join(' ');
+    for (const serverUrl of SERVER_URLS) {
+      console.log(`Uploading to ${serverUrl} (Platform: ${PLATFORM})...`);
 
-    execSync(uploadCmd);
-    console.log("Upload successful!");
+      const uploadCmd = [
+        `curl -X POST "${serverUrl}/upload"`,
+        `-H "Authorization: ${ADMIN_SECRET}"`,
+        `-F "file=@${tempFilePath}"`,
+        `-F "versionCode=${versionCode}"`,
+        `-F "versionName=${versionName}"`,
+        `-F "content=${cleanContent || 'Update'}"`,
+        `-F "platform=${PLATFORM}"`,
+        `-F "forceUpdate=${forceUpdate}"`
+      ].join(' ');
 
-    fs.unlinkSync(tempApkPath);
+      try {
+        execSync(uploadCmd);
+        console.log(`✓ Upload to ${serverUrl} successful!`);
+      } catch (err) {
+        console.error(`✗ Upload to ${serverUrl} failed:`, err.message);
+        // 继续上传到下一个服务器，不中断流程
+      }
+    }
+
+    console.log("All servers sync completed!");
+
+    fs.unlinkSync(tempFilePath);
 
   } catch (error) {
     console.error("Workflow failed:", error);
