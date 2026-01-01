@@ -10,6 +10,53 @@ import 'package:file_picker/file_picker.dart';
 import 'package:uuid/uuid.dart';
 import '../models.dart';
 
+/// 导入状态
+enum ImportStatus { newItem, update, skip }
+
+/// 道具预览项
+class GrenadePreviewItem {
+  final Map<String, dynamic> rawData;
+  final String uniqueId;
+  final String title;
+  final int type;
+  final String mapName;
+  final String layerName;
+  final String? author;
+  final ImportStatus status;
+  final DateTime updatedAt;
+
+  GrenadePreviewItem({
+    required this.rawData,
+    required this.uniqueId,
+    required this.title,
+    required this.type,
+    required this.mapName,
+    required this.layerName,
+    this.author,
+    required this.status,
+    required this.updatedAt,
+  });
+}
+
+/// 道具包预览结果
+class PackagePreviewResult {
+  final Map<String, List<GrenadePreviewItem>> grenadesByMap;
+  final String filePath;
+  final Map<String, List<int>> memoryImages;
+
+  PackagePreviewResult({
+    required this.grenadesByMap,
+    required this.filePath,
+    required this.memoryImages,
+  });
+
+  bool get isMultiMap => grenadesByMap.keys.length > 1;
+  
+  int get totalCount => grenadesByMap.values.fold(0, (sum, list) => sum + list.length);
+  
+  List<String> get mapNames => grenadesByMap.keys.toList();
+}
+
 class DataService {
   final Isar isar;
   DataService(this.isar);
@@ -31,6 +78,120 @@ class DataService {
     for (final path in paths) {
       await deleteMediaFile(path);
     }
+  }
+
+  /// 预览道具包内容（不执行导入）
+  Future<PackagePreviewResult?> previewPackage(String filePath) async {
+    if (!filePath.toLowerCase().endsWith('.cs2pkg')) {
+      return null;
+    }
+
+    final file = File(filePath);
+    if (!file.existsSync()) return null;
+
+    // 解压
+    final bytes = file.readAsBytesSync();
+    final archive = ZipDecoder().decodeBytes(bytes);
+
+    List<dynamic> jsonData = [];
+    final Map<String, List<int>> memoryImages = {};
+
+    for (var archiveFile in archive) {
+      final fileName = p.basename(archiveFile.name);
+      if (fileName == "data.json") {
+        jsonData = jsonDecode(utf8.decode(archiveFile.content as List<int>));
+      } else {
+        if (archiveFile.isFile && archiveFile.content != null) {
+          memoryImages[fileName] = archiveFile.content as List<int>;
+        }
+      }
+    }
+
+    if (jsonData.isEmpty) return null;
+
+    // 按地图分组
+    final Map<String, List<GrenadePreviewItem>> grenadesByMap = {};
+
+    for (var item in jsonData) {
+      final mapName = item['mapName'] as String? ?? 'Unknown';
+      final layerName = item['layerName'] as String? ?? 'Default';
+      final title = item['title'] as String? ?? '';
+      final type = item['type'] as int? ?? 0;
+      final author = item['author'] as String?;
+      final importedUniqueId = item['uniqueId'] as String?;
+      final xRatio = (item['x'] as num?)?.toDouble() ?? 0.0;
+      final yRatio = (item['y'] as num?)?.toDouble() ?? 0.0;
+      final importedUpdatedAt = item['updatedAt'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(item['updatedAt'])
+          : DateTime.now();
+
+      // 生成临时 uniqueId（如果没有）
+      final uniqueId = importedUniqueId ?? '${mapName}_${title}_${xRatio}_$yRatio';
+
+      // 计算导入状态
+      ImportStatus status = ImportStatus.newItem;
+      
+      // 查找地图
+      final map = await isar.gameMaps.filter().nameEqualTo(mapName).findFirst();
+      if (map != null) {
+        await map.layers.load();
+        MapLayer? layer;
+        for (var l in map.layers) {
+          if (l.name == layerName) {
+            layer = l;
+            break;
+          }
+        }
+        layer ??= map.layers.isNotEmpty ? map.layers.first : null;
+        
+        if (layer != null) {
+          // 查找已有道具
+          Grenade? existing;
+          
+          if (importedUniqueId != null && importedUniqueId.isNotEmpty) {
+            final allGrenades = await isar.grenades.where().findAll();
+            existing = allGrenades.where((g) => g.uniqueId == importedUniqueId).firstOrNull;
+          }
+          
+          if (existing == null && importedUniqueId == null) {
+            await layer.grenades.load();
+            existing = layer.grenades.where((g) =>
+                g.title == title &&
+                (g.xRatio - xRatio).abs() < 0.01 &&
+                (g.yRatio - yRatio).abs() < 0.01).firstOrNull;
+          }
+          
+          if (existing != null) {
+            if (importedUpdatedAt.isAfter(existing.updatedAt)) {
+              status = ImportStatus.update;
+            } else {
+              status = ImportStatus.skip;
+            }
+          }
+        }
+      }
+
+      final previewItem = GrenadePreviewItem(
+        rawData: item,
+        uniqueId: uniqueId,
+        title: title,
+        type: type,
+        mapName: mapName,
+        layerName: layerName,
+        author: author,
+        status: status,
+        updatedAt: importedUpdatedAt,
+      );
+
+      grenadesByMap.putIfAbsent(mapName, () => []);
+      grenadesByMap[mapName]!.add(previewItem);
+    }
+
+    return PackagePreviewResult(
+      grenadesByMap: grenadesByMap,
+      filePath: filePath,
+      memoryImages: memoryImages,
+    );
   }
 
   // --- 导出 (分享) ---
@@ -318,6 +479,114 @@ class DataService {
     });
 
     // 生成结果消息
+    final List<String> messages = [];
+    if (newCount > 0) messages.add("新增 $newCount 个");
+    if (updatedCount > 0) messages.add("更新 $updatedCount 个");
+    if (skippedCount > 0) messages.add("跳过 $skippedCount 个较旧版本");
+
+    if (messages.isEmpty) {
+      return "没有可导入的道具";
+    }
+    return "成功导入：${messages.join('，')}";
+  }
+
+  /// 从预览结果导入选中的道具
+  Future<String> importFromPreview(
+    PackagePreviewResult preview,
+    Set<String> selectedUniqueIds,
+  ) async {
+    if (selectedUniqueIds.isEmpty) {
+      return "未选择任何道具";
+    }
+
+    final importFileName = p.basename(preview.filePath);
+    final dataPath = isar.directory ?? '';
+    final memoryImages = preview.memoryImages;
+
+    int newCount = 0;
+    int updatedCount = 0;
+    int skippedCount = 0;
+    final List<Grenade> importedGrenades = [];
+
+    await isar.writeTxn(() async {
+      for (var mapGrenades in preview.grenadesByMap.values) {
+        for (var previewItem in mapGrenades) {
+          // 仅处理选中的道具
+          if (!selectedUniqueIds.contains(previewItem.uniqueId)) continue;
+
+          final item = previewItem.rawData;
+          final mapName = item['mapName'];
+          final layerName = item['layerName'];
+
+          // 查找地图
+          final map = await isar.gameMaps.filter().nameEqualTo(mapName).findFirst();
+          if (map == null) continue;
+
+          await map.layers.load();
+          MapLayer? layer;
+          for (var l in map.layers) {
+            if (l.name == layerName) {
+              layer = l;
+              break;
+            }
+          }
+          layer ??= map.layers.isNotEmpty ? map.layers.first : null;
+          if (layer == null) continue;
+
+          final importedUniqueId = item['uniqueId'] as String?;
+          final title = item['title'] as String;
+          final xRatio = (item['x'] as num).toDouble();
+          final yRatio = (item['y'] as num).toDouble();
+          final importedUpdatedAt = item['updatedAt'] != null
+              ? DateTime.fromMillisecondsSinceEpoch(item['updatedAt'])
+              : DateTime.now();
+
+          Grenade? existing;
+
+          if (importedUniqueId != null && importedUniqueId.isNotEmpty) {
+            final allGrenades = await isar.grenades.where().findAll();
+            existing = allGrenades.where((g) => g.uniqueId == importedUniqueId).firstOrNull;
+          }
+
+          if (existing == null && importedUniqueId == null) {
+            await layer.grenades.load();
+            existing = layer.grenades.where((g) =>
+                g.title == title &&
+                (g.xRatio - xRatio).abs() < 0.01 &&
+                (g.yRatio - yRatio).abs() < 0.01).firstOrNull;
+          }
+
+          if (existing != null) {
+            if (importedUpdatedAt.isAfter(existing.updatedAt)) {
+              await _updateExistingGrenade(existing, item, memoryImages, dataPath);
+              importedGrenades.add(existing);
+              updatedCount++;
+            } else {
+              skippedCount++;
+            }
+          } else {
+            final newGrenade = await _createNewGrenade(
+                item, memoryImages, dataPath, layer, importedUniqueId);
+            importedGrenades.add(newGrenade);
+            newCount++;
+          }
+        }
+      }
+
+      if (importedGrenades.isNotEmpty) {
+        final history = ImportHistory(
+          fileName: importFileName,
+          importedAt: DateTime.now(),
+          newCount: newCount,
+          updatedCount: updatedCount,
+          skippedCount: skippedCount,
+        );
+        await isar.importHistorys.put(history);
+        history.grenades.addAll(importedGrenades);
+        await history.grenades.save();
+      }
+    });
+
     final List<String> messages = [];
     if (newCount > 0) messages.add("新增 $newCount 个");
     if (updatedCount > 0) messages.add("更新 $updatedCount 个");

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:desktop_drop/desktop_drop.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:isar_community/isar.dart';
 import '../models.dart';
 import '../providers.dart';
@@ -9,6 +10,7 @@ import '../services/data_service.dart';
 import '../services/cloud_package_service.dart';
 import 'import_history_detail_screen.dart';
 import 'cloud_packages_screen.dart';
+import 'import_preview_screen.dart';
 
 class ImportScreen extends ConsumerStatefulWidget {
   const ImportScreen({super.key});
@@ -56,44 +58,69 @@ class _ImportScreenState extends ConsumerState<ImportScreen>
   Future<void> _handleImport() async {
     if (_dataService == null) return;
 
-    setState(() => _isImporting = true);
-    final result = await _dataService!.importData();
-    setState(() => _isImporting = false);
+    // 使用文件选择器选择文件
+    final result = await FilePicker.platform.pickFiles(
+      dialogTitle: '选择要导入的 .cs2pkg 文件',
+    );
+    if (result == null) return;
 
-    await _loadHistories(); // 刷新历史列表
+    final filePath = result.files.single.path!;
+    if (!filePath.toLowerCase().endsWith('.cs2pkg')) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("请选择 .cs2pkg 格式的文件"), backgroundColor: Colors.orange),
+        );
+      }
+      return;
+    }
 
+    // 跳转到预览界面
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result),
-          backgroundColor: result.contains("成功") ? Colors.green : Colors.orange,
+      final importResult = await Navigator.push<String>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ImportPreviewScreen(filePath: filePath),
         ),
       );
+
+      if (importResult != null && mounted) {
+        await _loadHistories();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(importResult),
+            backgroundColor: importResult.contains("成功") ? Colors.green : Colors.orange,
+          ),
+        );
+      }
     }
   }
 
   Future<void> _handleFileDrop(List<String> filePaths) async {
     if (_dataService == null) return;
 
-    setState(() => _isImporting = true);
-
     for (final filePath in filePaths) {
       if (filePath.toLowerCase().endsWith('.cs2pkg')) {
-        final result = await _dataService!.importFromPath(filePath);
+        // 跳转到预览界面
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(result),
-              backgroundColor:
-                  result.contains("成功") ? Colors.green : Colors.orange,
+          final importResult = await Navigator.push<String>(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ImportPreviewScreen(filePath: filePath),
             ),
           );
+
+          if (importResult != null && mounted) {
+            await _loadHistories();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(importResult),
+                backgroundColor: importResult.contains("成功") ? Colors.green : Colors.orange,
+              ),
+            );
+          }
         }
       }
     }
-
-    await _loadHistories(); // 刷新历史列表
-    setState(() => _isImporting = false);
   }
 
   Future<void> _handleUrlImport() async {
@@ -127,16 +154,21 @@ class _ImportScreenState extends ConsumerState<ImportScreen>
         return;
       }
 
-      final result = await _dataService!.importFromPath(filePath);
-      await _loadHistories();
-      _urlController.clear();
+      // 跳转到预览界面
+      final importResult = await Navigator.push<String>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ImportPreviewScreen(filePath: filePath),
+        ),
+      );
 
-      if (mounted) {
+      if (importResult != null && mounted) {
+        await _loadHistories();
+        _urlController.clear();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(result),
-            backgroundColor:
-                result.contains('成功') ? Colors.green : Colors.orange,
+            content: Text(importResult),
+            backgroundColor: importResult.contains('成功') ? Colors.green : Colors.orange,
           ),
         );
       }
