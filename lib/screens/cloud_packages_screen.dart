@@ -4,8 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../models/cloud_package.dart';
 import '../services/cloud_package_service.dart';
-import '../services/data_service.dart';
-import '../providers.dart';
+import 'import_preview_screen.dart';
 
 class CloudPackagesScreen extends ConsumerStatefulWidget {
   const CloudPackagesScreen({super.key});
@@ -99,21 +98,26 @@ class _CloudPackagesScreenState extends ConsumerState<CloudPackagesScreen> {
         return;
       }
 
-      // 导入
-      final isar = ref.read(isarProvider);
-      final dataService = DataService(isar);
-      final resultMsg = await dataService.importFromPath(filePath);
+      // 跳转到预览界面进行道具选择
+      if (!mounted) return;
+      final result = await Navigator.push<String>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ImportPreviewScreen(filePath: filePath),
+        ),
+      );
 
       // 删除临时文件
       try {
         await File(filePath).delete();
       } catch (_) {}
 
-      // 标记已导入（保存版本号）
-      await CloudPackageService.markPackageImported(pkg.id, pkg.version);
-      _lastImportedDates[pkg.id] = pkg.version;
-
-      _showMessage(resultMsg);
+      if (result != null) {
+        // 标记已导入（保存版本号）
+        await CloudPackageService.markPackageImported(pkg.id, pkg.version);
+        _lastImportedDates[pkg.id] = pkg.version;
+        _showMessage(result);
+      }
     } catch (e) {
       _showMessage('导入失败: $e');
     } finally {
