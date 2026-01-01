@@ -119,10 +119,9 @@ async function main() {
       }
     }
 
-    // 检查是否重复
+    // 版本信息日志（不再跳过，总是重新同步）
     if (currentStatus && currentStatus.versionCode === versionCode && currentStatus.versionName === versionName) {
-      console.log("Version matches. Skipping.");
-      return;
+      console.log("Version matches, but will re-sync anyway.");
     }
 
     // 4. 根据平台筛选对应的安装包
