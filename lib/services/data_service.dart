@@ -196,6 +196,125 @@ class DataService {
 
   // --- 导出 (分享) ---
 
+  /// 导出选中的道具列表
+  Future<void> exportSelectedGrenades(BuildContext context, List<Grenade> grenades) async {
+    if (grenades.isEmpty) return;
+
+    // 构建 JSON 数据结构
+    final List<Map<String, dynamic>> exportList = [];
+    final Set<String> filesToZip = {};
+
+    for (var g in grenades) {
+      g.layer.loadSync();
+      g.layer.value?.map.loadSync();
+      g.steps.loadSync();
+
+      final stepsData = <Map<String, dynamic>>[];
+      for (var s in g.steps) {
+        s.medias.loadSync();
+        final mediaData = <Map<String, dynamic>>[];
+        for (var m in s.medias) {
+          mediaData.add({'path': p.basename(m.localPath), 'type': m.type});
+          filesToZip.add(m.localPath);
+        }
+        stepsData.add({
+          'title': s.title,
+          'description': s.description,
+          'index': s.stepIndex,
+          'medias': mediaData,
+        });
+      }
+
+      exportList.add({
+        'uniqueId': g.uniqueId,
+        'mapName': g.layer.value?.map.value?.name ?? "Unknown",
+        'layerName': g.layer.value?.name ?? "Default",
+        'title': g.title,
+        'type': g.type,
+        'team': g.team,
+        'author': g.author,
+        'hasLocalEdits': g.hasLocalEdits,
+        'x': g.xRatio,
+        'y': g.yRatio,
+        'steps': stepsData,
+        'createdAt': g.createdAt.millisecondsSinceEpoch,
+        'updatedAt': g.updatedAt.millisecondsSinceEpoch,
+      });
+    }
+
+    // 创建临时打包目录
+    final tempDir = await getTemporaryDirectory();
+    final exportDir = Directory(p.join(tempDir.path, "export_temp"));
+    if (exportDir.existsSync()) exportDir.deleteSync(recursive: true);
+    exportDir.createSync();
+
+    // 写入 data.json
+    final jsonFile = File(p.join(exportDir.path, "data.json"));
+    jsonFile.writeAsStringSync(jsonEncode(exportList));
+
+    // 复制媒体文件
+    for (var path in filesToZip) {
+      final file = File(path);
+      if (file.existsSync()) {
+        file.copySync(p.join(exportDir.path, p.basename(path)));
+      }
+    }
+
+    // 压缩为 .cs2pkg
+    final encoder = ZipFileEncoder();
+    final zipPath = p.join(tempDir.path, "share_data.cs2pkg");
+    encoder.create(zipPath);
+    encoder.addDirectory(exportDir);
+    encoder.close();
+    if (!context.mounted) return;
+
+    // 根据平台显示不同的分享选项
+    final isDesktop = Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+
+    if (isDesktop) {
+      await _saveToFolderWithCustomName(context, zipPath);
+    } else {
+      showModalBottomSheet(
+        context: context,
+        builder: (ctx) => Container(
+          padding: const EdgeInsets.all(20),
+          height: 200,
+          decoration: const BoxDecoration(
+            color: Color(0xFF2A2D33),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              const Text("选择导出方式",
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              ListTile(
+                leading: const Icon(Icons.share, color: Colors.blueAccent),
+                title: const Text("系统分享 (微信/QQ)",
+                    style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  SharePlus.instance.share(ShareParams(files: [XFile(zipPath)], text: "CS2 道具数据分享"));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.folder_open, color: Colors.orangeAccent),
+                title: const Text("保存到文件夹", style: TextStyle(color: Colors.white)),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await _saveToFolder(context, zipPath);
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+  }
+
   Future<void> exportData(BuildContext context,
       {required int scopeType,
       Grenade? singleGrenade,

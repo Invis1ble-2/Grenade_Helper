@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:isar_community/isar.dart';
 import '../models.dart';
 import '../providers.dart';
 import '../services/data_service.dart';
@@ -164,6 +166,7 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
 
     // 多地图模式：显示地图列表
     if (_preview!.isMultiMap && _selectedMap == null) {
+      final isar = ref.read(isarProvider);
       return Scaffold(
         appBar: AppBar(title: const Text("选择地图")),
         body: ListView.builder(
@@ -172,10 +175,15 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
           itemBuilder: (context, index) {
             final mapName = _preview!.mapNames[index];
             final count = _preview!.grenadesByMap[mapName]?.length ?? 0;
+            // 查询地图获取图标
+            final gameMap = isar.gameMaps.filter().nameEqualTo(mapName).findFirstSync();
+            
             return Card(
               margin: const EdgeInsets.only(bottom: 12),
               child: ListTile(
-                leading: const Icon(Icons.map, color: Colors.orange, size: 40),
+                leading: gameMap != null
+                    ? SvgPicture.asset(gameMap.iconPath, width: 40, height: 40)
+                    : const Icon(Icons.map, color: Colors.orange, size: 40),
                 title: Text(mapName, style: const TextStyle(fontWeight: FontWeight.bold)),
                 subtitle: Text("$count 个道具"),
                 trailing: const Icon(Icons.chevron_right),
@@ -235,7 +243,7 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
       (GrenadeType.smoke, "烟雾", Icons.cloud),
       (GrenadeType.flash, "闪光", Icons.flash_on),
       (GrenadeType.molotov, "燃烧", Icons.local_fire_department),
-      (GrenadeType.he, "手雷", Icons.sports_handball),
+      (GrenadeType.he, "手雷", Icons.trip_origin),
       (GrenadeType.wallbang, "穿点", Icons.grid_4x4),
     ];
 
