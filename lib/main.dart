@@ -121,7 +121,18 @@ Future<void> _runMainWindow() async {
     await dataDir.create(recursive: true);
   }
 
-  // 2. 初始化 Isar 数据库
+  // 2. 清理可能残留的锁文件（应用异常关闭时可能产生）
+  try {
+    final lockFile = File('$dataPath/default.isar-lck');
+    if (await lockFile.exists()) {
+      debugPrint('[Main] Found stale lock file, removing...');
+      await lockFile.delete();
+    }
+  } catch (e) {
+    debugPrint('[Main] Error cleaning lock file: $e');
+  }
+
+  // 3. 初始化 Isar 数据库
   final isar = await Isar.open(
     [
       GameMapSchema,
@@ -157,6 +168,14 @@ Future<void> _runMainWindow() async {
 
     // 连接热键服务和窗口服务
     globalWindowService!.setHotkeyService(globalHotkeyService!);
+
+    // 设置数据库关闭回调
+    globalWindowService!.onCloseDatabase = () async {
+      if (globalIsar != null && globalIsar!.isOpen) {
+        await globalIsar!.close();
+        debugPrint('[Main] Isar database closed.');
+      }
+    };
 
     // 注册悬浮窗热键处理器（通过 IPC 发送命令给悬浮窗）
     globalHotkeyService!.registerHandler(HotkeyAction.prevGrenade, () {

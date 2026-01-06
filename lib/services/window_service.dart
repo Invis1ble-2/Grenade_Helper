@@ -19,6 +19,7 @@ class WindowService with TrayListener, WindowListener {
   void Function()? onShowOverlay;
   void Function()? onHideOverlay;
   void Function()? onExitApp;
+  Future<void> Function()? onCloseDatabase; // 退出时关闭数据库
 
   WindowService(this._settings);
 
@@ -192,6 +193,13 @@ class WindowService with TrayListener, WindowListener {
     trayManager.removeListener(this);
     windowManager.removeListener(this);
     await trayManager.destroy();
+    // 关闭数据库
+    try {
+      await onCloseDatabase?.call();
+      debugPrint('[WindowService] Database closed successfully.');
+    } catch (e) {
+      debugPrint('[WindowService] Error closing database: $e');
+    }
     await windowManager.setPreventClose(false);
     await windowManager.close();
   }
