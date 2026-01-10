@@ -1660,63 +1660,73 @@ const GrenadeSchema = CollectionSchema(
       name: r'hasLocalEdits',
       type: IsarType.bool,
     ),
-    r'isFavorite': PropertySchema(
+    r'impactXRatio': PropertySchema(
       id: 3,
+      name: r'impactXRatio',
+      type: IsarType.double,
+    ),
+    r'impactYRatio': PropertySchema(
+      id: 4,
+      name: r'impactYRatio',
+      type: IsarType.double,
+    ),
+    r'isFavorite': PropertySchema(
+      id: 5,
       name: r'isFavorite',
       type: IsarType.bool,
     ),
     r'isImported': PropertySchema(
-      id: 4,
+      id: 6,
       name: r'isImported',
       type: IsarType.bool,
     ),
     r'isNewImport': PropertySchema(
-      id: 5,
+      id: 7,
       name: r'isNewImport',
       type: IsarType.bool,
     ),
     r'sourceNote': PropertySchema(
-      id: 6,
+      id: 8,
       name: r'sourceNote',
       type: IsarType.string,
     ),
     r'sourceUrl': PropertySchema(
-      id: 7,
+      id: 9,
       name: r'sourceUrl',
       type: IsarType.string,
     ),
     r'team': PropertySchema(
-      id: 8,
+      id: 10,
       name: r'team',
       type: IsarType.long,
     ),
     r'title': PropertySchema(
-      id: 9,
+      id: 11,
       name: r'title',
       type: IsarType.string,
     ),
     r'type': PropertySchema(
-      id: 10,
+      id: 12,
       name: r'type',
       type: IsarType.long,
     ),
     r'uniqueId': PropertySchema(
-      id: 11,
+      id: 13,
       name: r'uniqueId',
       type: IsarType.string,
     ),
     r'updatedAt': PropertySchema(
-      id: 12,
+      id: 14,
       name: r'updatedAt',
       type: IsarType.dateTime,
     ),
     r'xRatio': PropertySchema(
-      id: 13,
+      id: 15,
       name: r'xRatio',
       type: IsarType.double,
     ),
     r'yRatio': PropertySchema(
-      id: 14,
+      id: 16,
       name: r'yRatio',
       type: IsarType.double,
     )
@@ -1806,18 +1816,20 @@ void _grenadeSerialize(
   writer.writeString(offsets[0], object.author);
   writer.writeDateTime(offsets[1], object.createdAt);
   writer.writeBool(offsets[2], object.hasLocalEdits);
-  writer.writeBool(offsets[3], object.isFavorite);
-  writer.writeBool(offsets[4], object.isImported);
-  writer.writeBool(offsets[5], object.isNewImport);
-  writer.writeString(offsets[6], object.sourceNote);
-  writer.writeString(offsets[7], object.sourceUrl);
-  writer.writeLong(offsets[8], object.team);
-  writer.writeString(offsets[9], object.title);
-  writer.writeLong(offsets[10], object.type);
-  writer.writeString(offsets[11], object.uniqueId);
-  writer.writeDateTime(offsets[12], object.updatedAt);
-  writer.writeDouble(offsets[13], object.xRatio);
-  writer.writeDouble(offsets[14], object.yRatio);
+  writer.writeDouble(offsets[3], object.impactXRatio);
+  writer.writeDouble(offsets[4], object.impactYRatio);
+  writer.writeBool(offsets[5], object.isFavorite);
+  writer.writeBool(offsets[6], object.isImported);
+  writer.writeBool(offsets[7], object.isNewImport);
+  writer.writeString(offsets[8], object.sourceNote);
+  writer.writeString(offsets[9], object.sourceUrl);
+  writer.writeLong(offsets[10], object.team);
+  writer.writeString(offsets[11], object.title);
+  writer.writeLong(offsets[12], object.type);
+  writer.writeString(offsets[13], object.uniqueId);
+  writer.writeDateTime(offsets[14], object.updatedAt);
+  writer.writeDouble(offsets[15], object.xRatio);
+  writer.writeDouble(offsets[16], object.yRatio);
 }
 
 Grenade _grenadeDeserialize(
@@ -1828,22 +1840,24 @@ Grenade _grenadeDeserialize(
 ) {
   final object = Grenade(
     hasLocalEdits: reader.readBoolOrNull(offsets[2]) ?? false,
-    isFavorite: reader.readBoolOrNull(offsets[3]) ?? false,
-    isImported: reader.readBoolOrNull(offsets[4]) ?? false,
-    isNewImport: reader.readBoolOrNull(offsets[5]) ?? false,
-    team: reader.readLongOrNull(offsets[8]) ?? 0,
-    title: reader.readString(offsets[9]),
-    type: reader.readLong(offsets[10]),
-    uniqueId: reader.readStringOrNull(offsets[11]),
-    xRatio: reader.readDouble(offsets[13]),
-    yRatio: reader.readDouble(offsets[14]),
+    isFavorite: reader.readBoolOrNull(offsets[5]) ?? false,
+    isImported: reader.readBoolOrNull(offsets[6]) ?? false,
+    isNewImport: reader.readBoolOrNull(offsets[7]) ?? false,
+    team: reader.readLongOrNull(offsets[10]) ?? 0,
+    title: reader.readString(offsets[11]),
+    type: reader.readLong(offsets[12]),
+    uniqueId: reader.readStringOrNull(offsets[13]),
+    xRatio: reader.readDouble(offsets[15]),
+    yRatio: reader.readDouble(offsets[16]),
   );
   object.author = reader.readStringOrNull(offsets[0]);
   object.createdAt = reader.readDateTime(offsets[1]);
   object.id = id;
-  object.sourceNote = reader.readStringOrNull(offsets[6]);
-  object.sourceUrl = reader.readStringOrNull(offsets[7]);
-  object.updatedAt = reader.readDateTime(offsets[12]);
+  object.impactXRatio = reader.readDoubleOrNull(offsets[3]);
+  object.impactYRatio = reader.readDoubleOrNull(offsets[4]);
+  object.sourceNote = reader.readStringOrNull(offsets[8]);
+  object.sourceUrl = reader.readStringOrNull(offsets[9]);
+  object.updatedAt = reader.readDateTime(offsets[14]);
   return object;
 }
 
@@ -1861,28 +1875,32 @@ P _grenadeDeserializeProp<P>(
     case 2:
       return (reader.readBoolOrNull(offset) ?? false) as P;
     case 3:
-      return (reader.readBoolOrNull(offset) ?? false) as P;
+      return (reader.readDoubleOrNull(offset)) as P;
     case 4:
-      return (reader.readBoolOrNull(offset) ?? false) as P;
+      return (reader.readDoubleOrNull(offset)) as P;
     case 5:
       return (reader.readBoolOrNull(offset) ?? false) as P;
     case 6:
-      return (reader.readStringOrNull(offset)) as P;
+      return (reader.readBoolOrNull(offset) ?? false) as P;
     case 7:
-      return (reader.readStringOrNull(offset)) as P;
+      return (reader.readBoolOrNull(offset) ?? false) as P;
     case 8:
-      return (reader.readLongOrNull(offset) ?? 0) as P;
-    case 9:
-      return (reader.readString(offset)) as P;
-    case 10:
-      return (reader.readLong(offset)) as P;
-    case 11:
       return (reader.readStringOrNull(offset)) as P;
+    case 9:
+      return (reader.readStringOrNull(offset)) as P;
+    case 10:
+      return (reader.readLongOrNull(offset) ?? 0) as P;
+    case 11:
+      return (reader.readString(offset)) as P;
     case 12:
-      return (reader.readDateTime(offset)) as P;
+      return (reader.readLong(offset)) as P;
     case 13:
-      return (reader.readDouble(offset)) as P;
+      return (reader.readStringOrNull(offset)) as P;
     case 14:
+      return (reader.readDateTime(offset)) as P;
+    case 15:
+      return (reader.readDouble(offset)) as P;
+    case 16:
       return (reader.readDouble(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -2302,6 +2320,164 @@ extension GrenadeQueryFilter
         includeLower: includeLower,
         upper: upper,
         includeUpper: includeUpper,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> impactXRatioIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNull(
+        property: r'impactXRatio',
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition>
+      impactXRatioIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNotNull(
+        property: r'impactXRatio',
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> impactXRatioEqualTo(
+    double? value, {
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'impactXRatio',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> impactXRatioGreaterThan(
+    double? value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'impactXRatio',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> impactXRatioLessThan(
+    double? value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'impactXRatio',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> impactXRatioBetween(
+    double? lower,
+    double? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'impactXRatio',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> impactYRatioIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNull(
+        property: r'impactYRatio',
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition>
+      impactYRatioIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNotNull(
+        property: r'impactYRatio',
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> impactYRatioEqualTo(
+    double? value, {
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'impactYRatio',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> impactYRatioGreaterThan(
+    double? value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'impactYRatio',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> impactYRatioLessThan(
+    double? value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'impactYRatio',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> impactYRatioBetween(
+    double? lower,
+    double? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'impactYRatio',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        epsilon: epsilon,
       ));
     });
   }
@@ -3298,6 +3474,30 @@ extension GrenadeQuerySortBy on QueryBuilder<Grenade, Grenade, QSortBy> {
     });
   }
 
+  QueryBuilder<Grenade, Grenade, QAfterSortBy> sortByImpactXRatio() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'impactXRatio', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterSortBy> sortByImpactXRatioDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'impactXRatio', Sort.desc);
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterSortBy> sortByImpactYRatio() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'impactYRatio', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterSortBy> sortByImpactYRatioDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'impactYRatio', Sort.desc);
+    });
+  }
+
   QueryBuilder<Grenade, Grenade, QAfterSortBy> sortByIsFavorite() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'isFavorite', Sort.asc);
@@ -3493,6 +3693,30 @@ extension GrenadeQuerySortThenBy
     });
   }
 
+  QueryBuilder<Grenade, Grenade, QAfterSortBy> thenByImpactXRatio() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'impactXRatio', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterSortBy> thenByImpactXRatioDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'impactXRatio', Sort.desc);
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterSortBy> thenByImpactYRatio() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'impactYRatio', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterSortBy> thenByImpactYRatioDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'impactYRatio', Sort.desc);
+    });
+  }
+
   QueryBuilder<Grenade, Grenade, QAfterSortBy> thenByIsFavorite() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'isFavorite', Sort.asc);
@@ -3659,6 +3883,18 @@ extension GrenadeQueryWhereDistinct
     });
   }
 
+  QueryBuilder<Grenade, Grenade, QDistinct> distinctByImpactXRatio() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'impactXRatio');
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QDistinct> distinctByImpactYRatio() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'impactYRatio');
+    });
+  }
+
   QueryBuilder<Grenade, Grenade, QDistinct> distinctByIsFavorite() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'isFavorite');
@@ -3759,6 +3995,18 @@ extension GrenadeQueryProperty
   QueryBuilder<Grenade, bool, QQueryOperations> hasLocalEditsProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'hasLocalEdits');
+    });
+  }
+
+  QueryBuilder<Grenade, double?, QQueryOperations> impactXRatioProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'impactXRatio');
+    });
+  }
+
+  QueryBuilder<Grenade, double?, QQueryOperations> impactYRatioProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'impactYRatio');
     });
   }
 

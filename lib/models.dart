@@ -100,6 +100,12 @@ class Grenade {
   /// 出处备注
   String? sourceNote;
 
+  /// 爆点 X 坐标比例 (0-1)，null 表示未设置爆点
+  double? impactXRatio;
+
+  /// 爆点 Y 坐标比例 (0-1)，null 表示未设置爆点
+  double? impactYRatio;
+
   // 反向链接到 MapLayer
   @Backlink(to: 'grenades')
   final layer = IsarLink<MapLayer>();

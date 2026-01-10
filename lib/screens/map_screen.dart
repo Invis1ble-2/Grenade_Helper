@@ -125,6 +125,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   GrenadeCluster? _joystickCluster; // 摇杆模式下选中的标点
   Offset? _joystickOriginalOffset; // 摇杆移动前的原始位置
 
+  // 爆点显示相关状态
+  GrenadeCluster? _selectedClusterForImpact; // 选中的点位（用于显示爆点）
+
   @override
   void initState() {
     super.initState();
@@ -277,6 +280,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     }
     final isEditMode = ref.read(isEditModeProvider);
     if (!isEditMode) return;
+    
+    // 如果道具列表面板已打开，禁止创建新道具
+    if (_selectedClusterForImpact != null) return;
 
     // 使用 GlobalKey 和全局坐标获取精确的本地比例
     final localRatio = _getLocalPosition(details.globalPosition);
@@ -453,315 +459,17 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   }
 
   void _showClusterBottomSheet(GrenadeCluster cluster, int layerId) {
-    final isEditMode = ref.read(isEditModeProvider);
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setModalState) {
-          // 多选删除模式状态
-          bool isMultiSelectMode = false;
-          Set<int> selectedIds = {};
-          final grenades = cluster.grenades;
+    // 设置选中状态，触发爆点显示和底部面板显示
+    setState(() {
+      _selectedClusterForImpact = cluster;
+    });
+  }
 
-          return DraggableScrollableSheet(
-            initialChildSize: 0.4,
-            minChildSize: 0.25,
-            maxChildSize: 0.7,
-            expand: false,
-            builder: (_, scrollController) {
-              return StatefulBuilder(
-                builder: (context, setInnerState) {
-                  return Column(
-                    children: [
-                      // 拖动条
-                      Container(
-                          margin: const EdgeInsets.only(top: 12, bottom: 8),
-                          width: 40,
-                          height: 4,
-                          decoration: BoxDecoration(
-                              color: Colors.grey[600],
-                              borderRadius: BorderRadius.circular(2))),
-                      // 头部
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 8),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                                isMultiSelectMode
-                                    ? "已选择 ${selectedIds.length} 个"
-                                    : "该点位共 ${grenades.length} 个道具",
-                                style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color: Theme.of(context)
-                                        .textTheme
-                                        .bodyLarge
-                                        ?.color)),
-                            if (isEditMode)
-                              Row(mainAxisSize: MainAxisSize.min, children: [
-                                // 删除/确认删除按钮
-                                if (isMultiSelectMode)
-                                  TextButton.icon(
-                                    onPressed: selectedIds.isEmpty
-                                        ? null
-                                        : () async {
-                                            final confirm =
-                                                await showDialog<bool>(
-                                              context: context,
-                                              builder: (ctx) => AlertDialog(
-                                                backgroundColor: Theme.of(ctx)
-                                                    .colorScheme
-                                                    .surface,
-                                                title: Text("批量删除",
-                                                    style: TextStyle(
-                                                        color: Theme.of(ctx)
-                                                            .textTheme
-                                                            .bodyLarge
-                                                            ?.color)),
-                                                content: Text(
-                                                    "确定要删除选中的 ${selectedIds.length} 个道具吗？",
-                                                    style: TextStyle(
-                                                        color: Theme.of(ctx)
-                                                            .textTheme
-                                                            .bodySmall
-                                                            ?.color)),
-                                                actions: [
-                                                  TextButton(
-                                                      onPressed: () =>
-                                                          Navigator.pop(
-                                                              ctx, false),
-                                                      child: const Text("取消")),
-                                                  TextButton(
-                                                      onPressed: () =>
-                                                          Navigator.pop(
-                                                              ctx, true),
-                                                      child: const Text("删除",
-                                                          style: TextStyle(
-                                                              color:
-                                                                  Colors.red))),
-                                                ],
-                                              ),
-                                            );
-                                            if (confirm == true) {
-                                              // 收集要删除的道具
-                                              final toDelete = <Grenade>[];
-                                              for (final id in selectedIds) {
-                                                final g = grenades.firstWhere(
-                                                    (g) => g.id == id,
-                                                    orElse: () =>
-                                                        grenades.first);
-                                                if (!toDelete
-                                                    .any((x) => x.id == g.id)) {
-                                                  toDelete.add(g);
-                                                }
-                                              }
-                                              // 在单个事务中批量删除
-                                              await _deleteGrenadesInBatch(
-                                                  toDelete);
-                                              setModalState(() {
-                                                grenades.removeWhere((g) =>
-                                                    selectedIds.contains(g.id));
-                                              });
-                                              if (grenades.isEmpty) {
-                                                if (context.mounted) Navigator.pop(context);
-                                              } else {
-                                                setInnerState(() {
-                                                  isMultiSelectMode = false;
-                                                  selectedIds.clear();
-                                                });
-                                              }
-                                            }
-                                          },
-                                    icon: const Icon(Icons.delete, size: 18),
-                                    label: Text("删除(${selectedIds.length})"),
-                                    style: TextButton.styleFrom(
-                                        foregroundColor: Colors.red),
-                                  )
-                                else
-                                  IconButton(
-                                    onPressed: () {
-                                      setInnerState(() {
-                                        isMultiSelectMode = true;
-                                      });
-                                    },
-                                    icon: const Icon(Icons.delete_outline),
-                                    color: Colors.red,
-                                    tooltip: "批量删除",
-                                    iconSize: 22,
-                                  ),
-                                // 取消多选按钮
-                                if (isMultiSelectMode)
-                                  IconButton(
-                                    onPressed: () {
-                                      setInnerState(() {
-                                        isMultiSelectMode = false;
-                                        selectedIds.clear();
-                                      });
-                                    },
-                                    icon: const Icon(Icons.close),
-                                    color: Colors.grey,
-                                    iconSize: 22,
-                                  ),
-                                // 移动整体按钮
-                                if (!isMultiSelectMode)
-                                  IconButton(
-                                    onPressed: () {
-                                      Navigator.pop(context);
-                                      _startMoveCluster(cluster);
-                                    },
-                                    icon: const Icon(Icons.open_with),
-                                    color: Colors.cyan,
-                                    tooltip: "移动整体",
-                                    iconSize: 22,
-                                  ),
-                                // 添加按钮
-                                if (!isMultiSelectMode)
-                                  IconButton(
-                                    onPressed: () {
-                                      Navigator.pop(context);
-                                      _createGrenadeAtCluster(cluster, layerId);
-                                    },
-                                    icon: const Icon(Icons.add_circle),
-                                    color: Colors.orange,
-                                    tooltip: "添加道具",
-                                    iconSize: 22,
-                                  ),
-                              ]),
-                          ],
-                        ),
-                      ),
-                      Divider(color: Theme.of(context).dividerColor, height: 1),
-                      // 道具列表
-                      Expanded(
-                        child: ListView.builder(
-                          controller: scrollController,
-                          itemCount: grenades.length,
-                          itemBuilder: (_, index) {
-                            final g = grenades[index];
-                            final color = _getTeamColor(g.team);
-                            final icon = _getTypeIcon(g.type);
-                            final isSelected = selectedIds.contains(g.id);
-
-                            return ListTile(
-                              leading: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  // 多选模式显示复选框
-                                  if (isMultiSelectMode)
-                                    Checkbox(
-                                      value: isSelected,
-                                      onChanged: (val) {
-                                        setInnerState(() {
-                                          if (val == true) {
-                                            selectedIds.add(g.id);
-                                          } else {
-                                            selectedIds.remove(g.id);
-                                          }
-                                        });
-                                      },
-                                      activeColor: Colors.red,
-                                    ),
-                                  // 道具图标
-                                  Container(
-                                      width: 32,
-                                      height: 32,
-                                      decoration: BoxDecoration(
-                                          color: Colors.black54,
-                                          shape: BoxShape.circle,
-                                          border: Border.all(
-                                              color: color, width: 2)),
-                                      child:
-                                          Icon(icon, size: 16, color: color)),
-                                ],
-                              ),
-                              title: Text(g.title,
-                                  style: TextStyle(
-                                      color: Theme.of(context)
-                                          .textTheme
-                                          .bodyLarge
-                                          ?.color,
-                                      fontWeight: FontWeight.w500,
-                                      fontSize: 14)),
-                              subtitle: Text(
-                                  "${_getTypeName(g.type)} • ${_getTeamName(g.team)}",
-                                  style: TextStyle(
-                                      color: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall
-                                          ?.color,
-                                      fontSize: 11)),
-                              trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (g.isFavorite)
-                                      const Icon(Icons.star,
-                                          color: Colors.amber, size: 16),
-                                    if (g.isNewImport)
-                                      Container(
-                                          margin:
-                                              const EdgeInsets.only(left: 4),
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 4, vertical: 1),
-                                          decoration: BoxDecoration(
-                                              color: Colors.red,
-                                              borderRadius:
-                                                  BorderRadius.circular(6)),
-                                          child: const Text("NEW",
-                                              style: TextStyle(
-                                                  fontSize: 8,
-                                                  color: Colors.white))),
-                                    // 单独移动按钮（编辑模式且非多选模式）
-                                    if (isEditMode && !isMultiSelectMode)
-                                      IconButton(
-                                        onPressed: () {
-                                          Navigator.pop(context);
-                                          _startMoveSingleGrenade(g);
-                                        },
-                                        icon: const Icon(Icons.open_with),
-                                        color: Colors.cyan,
-                                        iconSize: 18,
-                                        padding: EdgeInsets.zero,
-                                        constraints: const BoxConstraints(
-                                            minWidth: 32, minHeight: 32),
-                                      ),
-                                    if (!isMultiSelectMode)
-                                      const Icon(Icons.chevron_right,
-                                          color: Colors.grey, size: 20),
-                                  ]),
-                              onTap: isMultiSelectMode
-                                  ? () {
-                                      setInnerState(() {
-                                        if (isSelected) {
-                                          selectedIds.remove(g.id);
-                                        } else {
-                                          selectedIds.add(g.id);
-                                        }
-                                      });
-                                    }
-                                  : () {
-                                      Navigator.pop(context);
-                                      _handleGrenadeTap(g,
-                                          isEditing: isEditMode);
-                                    },
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-                  );
-                },
-              );
-            },
-          );
-        },
-      ),
-    );
+  /// 关闭底部道具列表面板
+  void _closeClusterPanel() {
+    setState(() {
+      _selectedClusterForImpact = null;
+    });
   }
 
   void _createGrenadeAtCluster(GrenadeCluster cluster, int layerId) async {
@@ -1417,6 +1125,92 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     );
   }
 
+  /// 构建爆点标记（紫色圆形外圈 + X 内部）
+  Widget _buildImpactMarker(
+      Grenade grenade,
+      BoxConstraints constraints,
+      double markerScale,
+      ({
+        double width,
+        double height,
+        double offsetX,
+        double offsetY
+      }) imageBounds) {
+    if (grenade.impactXRatio == null || grenade.impactYRatio == null) {
+      return const SizedBox.shrink();
+    }
+
+    const double baseHalfSize = 8.0;
+    final left = imageBounds.offsetX +
+        grenade.impactXRatio! * imageBounds.width -
+        baseHalfSize;
+    final top = imageBounds.offsetY +
+        grenade.impactYRatio! * imageBounds.height -
+        baseHalfSize;
+
+    return Positioned(
+      left: left,
+      top: top,
+      child: Transform.scale(
+        scale: markerScale,
+        alignment: Alignment.center,
+        child: Container(
+          width: 16,
+          height: 16,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.4),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.purpleAccent, width: 2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.purpleAccent.withValues(alpha: 0.3),
+                blurRadius: 4,
+                spreadRadius: 1,
+              ),
+            ],
+          ),
+          child: const Icon(Icons.close, size: 10, color: Colors.purpleAccent),
+        ),
+      ),
+    );
+  }
+
+  /// 构建投掷点到爆点的连线
+  Widget _buildConnectionLine(
+      Grenade grenade,
+      ({
+        double width,
+        double height,
+        double offsetX,
+        double offsetY
+      }) imageBounds) {
+    if (grenade.impactXRatio == null || grenade.impactYRatio == null) {
+      return const SizedBox.shrink();
+    }
+
+    final startX = imageBounds.offsetX + grenade.xRatio * imageBounds.width;
+    final startY = imageBounds.offsetY + grenade.yRatio * imageBounds.height;
+    final endX =
+        imageBounds.offsetX + grenade.impactXRatio! * imageBounds.width;
+    final endY =
+        imageBounds.offsetY + grenade.impactYRatio! * imageBounds.height;
+
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: CustomPaint(
+          painter: _DashedLinePainter(
+            start: Offset(startX, startY),
+            end: Offset(endX, endY),
+            color: Colors.purpleAccent.withValues(alpha: 0.6),
+            strokeWidth: 1.5,
+            dashLength: 4,
+            gapLength: 4,
+          ),
+        ),
+      ),
+    );
+  }
+
   /// 构建出生点标记（方形 + 数字）- 带透明度，可点击创建道具
   Widget _buildSpawnPointMarker(
       SpawnPoint spawn,
@@ -2003,247 +1797,685 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                           borderRadius: BorderRadius.circular(20))),
                 ]))),
       ),
-      body: LayoutBuilder(builder: (context, constraints) {
-        return Stack(children: [
-          Positioned.fill(
-              child: Listener(
-                  onPointerSignal: (event) {
-                    if (event is PointerScrollEvent) {
-                      _handleMouseWheelZoom(event, constraints);
-                    }
-                  },
-                  child: PhotoView.customChild(
-                    key: ValueKey(currentLayer.id),
-                    controller: _photoViewController,
-                    initialScale: PhotoViewComputedScale.covered,
-                    minScale: PhotoViewComputedScale.contained * 0.8,
-                    maxScale: PhotoViewComputedScale.covered * 5.0,
-                    child: StreamBuilder<PhotoViewControllerValue>(
-                      stream: _photoViewController.outputStateStream,
-                      builder: (context, snapshot) {
-                        final double scale = snapshot.data?.scale ?? 1.0;
-                        // Calculate scale factor (inverse of zoom)
-                        // Base scalar is 1.0, decreases as we zoom in
-                        final double markerScale = 1.0 / scale;
-                        // Clamp scale to prevent markers getting too small or too big if needed
-                        // For now we use direct inverse scaling to keep visual size constant
+      body: Column(
+        children: [
+          // 地图区域（自适应填充剩余空间）
+          Expanded(
+            child: LayoutBuilder(builder: (context, constraints) {
+              return Stack(children: [
+                Positioned.fill(
+                    child: Listener(
+                        onPointerSignal: (event) {
+                          if (event is PointerScrollEvent) {
+                            _handleMouseWheelZoom(event, constraints);
+                          }
+                        },
+                        child: PhotoView.customChild(
+                          key: ValueKey(currentLayer.id),
+                          controller: _photoViewController,
+                          initialScale: PhotoViewComputedScale.covered,
+                          minScale: PhotoViewComputedScale.contained * 0.8,
+                          maxScale: PhotoViewComputedScale.covered * 5.0,
+                          child: StreamBuilder<PhotoViewControllerValue>(
+                            stream: _photoViewController.outputStateStream,
+                            builder: (context, snapshot) {
+                              final double scale = snapshot.data?.scale ?? 1.0;
+                              // Calculate scale factor (inverse of zoom)
+                              // Base scalar is 1.0, decreases as we zoom in
+                              final double markerScale = 1.0 / scale;
+                              // Clamp scale to prevent markers getting too small or too big if needed
+                              // For now we use direct inverse scaling to keep visual size constant
 
-                        // 计算 BoxFit.contain 模式下图片的实际显示区域
-                        final imageBounds = _getImageBounds(
-                            constraints.maxWidth, constraints.maxHeight);
+                              // 计算 BoxFit.contain 模式下图片的实际显示区域
+                              final imageBounds = _getImageBounds(
+                                  constraints.maxWidth, constraints.maxHeight);
 
-                        return GestureDetector(
-                            onTapUp: (d) => _handleTap(d, constraints.maxWidth,
-                                constraints.maxHeight, currentLayer.id),
-                            child: Stack(key: _stackKey, children: [
-                              Image.asset(currentLayer.assetPath,
-                                  width: constraints.maxWidth,
-                                  height: constraints.maxHeight,
-                                  fit: BoxFit.contain),
-                              // 道具点位标记（先渲染，在下层）
-                              // 缩放 200% 以上时禁用合并，显示完整细节
-                              ...grenadesAsync.when(
-                                  data: (list) {
-                                    final clusterThreshold =
-                                        scale >= 2.0 ? 0.008 : 0.02;
-                                    final clusters = clusterGrenades(list,
-                                        threshold: clusterThreshold);
-                                    return clusters.map((c) =>
-                                        _buildClusterMarker(
-                                            c,
-                                            constraints,
-                                            isEditMode,
-                                            currentLayer.id,
-                                            markerScale,
-                                            imageBounds));
+                              return GestureDetector(
+                                  onTapUp: (d) => _handleTap(d, constraints.maxWidth,
+                                      constraints.maxHeight, currentLayer.id),
+                                  child: Stack(key: _stackKey, children: [
+                                    Image.asset(currentLayer.assetPath,
+                                        width: constraints.maxWidth,
+                                        height: constraints.maxHeight,
+                                        fit: BoxFit.contain),
+                                    // 道具点位标记（先渲染，在下层）
+                                    // 缩放 200% 以上时禁用合并，显示完整细节
+                                    ...grenadesAsync.when(
+                                        data: (list) {
+                                          final clusterThreshold =
+                                              scale >= 2.0 ? 0.008 : 0.02;
+                                          final clusters = clusterGrenades(list,
+                                              threshold: clusterThreshold);
+                                          
+                                          // 如果有选中的点位，只显示选中的点位
+                                          final visibleClusters = _selectedClusterForImpact == null
+                                              ? clusters
+                                              : clusters.where((c) => _isSameCluster(c, _selectedClusterForImpact)).toList();
+                                          
+                                          return visibleClusters.map((c) =>
+                                              _buildClusterMarker(
+                                                  c,
+                                                  constraints,
+                                                  isEditMode,
+                                                  currentLayer.id,
+                                                  markerScale,
+                                                  imageBounds));
+                                        },
+                                        error: (_, __) => [],
+                                        loading: () => []),
+                                    // 爆点连线（选中点位时显示）
+                                    if (_selectedClusterForImpact != null)
+                                      ..._selectedClusterForImpact!.grenades
+                                          .where((g) =>
+                                              g.impactXRatio != null &&
+                                              g.impactYRatio != null &&
+                                              g.type != GrenadeType.wallbang) // 穿点类型不显示爆点
+                                          .map((g) => _buildConnectionLine(g, imageBounds)),
+                                    // 爆点标记（选中点位时显示）
+                                    if (_selectedClusterForImpact != null)
+                                      ..._selectedClusterForImpact!.grenades
+                                          .where((g) =>
+                                              g.impactXRatio != null &&
+                                              g.impactYRatio != null &&
+                                              g.type != GrenadeType.wallbang) // 穿点类型不显示爆点
+                                          .map((g) => _buildImpactMarker(
+                                              g, constraints, markerScale, imageBounds)),
+                                    // 出生点标记（后渲染，在上层，但不响应点击）
+                                    if (showSpawnPoints && spawnConfig != null)
+                                      IgnorePointer(
+                                        child: Stack(
+                                          children: [
+                                            ...spawnConfig.ctSpawns.map((spawn) =>
+                                                _buildSpawnPointMarker(
+                                                    spawn,
+                                                    true,
+                                                    constraints,
+                                                    markerScale,
+                                                    imageBounds,
+                                                    currentLayer.id,
+                                                    isEditMode)),
+                                            ...spawnConfig.tSpawns.map((spawn) =>
+                                                _buildSpawnPointMarker(
+                                                    spawn,
+                                                    false,
+                                                    constraints,
+                                                    markerScale,
+                                                    imageBounds,
+                                                    currentLayer.id,
+                                                    isEditMode)),
+                                          ],
+                                        ),
+                                      ),
+                                    if (_draggingCluster != null &&
+                                        _dragOffset != null)
+                                      Positioned(
+                                          left: imageBounds.offsetX +
+                                              _dragOffset!.dx * imageBounds.width -
+                                              14.0, // Fixed offset, not scaled
+                                          top: imageBounds.offsetY +
+                                              _dragOffset!.dy * imageBounds.height -
+                                              14.0, // Fixed offset, not scaled
+                                          child: Transform.scale(
+                                            scale: markerScale,
+                                            alignment: Alignment.center,
+                                            child: Container(
+                                                width: 28,
+                                                height: 28,
+                                                decoration: BoxDecoration(
+                                                    color: Colors.cyan
+                                                        .withValues(alpha: 0.6),
+                                                    shape: BoxShape.circle,
+                                                    border: Border.all(
+                                                        color: Colors.cyan,
+                                                        width: 2)),
+                                                child: const Icon(Icons.open_with,
+                                                    size: 14, color: Colors.white)),
+                                          )),
+                                    if (_tempTapPosition != null)
+                                      Positioned(
+                                          left: imageBounds.offsetX +
+                                              _tempTapPosition!.dx *
+                                                  imageBounds.width -
+                                              12.0, // Fixed offset, not scaled
+                                          top: imageBounds.offsetY +
+                                              _tempTapPosition!.dy *
+                                                  imageBounds.height -
+                                              12.0, // Fixed offset, not scaled
+                                          child: Transform.scale(
+                                            scale: markerScale,
+                                            child: const Icon(Icons.add_circle,
+                                                color: Colors.greenAccent, size: 24),
+                                          )),
+                                  ]));
+                            },
+                          ),
+                        ))),
+                // 顶部UI
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: SafeArea(
+                      child: Padding(
+                          padding:
+                              const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                      color: Colors.black.withValues(alpha: 0.85),
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(color: Colors.white12)),
+                                  child: Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceAround,
+                                      children: [
+                                        _buildTypeFilterBtn(
+                                            selectedTypes,
+                                            GrenadeType.smoke,
+                                            "烟",
+                                            Icons.cloud,
+                                            Colors.grey),
+                                        _buildTypeFilterBtn(
+                                            selectedTypes,
+                                            GrenadeType.flash,
+                                            "闪",
+                                            Icons.flash_on,
+                                            Colors.yellow),
+                                        _buildTypeFilterBtn(
+                                            selectedTypes,
+                                            GrenadeType.molotov,
+                                            "火",
+                                            Icons.local_fire_department,
+                                            Colors.red),
+                                        _buildTypeFilterBtn(
+                                            selectedTypes,
+                                            GrenadeType.he,
+                                            "雷",
+                                            Icons.trip_origin,
+                                            Colors.green),
+                                        _buildTypeFilterBtn(
+                                            selectedTypes,
+                                            GrenadeType.wallbang,
+                                            "穿",
+                                            Icons.apps,
+                                            Colors.cyan),
+                                      ])),
+                              const SizedBox(height: 10),
+                              /* Search bar moved to AppBar */
+                            ],
+                          ))),
+                ),
+                // 楼层切换按钮
+                if (layers.length > 1)
+                  Positioned(
+                      right: 16,
+                      bottom: !isEditMode ? 80 : 30,
+                      child: Column(children: [
+                        FloatingActionButton.small(
+                            heroTag: "btn_up",
+                            backgroundColor: layerIndex < layers.length - 1
+                                ? Colors.orange
+                                : Colors.grey[800],
+                            onPressed: layerIndex < layers.length - 1
+                                ? () => ref
+                                    .read(selectedLayerIndexProvider.notifier)
+                                    .state++
+                                : null,
+                            child: const Icon(Icons.arrow_upward)),
+                        Container(
+                            margin: const EdgeInsets.symmetric(vertical: 8),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                                color: Colors.black87,
+                                borderRadius: BorderRadius.circular(4)),
+                            child: Text("F${layerIndex + 1}",
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold))),
+                        FloatingActionButton.small(
+                            heroTag: "btn_down",
+                            backgroundColor:
+                                layerIndex > 0 ? Colors.orange : Colors.grey[800],
+                            onPressed: layerIndex > 0
+                                ? () => ref
+                                    .read(selectedLayerIndexProvider.notifier)
+                                    .state--
+                                : null,
+                            child: const Icon(Icons.arrow_downward)),
+                      ])),
+                // 出生点侧边栏
+                if (showSpawnPoints && spawnConfig != null && _selectedClusterForImpact == null)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    bottom: isEditMode ? 0 : 60,
+                    child: _buildSpawnPointSidebar(
+                        spawnConfig, currentLayer.id, isEditMode),
+                  ),
+                // 底部收藏栏（仅在未选中点位时显示）
+                if (!isEditMode && _selectedClusterForImpact == null)
+                  Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: _buildFavoritesBar(grenadesAsync)),
+              ]);
+            }),
+          ),
+          // 底部道具列表面板（选中点位时显示）
+          if (_selectedClusterForImpact != null)
+            _buildClusterListPanel(currentLayer.id, isEditMode),
+        ],
+      ),
+    );
+  }
+
+  /// 构建底部道具列表面板
+  Widget _buildClusterListPanel(int layerId, bool isEditMode) {
+    final cluster = _selectedClusterForImpact!;
+    final grenades = cluster.grenades;
+
+    return StatefulBuilder(
+      builder: (context, setInnerState) {
+        // 多选删除模式状态
+        bool isMultiSelectMode = false;
+        Set<int> selectedIds = {};
+
+        return Container(
+          height: 220,
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.3),
+                blurRadius: 10,
+                offset: const Offset(0, -2),
+              ),
+            ],
+          ),
+          child: StatefulBuilder(
+            builder: (context, setPanelState) {
+              return Column(
+                children: [
+                  // 头部
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Row(
+                      children: [
+                        Text(
+                          isMultiSelectMode
+                              ? "已选择 ${selectedIds.length} 个"
+                              : "该点位共 ${grenades.length} 个道具",
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Theme.of(context).textTheme.bodyLarge?.color,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (isEditMode)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              // 批量删除按钮
+                              if (isMultiSelectMode)
+                                TextButton.icon(
+                                  onPressed: selectedIds.isEmpty
+                                      ? null
+                                      : () async {
+                                          final confirm = await showDialog<bool>(
+                                            context: context,
+                                            builder: (ctx) => AlertDialog(
+                                              backgroundColor: Theme.of(ctx).colorScheme.surface,
+                                              title: Text("批量删除",
+                                                  style: TextStyle(
+                                                      color: Theme.of(ctx).textTheme.bodyLarge?.color)),
+                                              content: Text(
+                                                  "确定要删除选中的 ${selectedIds.length} 个道具吗？",
+                                                  style: TextStyle(
+                                                      color: Theme.of(ctx).textTheme.bodySmall?.color)),
+                                              actions: [
+                                                TextButton(
+                                                    onPressed: () => Navigator.pop(ctx, false),
+                                                    child: const Text("取消")),
+                                                TextButton(
+                                                    onPressed: () => Navigator.pop(ctx, true),
+                                                    child: const Text("删除",
+                                                        style: TextStyle(color: Colors.red))),
+                                              ],
+                                            ),
+                                          );
+                                          if (confirm == true) {
+                                            final toDelete = <Grenade>[];
+                                            for (final id in selectedIds) {
+                                              final g = grenades.firstWhere(
+                                                  (g) => g.id == id,
+                                                  orElse: () => grenades.first);
+                                              if (!toDelete.any((x) => x.id == g.id)) {
+                                                toDelete.add(g);
+                                              }
+                                            }
+                                            await _deleteGrenadesInBatch(toDelete);
+                                            if (grenades.isEmpty || toDelete.length == grenades.length) {
+                                              _closeClusterPanel();
+                                            } else {
+                                              setPanelState(() {
+                                                isMultiSelectMode = false;
+                                                selectedIds.clear();
+                                              });
+                                            }
+                                          }
+                                        },
+                                  icon: const Icon(Icons.delete, size: 16),
+                                  label: Text("删除(${selectedIds.length})"),
+                                  style: TextButton.styleFrom(foregroundColor: Colors.red),
+                                )
+                              else
+                                IconButton(
+                                  onPressed: () {
+                                    setPanelState(() {
+                                      isMultiSelectMode = true;
+                                    });
                                   },
-                                  error: (_, __) => [],
-                                  loading: () => []),
-                              // 出生点标记（后渲染，在上层，但不响应点击）
-                              if (showSpawnPoints && spawnConfig != null)
-                                IgnorePointer(
-                                  child: Stack(
-                                    children: [
-                                      ...spawnConfig.ctSpawns.map((spawn) =>
-                                          _buildSpawnPointMarker(
-                                              spawn,
-                                              true,
-                                              constraints,
-                                              markerScale,
-                                              imageBounds,
-                                              currentLayer.id,
-                                              isEditMode)),
-                                      ...spawnConfig.tSpawns.map((spawn) =>
-                                          _buildSpawnPointMarker(
-                                              spawn,
-                                              false,
-                                              constraints,
-                                              markerScale,
-                                              imageBounds,
-                                              currentLayer.id,
-                                              isEditMode)),
-                                    ],
+                                  icon: const Icon(Icons.delete_outline),
+                                  color: Colors.red,
+                                  tooltip: "批量删除",
+                                  iconSize: 18,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                ),
+                              // 取消多选按钮
+                              if (isMultiSelectMode)
+                                IconButton(
+                                  onPressed: () {
+                                    setPanelState(() {
+                                      isMultiSelectMode = false;
+                                      selectedIds.clear();
+                                    });
+                                  },
+                                  icon: const Icon(Icons.close),
+                                  color: Colors.grey,
+                                  iconSize: 18,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                ),
+                              // 移动整体按钮
+                              if (!isMultiSelectMode)
+                                IconButton(
+                                  onPressed: () {
+                                    _closeClusterPanel();
+                                    _startMoveCluster(cluster);
+                                  },
+                                  icon: const Icon(Icons.open_with),
+                                  color: Colors.cyan,
+                                  tooltip: "移动整体",
+                                  iconSize: 18,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                ),
+                              // 添加按钮
+                              if (!isMultiSelectMode)
+                                IconButton(
+                                  onPressed: () {
+                                    _closeClusterPanel();
+                                    _createGrenadeAtCluster(cluster, layerId);
+                                  },
+                                  icon: const Icon(Icons.add_circle),
+                                  color: Colors.orange,
+                                  tooltip: "添加道具",
+                                  iconSize: 18,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                ),
+                            ],
+                          ),
+                        // 关闭按钮
+                        IconButton(
+                          onPressed: _closeClusterPanel,
+                          icon: const Icon(Icons.close),
+                          color: Colors.grey,
+                          iconSize: 18,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Divider(color: Theme.of(context).dividerColor, height: 1),
+                  // 道具列表
+                  Expanded(
+                    child: ListView.builder(
+                      padding: EdgeInsets.zero,
+                      itemCount: grenades.length,
+                      itemBuilder: (_, index) {
+                        final g = grenades[index];
+                        final color = _getTeamColor(g.team);
+                        final icon = _getTypeIcon(g.type);
+                        final isSelected = selectedIds.contains(g.id);
+
+                        // 左滑删除功能（编辑模式下）
+                        Widget listItem = ListTile(
+                          dense: true,
+                          visualDensity: VisualDensity.compact,
+                          leading: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              // 多选模式显示复选框
+                              if (isMultiSelectMode)
+                                Checkbox(
+                                  value: isSelected,
+                                  onChanged: (val) {
+                                    setPanelState(() {
+                                      if (val == true) {
+                                        selectedIds.add(g.id);
+                                      } else {
+                                        selectedIds.remove(g.id);
+                                      }
+                                    });
+                                  },
+                                  activeColor: Colors.red,
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                              // 道具图标
+                              Container(
+                                width: 26,
+                                height: 26,
+                                decoration: BoxDecoration(
+                                  color: Colors.black54,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: color, width: 2),
+                                ),
+                                child: Icon(icon, size: 12, color: color),
+                              ),
+                            ],
+                          ),
+                          title: Text(
+                            g.title,
+                            style: TextStyle(
+                              color: Theme.of(context).textTheme.bodyLarge?.color,
+                              fontWeight: FontWeight.w500,
+                              fontSize: 12,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            "${_getTypeName(g.type)} • ${_getTeamName(g.team)}",
+                            style: TextStyle(
+                              color: Theme.of(context).textTheme.bodySmall?.color,
+                              fontSize: 10,
+                            ),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (g.isFavorite)
+                                const Icon(Icons.star, color: Colors.amber, size: 12),
+                              if (g.isNewImport)
+                                Container(
+                                  margin: const EdgeInsets.only(left: 2),
+                                  padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red,
+                                    borderRadius: BorderRadius.circular(3),
+                                  ),
+                                  child: const Text(
+                                    "NEW",
+                                    style: TextStyle(fontSize: 6, color: Colors.white),
                                   ),
                                 ),
-                              if (_draggingCluster != null &&
-                                  _dragOffset != null)
-                                Positioned(
-                                    left: imageBounds.offsetX +
-                                        _dragOffset!.dx * imageBounds.width -
-                                        14.0, // Fixed offset, not scaled
-                                    top: imageBounds.offsetY +
-                                        _dragOffset!.dy * imageBounds.height -
-                                        14.0, // Fixed offset, not scaled
-                                    child: Transform.scale(
-                                      scale: markerScale,
-                                      child: Container(
-                                          width: 28,
-                                          height: 28,
-                                          decoration: BoxDecoration(
-                                              color: Colors.orange
-                                                  .withValues(alpha: 0.8),
-                                              shape: BoxShape.circle,
-                                              border: Border.all(
-                                                  color: Colors.white,
-                                                  width: 2)),
-                                          child: const Icon(Icons.place,
-                                              size: 16, color: Colors.white)),
-                                    )),
-                              if (_tempTapPosition != null)
-                                Positioned(
-                                    left: imageBounds.offsetX +
-                                        _tempTapPosition!.dx *
-                                            imageBounds.width -
-                                        12.0, // Fixed offset, not scaled
-                                    top: imageBounds.offsetY +
-                                        _tempTapPosition!.dy *
-                                            imageBounds.height -
-                                        12.0, // Fixed offset, not scaled
-                                    child: Transform.scale(
-                                      scale: markerScale,
-                                      child: const Icon(Icons.add_circle,
-                                          color: Colors.greenAccent, size: 24),
-                                    )),
-                            ]));
+                              // 单独移动按钮
+                              if (isEditMode && !isMultiSelectMode)
+                                IconButton(
+                                  onPressed: () {
+                                    _closeClusterPanel();
+                                    _startMoveSingleGrenade(g);
+                                  },
+                                  icon: const Icon(Icons.open_with),
+                                  color: Colors.cyan,
+                                  iconSize: 14,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                                ),
+                              if (!isMultiSelectMode)
+                                const Icon(Icons.chevron_right, color: Colors.grey, size: 16),
+                            ],
+                          ),
+                          onTap: isMultiSelectMode
+                              ? () {
+                                  setPanelState(() {
+                                    if (isSelected) {
+                                      selectedIds.remove(g.id);
+                                    } else {
+                                      selectedIds.add(g.id);
+                                    }
+                                  });
+                                }
+                              : () {
+                                  _closeClusterPanel();
+                                  _handleGrenadeTap(g, isEditing: isEditMode);
+                                },
+                        );
+
+                        // 编辑模式下添加左滑删除
+                        if (isEditMode && !isMultiSelectMode) {
+                          return Dismissible(
+                            key: Key('grenade_${g.id}'),
+                            direction: DismissDirection.endToStart,
+                            background: Container(
+                              alignment: Alignment.centerRight,
+                              padding: const EdgeInsets.only(right: 16),
+                              color: Colors.red,
+                              child: const Icon(Icons.delete, color: Colors.white),
+                            ),
+                            confirmDismiss: (_) async {
+                              return await showDialog<bool>(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  backgroundColor: Theme.of(ctx).colorScheme.surface,
+                                  title: Text("删除道具",
+                                      style: TextStyle(
+                                          color: Theme.of(ctx).textTheme.bodyLarge?.color)),
+                                  content: Text("确定要删除 \"${g.title}\" 吗？",
+                                      style: TextStyle(
+                                          color: Theme.of(ctx).textTheme.bodySmall?.color)),
+                                  actions: [
+                                    TextButton(
+                                        onPressed: () => Navigator.pop(ctx, false),
+                                        child: const Text("取消")),
+                                    TextButton(
+                                        onPressed: () => Navigator.pop(ctx, true),
+                                        child: const Text("删除",
+                                            style: TextStyle(color: Colors.red))),
+                                  ],
+                                ),
+                              );
+                            },
+                            onDismissed: (_) async {
+                              await _deleteGrenadesInBatch([g]);
+                              if (grenades.length <= 1) {
+                                _closeClusterPanel();
+                              }
+                            },
+                            child: listItem,
+                          );
+                        }
+
+                        return listItem;
                       },
                     ),
-                  ))),
-          // 顶部UI
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: SafeArea(
-                child: Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.85),
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: Colors.white12)),
-                            child: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceAround,
-                                children: [
-                                  _buildTypeFilterBtn(
-                                      selectedTypes,
-                                      GrenadeType.smoke,
-                                      "烟",
-                                      Icons.cloud,
-                                      Colors.grey),
-                                  _buildTypeFilterBtn(
-                                      selectedTypes,
-                                      GrenadeType.flash,
-                                      "闪",
-                                      Icons.flash_on,
-                                      Colors.yellow),
-                                  _buildTypeFilterBtn(
-                                      selectedTypes,
-                                      GrenadeType.molotov,
-                                      "火",
-                                      Icons.local_fire_department,
-                                      Colors.red),
-                                  _buildTypeFilterBtn(
-                                      selectedTypes,
-                                      GrenadeType.he,
-                                      "雷",
-                                      Icons.trip_origin,
-                                      Colors.green),
-                                  _buildTypeFilterBtn(
-                                      selectedTypes,
-                                      GrenadeType.wallbang,
-                                      "穿",
-                                      Icons.apps,
-                                      Colors.cyan),
-                                ])),
-                        const SizedBox(height: 10),
-                        /* Search bar moved to AppBar */
-                      ],
-                    ))),
+                  ),
+                ],
+              );
+            },
           ),
-          // 楼层切换
-          if (layers.length > 1)
-            Positioned(
-                right: 16,
-                bottom: !isEditMode ? 80 : 30,
-                child: Column(children: [
-                  FloatingActionButton.small(
-                      heroTag: "btn_up",
-                      backgroundColor: layerIndex < layers.length - 1
-                          ? Colors.orange
-                          : Colors.grey[800],
-                      onPressed: layerIndex < layers.length - 1
-                          ? () => ref
-                              .read(selectedLayerIndexProvider.notifier)
-                              .state++
-                          : null,
-                      child: const Icon(Icons.arrow_upward)),
-                  Container(
-                      margin: const EdgeInsets.symmetric(vertical: 8),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                          color: Colors.black87,
-                          borderRadius: BorderRadius.circular(4)),
-                      child: Text("F${layerIndex + 1}",
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold))),
-                  FloatingActionButton.small(
-                      heroTag: "btn_down",
-                      backgroundColor:
-                          layerIndex > 0 ? Colors.orange : Colors.grey[800],
-                      onPressed: layerIndex > 0
-                          ? () => ref
-                              .read(selectedLayerIndexProvider.notifier)
-                              .state--
-                          : null,
-                      child: const Icon(Icons.arrow_downward)),
-                ])),
-          // 出生点侧边栏
-          if (showSpawnPoints && spawnConfig != null)
-            Positioned(
-              right: 0,
-              top: 0,
-              bottom: isEditMode ? 0 : 60,
-              child: _buildSpawnPointSidebar(
-                  spawnConfig, currentLayer.id, isEditMode),
-            ),
-          // 底部收藏栏
-          if (!isEditMode)
-            Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: _buildFavoritesBar(grenadesAsync)),
-        ]);
-      }),
+        );
+      },
     );
+  }
+}
+
+/// 虚线画笔，用于绘制投掷点到爆点的连线
+class _DashedLinePainter extends CustomPainter {
+  final Offset start;
+  final Offset end;
+  final Color color;
+  final double strokeWidth;
+  final double dashLength;
+  final double gapLength;
+
+  _DashedLinePainter({
+    required this.start,
+    required this.end,
+    required this.color,
+    this.strokeWidth = 1.5,
+    this.dashLength = 4,
+    this.gapLength = 4,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke;
+
+    final path = Path();
+    final totalLength = (end - start).distance;
+    final direction = (end - start) / totalLength;
+
+    double currentLength = 0;
+    bool draw = true;
+
+    path.moveTo(start.dx, start.dy);
+
+    while (currentLength < totalLength) {
+      final segmentLength = draw ? dashLength : gapLength;
+      final nextLength = (currentLength + segmentLength).clamp(0.0, totalLength);
+      final nextPoint = start + direction * nextLength;
+
+      if (draw) {
+        path.lineTo(nextPoint.dx, nextPoint.dy);
+      } else {
+        path.moveTo(nextPoint.dx, nextPoint.dy);
+      }
+
+      currentLength = nextLength;
+      draw = !draw;
+    }
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedLinePainter oldDelegate) {
+    return start != oldDelegate.start ||
+        end != oldDelegate.end ||
+        color != oldDelegate.color;
   }
 }

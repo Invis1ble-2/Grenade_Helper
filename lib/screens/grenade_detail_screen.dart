@@ -19,6 +19,7 @@ import '../models.dart';
 import '../providers.dart';
 import '../services/data_service.dart';
 import '../main.dart' show sendOverlayCommand;
+import 'impact_point_picker_screen.dart';
 
 // --- 视频播放小组件 ---
 class VideoPlayerWidget extends StatefulWidget {
@@ -212,6 +213,95 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
       await isar.grenades.put(grenade!);
     });
     _loadData(resetTitle: false);
+  }
+
+  /// 更新爆点位置
+  Future<void> _updateImpactPoint(double? x, double? y) async {
+    if (grenade == null) return;
+    final isar = ref.read(isarProvider);
+
+    grenade!.impactXRatio = x;
+    grenade!.impactYRatio = y;
+    grenade!.updatedAt = DateTime.now();
+
+    await isar.writeTxn(() async {
+      await isar.grenades.put(grenade!);
+    });
+
+    await _markAsLocallyEdited();
+    _loadData(resetTitle: false);
+    sendOverlayCommand('reload_data');
+  }
+
+  /// 打开爆点选择页面
+  Future<void> _pickImpactPoint() async {
+    if (grenade == null) return;
+
+    // 获取道具所在楼层
+    await grenade!.layer.load();
+    final layer = grenade!.layer.value;
+    if (layer == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('无法获取楼层信息')),
+      );
+      return;
+    }
+
+    final result = await Navigator.push<Offset>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ImpactPointPickerScreen(
+          grenadeId: grenade!.id,
+          initialX: grenade!.impactXRatio,
+          initialY: grenade!.impactYRatio,
+          throwX: grenade!.xRatio,
+          throwY: grenade!.yRatio,
+          layerId: layer.id,
+        ),
+      ),
+    );
+
+    if (result != null) {
+      await _updateImpactPoint(result.dx, result.dy);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✓ 爆点已设置'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 1),
+        ),
+      );
+    }
+  }
+
+  /// 清除爆点
+  Future<void> _clearImpactPoint() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清除爆点'),
+        content: const Text('确定要清除已设置的爆点吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('清除', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await _updateImpactPoint(null, null);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('爆点已清除'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+    }
   }
 
   void _deleteGrenade() {
@@ -1250,32 +1340,151 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     );
   }
 
+  /// 构建爆点设置区域
+  Widget _buildImpactPointSection() {
+    final hasImpactPoint =
+        grenade!.impactXRatio != null && grenade!.impactYRatio != null;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.purpleAccent.withValues(alpha: 0.3),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.purpleAccent, width: 2),
+                ),
+                child: const Icon(Icons.close,
+                    size: 14, color: Colors.purpleAccent),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '爆点位置',
+                style: TextStyle(
+                  color: Theme.of(context).textTheme.bodyLarge?.color,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+              const Spacer(),
+              if (hasImpactPoint)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Text(
+                    '已设置',
+                    style: TextStyle(
+                      color: Colors.greenAccent,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (hasImpactPoint)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                children: [
+                  Icon(Icons.location_on,
+                      size: 14, color: Colors.grey[500]),
+                  const SizedBox(width: 4),
+                  Text(
+                    '坐标: (${grenade!.impactXRatio!.toStringAsFixed(3)}, ${grenade!.impactYRatio!.toStringAsFixed(3)})',
+                    style: TextStyle(
+                      color: Colors.grey[500],
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _pickImpactPoint,
+                  icon: Icon(
+                    hasImpactPoint ? Icons.edit_location : Icons.add_location,
+                    size: 18,
+                  ),
+                  label: Text(hasImpactPoint ? '修改爆点' : '设置爆点'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.purpleAccent,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ),
+              if (hasImpactPoint) ...[
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: _clearImpactPoint,
+                  icon: const Icon(Icons.clear, size: 18),
+                  label: const Text('清除'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    side: const BorderSide(color: Colors.red),
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 10, horizontal: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildStepList(bool isEditing) {
     final steps = grenade!.steps.toList();
     steps.sort((a, b) => a.stepIndex.compareTo(b.stepIndex));
 
-    if (steps.isEmpty) {
+    // 是否显示爆点卡片（编辑模式且非穿点类型）
+    final showImpactCard = isEditing && grenade!.type != GrenadeType.wallbang;
+
+    if (steps.isEmpty && !showImpactCard) {
       return const Center(
           child: Text("暂无教学步骤", style: TextStyle(color: Colors.grey)));
     }
 
     if (isEditing) {
-      return ReorderableListView(
+      // 编辑模式：使用 ListView（爬点卡片不参与重排序）
+      return ListView(
         padding: const EdgeInsets.all(16),
-        onReorder: (oldIndex, newIndex) {
-          if (oldIndex < newIndex) newIndex -= 1;
-          final item = steps.removeAt(oldIndex);
-          steps.insert(newIndex, item);
-          final isar = ref.read(isarProvider);
-          for (int i = 0; i < steps.length; i++) {
-            steps[i].stepIndex = i;
-          }
-          isar.writeTxnSync(() {
-            isar.grenadeSteps.putAllSync(steps);
-          });
-          setState(() {});
-        },
-        children: steps.map((step) => _buildStepCard(step, isEditing)).toList(),
+        children: [
+          // 爆点卡片（编辑模式且非穿点类型时显示）
+          if (showImpactCard) _buildImpactPointSection(),
+          // 步骤卡片
+          ...steps.map((step) => _buildStepCard(step, isEditing)),
+        ],
       );
     } else {
       return ListView.builder(
