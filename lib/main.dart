@@ -435,7 +435,8 @@ Future<void> _runOverlayWindow(
       // 更新窗口尺寸
       case 'update_size':
         final sizeIndex = call.arguments?['sizeIndex'] as int? ?? 1;
-        debugPrint('[Overlay] Received update_size command with index: $sizeIndex');
+        debugPrint(
+            '[Overlay] Received update_size command with index: $sizeIndex');
         overlayState.setOverlaySize(sizeIndex);
         return 'ok';
       // 增加导航速度
@@ -667,8 +668,8 @@ class _MainAppState extends ConsumerState<MainApp> {
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted) _checkDonationReminder();
     });
-    // 加载保存的主题设置
-    _loadThemeSetting();
+    // 加载全局设置
+    _loadGlobalSettings();
   }
 
   /// 检查是否需要显示赞助提醒
@@ -768,13 +769,18 @@ class _MainAppState extends ConsumerState<MainApp> {
     );
   }
 
-  Future<void> _loadThemeSetting() async {
+  Future<void> _loadGlobalSettings() async {
     if (globalSettingsService != null) {
       final savedTheme = globalSettingsService!.getThemeMode();
       ref.read(themeModeProvider.notifier).state = savedTheme;
       // 加载节日主题开关设置
       final seasonalEnabled = globalSettingsService!.getSeasonalThemeEnabled();
       ref.read(seasonalThemeEnabledProvider.notifier).state = seasonalEnabled;
+      // 加载地图连线设置
+      ref.read(mapLineColorProvider.notifier).state =
+          globalSettingsService!.getMapLineColor();
+      ref.read(mapLineOpacityProvider.notifier).state =
+          globalSettingsService!.getMapLineOpacity();
     }
   }
 
@@ -971,10 +977,12 @@ class _MainAppState extends ConsumerState<MainApp> {
             children: [
               Text(
                 '新版本: ${updateInfo.versionName}',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
               ),
               const SizedBox(height: 12),
-              const Text('更新内容:', style: TextStyle(fontWeight: FontWeight.w500)),
+              const Text('更新内容:',
+                  style: TextStyle(fontWeight: FontWeight.w500)),
               const SizedBox(height: 4),
               Container(
                 padding: const EdgeInsets.all(8),
@@ -1002,7 +1010,8 @@ class _MainAppState extends ConsumerState<MainApp> {
             // 网盘下载
             PopupMenuButton<String>(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
                   color: Colors.grey[800],
                   borderRadius: BorderRadius.circular(4),

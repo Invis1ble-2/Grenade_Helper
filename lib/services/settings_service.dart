@@ -123,6 +123,8 @@ class SettingsService {
   static const String _keySeasonalThemeEnabled = 'seasonal_theme_enabled';
   static const String _keyLaunchCount = 'app_launch_count';
   static const String _keyDonationDialogShown = 'donation_dialog_shown';
+  static const String _keyMapLineColor = 'map_line_color'; // int value of color
+  static const String _keyMapLineOpacity = 'map_line_opacity';
 
   // 移动端使用 SharedPreferences
   SharedPreferences? _prefs;
@@ -287,10 +289,19 @@ class SettingsService {
             prefs.getBool(_keyDonationDialogShown);
         migrated = true;
       }
+      if (prefs.containsKey(_keyMapLineColor)) {
+        _cache[_keyMapLineColor] = prefs.getInt(_keyMapLineColor);
+        migrated = true;
+      }
+      if (prefs.containsKey(_keyMapLineOpacity)) {
+        _cache[_keyMapLineOpacity] = prefs.getDouble(_keyMapLineOpacity);
+        migrated = true;
+      }
 
       if (migrated) {
         await _saveValues(_cache);
-        debugPrint('[Settings] Migrated settings from SharedPreferences to file');
+        debugPrint(
+            '[Settings] Migrated settings from SharedPreferences to file');
       }
     } catch (e) {
       debugPrint('[Settings] Error migrating from SharedPreferences: $e');
@@ -662,6 +673,44 @@ class SettingsService {
       await _saveValue(_keyDonationDialogShown, true);
     } else {
       await _prefs?.setBool(_keyDonationDialogShown, true);
+    }
+  }
+
+  // ==================== 地图连线设置 ====================
+
+  /// 获取地图连线颜色值 (int)，默认为紫色 (Colors.purpleAccent.value)
+  int getMapLineColor() {
+    // 默认 Colors.purpleAccent 的值
+    const defaultColor = 0xFFE040FB;
+    if (isDesktop) {
+      return (_cache[_keyMapLineColor] as num?)?.toInt() ?? defaultColor;
+    }
+    return _prefs?.getInt(_keyMapLineColor) ?? defaultColor;
+  }
+
+  Future<void> setMapLineColor(int value) async {
+    if (isDesktop) {
+      _cache[_keyMapLineColor] = value;
+      await _saveValue(_keyMapLineColor, value);
+    } else {
+      await _prefs?.setInt(_keyMapLineColor, value);
+    }
+  }
+
+  /// 获取地图连线透明度 (0.0 - 1.0)，默认为 0.6
+  double getMapLineOpacity() {
+    if (isDesktop) {
+      return (_cache[_keyMapLineOpacity] as num?)?.toDouble() ?? 0.6;
+    }
+    return _prefs?.getDouble(_keyMapLineOpacity) ?? 0.6;
+  }
+
+  Future<void> setMapLineOpacity(double value) async {
+    if (isDesktop) {
+      _cache[_keyMapLineOpacity] = value;
+      await _saveValue(_keyMapLineOpacity, value);
+    } else {
+      await _prefs?.setDouble(_keyMapLineOpacity, value);
     }
   }
 

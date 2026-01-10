@@ -48,6 +48,11 @@ final typeFilterProvider = StateProvider.autoDispose<Set<int>>((ref) => <int>{
 // 出生点显示开关（默认关闭）
 final showSpawnPointsProvider = StateProvider.autoDispose<bool>((ref) => false);
 
+// 地图连线设置
+final mapLineColorProvider =
+    StateProvider<int>((ref) => 0xFFE040FB); // 默认 PurpleAccent (0xFFE040FB)
+final mapLineOpacityProvider = StateProvider<double>((ref) => 0.6);
+
 // ==================== Isar 数据流 ====================
 
 // 层级 1: 原始数据源 (Raw Data)
@@ -80,7 +85,7 @@ final filteredGrenadesProvider =
       if (!selectedTypes.contains(g.type)) return false;
 
       // B. 阵营筛选
-      if (teamFilter == TeamType.onlyAll && g.team != TeamType.all){
+      if (teamFilter == TeamType.onlyAll && g.team != TeamType.all) {
         return false;
       }
       if (teamFilter == TeamType.ct && g.team != TeamType.ct) return false;

@@ -29,6 +29,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late int _overlaySize; // 悬浮窗尺寸 (0=小, 1=中, 2=大)
   late bool _closeToTray;
   late int _overlayNavSpeed; // 悬浮窗导航速度 (1-5)
+  // 地图连线设置
+  late int _mapLineColor;
+  late double _mapLineOpacity;
   // 摇杆相关设置（仅移动端）
   late int _markerMoveMode;
   late double _joystickOpacity;
@@ -62,6 +65,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _overlaySize = widget.settingsService!.getOverlaySize();
       _closeToTray = widget.settingsService!.getCloseToTray();
       _overlayNavSpeed = widget.settingsService!.getOverlayNavSpeed();
+      _mapLineColor = widget.settingsService!.getMapLineColor();
+      _mapLineOpacity = widget.settingsService!.getMapLineOpacity();
       _markerMoveMode = widget.settingsService!.getMarkerMoveMode();
       _joystickOpacity = widget.settingsService!.getJoystickOpacity();
       _joystickSpeed = widget.settingsService!.getJoystickSpeed();
@@ -76,6 +81,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _overlaySize = 1;
       _closeToTray = true;
       _overlayNavSpeed = 3;
+      _mapLineColor = 0xFFE040FB;
+      _mapLineOpacity = 0.6;
       _markerMoveMode = 0;
       _joystickOpacity = 0.8;
       _joystickSpeed = 3;
@@ -143,6 +150,36 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             // 节日主题开关（仅在有激活节日主题时显示）
             if (SeasonalThemeManager.getActiveTheme() != null)
               _buildSeasonalThemeToggle(),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _buildSection(
+          title: '🗺️ 地图显示',
+          children: [
+            ListTile(
+              title: const Text('连接线颜色'),
+              subtitle: _buildColorPickerRow(),
+            ),
+            ListTile(
+              title: const Text('连接线透明度'),
+              subtitle: Text('${(_mapLineOpacity * 100).toInt()}%'),
+              trailing: SizedBox(
+                width: 150,
+                child: Slider(
+                  value: _mapLineOpacity,
+                  min: 0.1,
+                  max: 1.0,
+                  divisions: 9,
+                  onChanged: (value) async {
+                    setState(() => _mapLineOpacity = value);
+                    ref.read(mapLineOpacityProvider.notifier).state = value;
+                    if (widget.settingsService != null) {
+                      await widget.settingsService!.setMapLineOpacity(value);
+                    }
+                  },
+                ),
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 16),
@@ -335,6 +372,39 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ),
         const SizedBox(height: 16),
         _buildSection(
+          title: '🗺️ 地图显示',
+          children: [
+            ListTile(
+              title: const Text('连接线颜色'),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 8.0),
+                child: _buildColorPickerRow(),
+              ),
+            ),
+            ListTile(
+              title: const Text('连接线透明度'),
+              subtitle: Text('${(_mapLineOpacity * 100).toInt()}%'),
+              trailing: SizedBox(
+                width: 200,
+                child: Slider(
+                  value: _mapLineOpacity,
+                  min: 0.1,
+                  max: 1.0,
+                  divisions: 9,
+                  onChanged: (value) async {
+                    setState(() => _mapLineOpacity = value);
+                    ref.read(mapLineOpacityProvider.notifier).state = value;
+                    if (widget.settingsService != null) {
+                      await widget.settingsService!.setMapLineOpacity(value);
+                    }
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _buildSection(
           title: '⚙️ 通用设置',
           children: [
             ListTile(
@@ -420,7 +490,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 decoration: BoxDecoration(
                   color: Colors.amber.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+                  border:
+                      Border.all(color: Colors.amber.withValues(alpha: 0.3)),
                 ),
                 child: Row(
                   children: [
@@ -709,6 +780,59 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           debugPrint('[Settings] Hotkey changed, notified overlay to reload');
         },
       ),
+    );
+  }
+
+  Widget _buildColorPickerRow() {
+    final colors = [
+      0xFFE040FB, // PurpleAccent (Default)
+      0xFF448AFF, // BlueAccent
+      0xFF18FFFF, // CyanAccent
+      0xFF69F0AE, // GreenAccent
+      0xFFFFAB40, // OrangeAccent
+      0xFFFF5252, // RedAccent
+      0xFFFFFFFF, // White
+    ];
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: colors.map((colorValue) {
+        final isSelected = _mapLineColor == colorValue;
+        return GestureDetector(
+          onTap: () async {
+            setState(() => _mapLineColor = colorValue);
+            ref.read(mapLineColorProvider.notifier).state = colorValue;
+            if (widget.settingsService != null) {
+              await widget.settingsService!.setMapLineColor(colorValue);
+            }
+          },
+          child: Container(
+            margin: const EdgeInsets.only(right: 12),
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              color: Color(colorValue),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: isSelected ? Colors.white : Colors.transparent,
+                width: 2,
+              ),
+              boxShadow: isSelected
+                  ? [
+                      BoxShadow(
+                        color: Color(colorValue).withValues(alpha: 0.5),
+                        blurRadius: 6,
+                        spreadRadius: 2,
+                      )
+                    ]
+                  : null,
+            ),
+            child: isSelected
+                ? const Icon(Icons.check, size: 16, color: Colors.black54)
+                : null,
+          ),
+        );
+      }).toList(),
     );
   }
 }

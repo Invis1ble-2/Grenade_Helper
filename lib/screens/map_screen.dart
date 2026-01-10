@@ -7,6 +7,7 @@ import 'package:photo_view/photo_view.dart';
 import 'package:isar_community/isar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../models.dart';
 import '../providers.dart';
 import '../main.dart';
@@ -34,7 +35,7 @@ final _filteredGrenadesProvider =
       .map((allGrenades) {
     return allGrenades.where((g) {
       if (!selectedTypes.contains(g.type)) return false;
-      if (teamFilter == TeamType.onlyAll && g.team != TeamType.all){
+      if (teamFilter == TeamType.onlyAll && g.team != TeamType.all) {
         return false;
       }
       if (teamFilter == TeamType.ct && g.team != TeamType.ct) return false;
@@ -103,6 +104,36 @@ List<GrenadeCluster> clusterGrenades(List<Grenade> grenades,
   return clusters;
 }
 
+List<GrenadeCluster> clusterGrenadesByImpact(List<Grenade> grenades,
+    {double threshold = 0.0}) {
+  if (grenades.isEmpty) return [];
+  final List<GrenadeCluster> clusters = [];
+  // Filter only grenades with impact coordinates
+  final List<Grenade> remaining = grenades
+      .where((g) => g.impactXRatio != null && g.impactYRatio != null)
+      .toList();
+
+  while (remaining.isNotEmpty) {
+    final first = remaining.removeAt(0);
+    final nearby = <Grenade>[first];
+    remaining.removeWhere((g) {
+      final dx = (g.impactXRatio! - first.impactXRatio!).abs();
+      final dy = (g.impactYRatio! - first.impactYRatio!).abs();
+      if ((dx * dx + dy * dy) < threshold * threshold) {
+        nearby.add(g);
+        return true;
+      }
+      return false;
+    });
+    final avgX = nearby.map((g) => g.impactXRatio!).reduce((a, b) => a + b) /
+        nearby.length;
+    final avgY = nearby.map((g) => g.impactYRatio!).reduce((a, b) => a + b) /
+        nearby.length;
+    clusters.add(GrenadeCluster(xRatio: avgX, yRatio: avgY, grenades: nearby));
+  }
+  return clusters;
+}
+
 class MapScreen extends ConsumerStatefulWidget {
   final GameMap gameMap;
   const MapScreen({super.key, required this.gameMap});
@@ -120,6 +151,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   late final PhotoViewController _photoViewController;
   final GlobalKey _stackKey = GlobalKey(); // 添加 GlobalKey
   bool _isSpawnSidebarExpanded = true; // 出生点侧边栏展开状态
+  bool _isImpactMode = false; // 是否开启爆点优先显示模式
 
   // 摇杆模式相关状态
   GrenadeCluster? _joystickCluster; // 摇杆模式下选中的标点
@@ -127,6 +159,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
   // 爆点显示相关状态
   GrenadeCluster? _selectedClusterForImpact; // 选中的点位（用于显示爆点）
+
+  // 爆点拖动编辑相关状态
+  GrenadeCluster? _draggingImpactCluster; // 正在拖动的爆点 cluster
+  Offset? _impactDragOffset; // 爆点拖动位置
+  Offset? _impactDragAnchorOffset; // 爆点拖动锚点偏移
+  Grenade? _movingSingleImpactGrenade; // 单个道具爆点移动状态
 
   @override
   void initState() {
@@ -273,14 +311,185 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   }
 
   void _handleTap(
-      TapUpDetails details, double width, double height, int layerId) {
-    if (_isMovingCluster || _movingSingleGrenade != null) {
-      _handleMoveClusterTap(details, width, height);
+      TapUpDetails details, double width, double height, int layerId) async {
+    if (_isMovingCluster ||
+        _movingSingleGrenade != null ||
+        _movingSingleImpactGrenade != null ||
+        _draggingImpactCluster != null) {
+      final localRatio = _getLocalPosition(details.globalPosition);
+      if (localRatio == null) return;
+
+      final targetX = localRatio.dx;
+      final targetY = localRatio.dy;
+
+      // 边界检查
+      if (targetX < 0 || targetX > 1 || targetY < 0 || targetY > 1) {
+        return;
+      }
+
+      // 处理单个道具移动
+      if (_movingSingleGrenade != null) {
+        final isar = ref.read(isarProvider);
+        final targetId = _movingSingleGrenade!.id;
+
+        await isar.writeTxn(() async {
+          final g = await isar.grenades.get(targetId);
+          if (g != null) {
+            g.xRatio = targetX;
+            g.yRatio = targetY;
+            g.updatedAt = DateTime.now();
+            await isar.grenades.put(g);
+          }
+        });
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text("✓ 道具位置已更新"),
+            backgroundColor: Colors.cyan,
+            duration: Duration(seconds: 1)));
+
+        // 移动完成后，尝试恢复选中状态（无论爆点模式还是标准模式）
+        Future.delayed(const Duration(milliseconds: 50), () {
+          if (!mounted) return;
+          // 使用正确的 Provider 获取当前楼层的道具列表
+          final grenades =
+              ref.read(_filteredGrenadesProvider(layerId)).asData?.value;
+          if (grenades != null) {
+            final clusterThreshold = _photoViewController.scale != null &&
+                    _photoViewController.scale! >= 2.0
+                ? 0.008
+                : 0.02;
+
+            List<GrenadeCluster> clusters;
+            if (_isImpactMode) {
+              clusters = clusterGrenadesByImpact(grenades,
+                  threshold: clusterThreshold);
+            } else {
+              clusters = clusterGrenades(grenades, threshold: clusterThreshold);
+            }
+
+            // 找到包含该道具 ID 的 cluster
+            try {
+              final cluster = clusters
+                  .firstWhere((c) => c.grenades.any((g) => g.id == targetId));
+              setState(() {
+                _selectedClusterForImpact = cluster;
+              });
+            } catch (_) {
+              // 如果找不到，则不恢复选中
+            }
+          }
+        });
+
+        setState(() {
+          _movingSingleGrenade = null;
+        });
+        return;
+      }
+
+      // 处理单个爆点移动
+      if (_movingSingleImpactGrenade != null) {
+        final isar = ref.read(isarProvider);
+        await isar.writeTxn(() async {
+          final g = await isar.grenades.get(_movingSingleImpactGrenade!.id);
+          if (g != null) {
+            g.impactXRatio = targetX;
+            g.impactYRatio = targetY;
+            g.updatedAt = DateTime.now();
+            await isar.grenades.put(g);
+          }
+        });
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text("✓ 爆点位置已更新"),
+            backgroundColor: Colors.purpleAccent,
+            duration: Duration(seconds: 1)));
+
+        setState(() {
+          _movingSingleImpactGrenade = null;
+        });
+        return;
+      }
+
+      // 处理 Cluster 爆点整体移动
+      if (_draggingImpactCluster != null) {
+        final isar = ref.read(isarProvider);
+        await isar.writeTxn(() async {
+          for (final g in _draggingImpactCluster!.grenades) {
+            final freshG = await isar.grenades.get(g.id);
+            if (freshG != null) {
+              freshG.impactXRatio = targetX;
+              freshG.impactYRatio = targetY;
+              freshG.updatedAt = DateTime.now();
+              await isar.grenades.put(freshG);
+            }
+          }
+        });
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text("✓ 爆点已移动"),
+            backgroundColor: Colors.purpleAccent,
+            duration: Duration(seconds: 1)));
+
+        setState(() {
+          _draggingImpactCluster = null;
+          _impactDragOffset = null;
+          _impactDragAnchorOffset = null;
+        });
+        return;
+      }
+
+      // 处理整组点位合并：如果正在移动点位组，点击现有点位则全部合并进去
+      // 这里需要查找点击位置是否有现有的 cluster。但 _handleMoveClusterTap 之前的逻辑似乎是点击任何地方都视为移动目标？
+      // 不，之前的逻辑是：如果是点击了现有的点位 -> 合并；点击空白处 -> 移动。
+      // 由于这里只有点击空白处的逻辑（_handleTap 是 onBlankTap? 不，_handleTap 是 Stack 的 tapUp）
+
+      // 我们需要先检查点击位置是否有其他 cluster 以处理合并逻辑。
+      // 但是 _handleTap 这里的逻辑原本是 "创建新道具" (点击空白处)。
+      // 点击现有的 cluster 会触发 `_handleClusterTap`。
+      // 所以，如果是移动模式下点击空白处 -> 移动位置。
+      // 如果点击了 cluster -> _handleClusterTap 会被调用。
+
+      // 所以这里只需要处理 "移动到新位置" 的逻辑。
+
+      if (_isMovingCluster && _draggingCluster != null) {
+        final isar = ref.read(isarProvider);
+        isar.writeTxnSync(() {
+          for (final g in _draggingCluster!.grenades) {
+            final freshG = isar.grenades.getSync(g.id);
+            if (freshG != null) {
+              freshG.xRatio = targetX;
+              freshG.yRatio = targetY;
+              freshG.updatedAt = DateTime.now();
+              isar.grenades.putSync(freshG);
+            }
+          }
+        });
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text("✓ 点位已移动"),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 1)));
+
+        setState(() {
+          _isMovingCluster = false;
+          _draggingCluster = null;
+          _dragOffset = null;
+        });
+        return;
+      }
       return;
     }
     final isEditMode = ref.read(isEditModeProvider);
     if (!isEditMode) return;
-    
+
     // 如果道具列表面板已打开，禁止创建新道具
     if (_selectedClusterForImpact != null) return;
 
@@ -405,6 +614,40 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
       setState(() {
         _movingSingleGrenade = null;
+      });
+      setState(() {
+        _movingSingleGrenade = null;
+      });
+      return;
+    }
+
+    // 处理单个爆点移动
+    if (_movingSingleImpactGrenade != null) {
+      final isar = ref.read(isarProvider);
+
+      // 使用目标 Cluster 的坐标作为新爆点位置（吸附效果）
+      final targetX = cluster.xRatio;
+      final targetY = cluster.yRatio;
+
+      await isar.writeTxn(() async {
+        final g = await isar.grenades.get(_movingSingleImpactGrenade!.id);
+        if (g != null) {
+          g.impactXRatio = targetX;
+          g.impactYRatio = targetY;
+          g.updatedAt = DateTime.now();
+          await isar.grenades.put(g);
+        }
+      });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text("✓ 爆点位置已更新"),
+          backgroundColor: Colors.purpleAccent,
+          duration: Duration(seconds: 1)));
+
+      setState(() {
+        _movingSingleImpactGrenade = null;
       });
       return;
     }
@@ -561,6 +804,32 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
   }
 
+  /// 开始移动爆点位置
+  void _startMoveImpactCluster(GrenadeCluster cluster) {
+    setState(() {
+      _draggingImpactCluster = cluster;
+      _impactDragOffset = Offset(cluster.xRatio, cluster.yRatio);
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: const Text("点击地图新位置以移动爆点，或点击取消"),
+      backgroundColor: Colors.purpleAccent,
+      duration: const Duration(seconds: 10),
+      action: SnackBarAction(
+          label: "取消",
+          textColor: Colors.white,
+          onPressed: _cancelMoveImpactCluster),
+    ));
+  }
+
+  void _cancelMoveImpactCluster() {
+    setState(() {
+      _draggingImpactCluster = null;
+      _impactDragOffset = null;
+      _impactDragAnchorOffset = null;
+    });
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+  }
+
   /// 开始移动单个道具
   void _startMoveSingleGrenade(Grenade grenade) {
     setState(() {
@@ -577,99 +846,34 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     ));
   }
 
+  /// 开始移动单个道具的爆点
+  void _startMoveSingleGrenadeImpact(Grenade grenade) {
+    setState(() {
+      _movingSingleImpactGrenade = grenade;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('点击地图移动爆点「${grenade.title}」'),
+      backgroundColor: Colors.purpleAccent,
+      duration: const Duration(seconds: 10),
+      action: SnackBarAction(
+          label: "取消",
+          textColor: Colors.white,
+          onPressed: _cancelMoveSingleGrenadeImpact),
+    ));
+  }
+
+  void _cancelMoveSingleGrenadeImpact() {
+    setState(() {
+      _movingSingleImpactGrenade = null;
+    });
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+  }
+
   void _cancelMoveSingleGrenade() {
     setState(() {
       _movingSingleGrenade = null;
     });
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
-  }
-
-  void _handleMoveClusterTap(
-      TapUpDetails details, double width, double height) async {
-    // 处理单个道具移动
-    if (_movingSingleGrenade != null) {
-      final localRatio = _getLocalPosition(details.globalPosition);
-      if (localRatio == null) return;
-
-      double newX = localRatio.dx;
-      double newY = localRatio.dy;
-
-      // 边界检查
-      if (newX < 0 || newX > 1 || newY < 0 || newY > 1) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text("无法移动到地图外"),
-            backgroundColor: Colors.red,
-            duration: Duration(seconds: 1)));
-        return;
-      }
-
-      final isar = ref.read(isarProvider);
-
-      String successMessage = "✓ 道具已移动到新位置";
-      Color messageColor = Colors.green;
-
-      // 移除自动吸附逻辑，点击地图空白处只做移动
-
-      await isar.writeTxn(() async {
-        final g = await isar.grenades.get(_movingSingleGrenade!.id);
-        if (g != null) {
-          g.xRatio = newX;
-          g.yRatio = newY;
-          g.updatedAt = DateTime.now();
-          await isar.grenades.put(g);
-        }
-      });
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(successMessage),
-          backgroundColor: messageColor,
-          duration: const Duration(seconds: 1)));
-      setState(() {
-        _movingSingleGrenade = null;
-      });
-      return;
-    }
-
-    // 处理点位整体移动
-    if (_draggingCluster == null) return;
-
-    // 使用 GlobalKey 和全局坐标获取精确的本地比例
-    final localRatio = _getLocalPosition(details.globalPosition);
-    if (localRatio == null) return;
-
-    final newX = localRatio.dx;
-    final newY = localRatio.dy;
-
-    // 边界检查：只允许移动到地图范围内
-    if (newX < 0 || newX > 1 || newY < 0 || newY > 1) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("无法移动到地图外"),
-          backgroundColor: Colors.red,
-          duration: Duration(seconds: 1)));
-      return;
-    }
-
-    final isar = ref.read(isarProvider);
-    await isar.writeTxn(() async {
-      for (final g in _draggingCluster!.grenades) {
-        g.xRatio = newX;
-        g.yRatio = newY;
-        g.updatedAt = DateTime.now();
-        await isar.grenades.put(g);
-      }
-    });
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text("✓ 点位已移动"),
-        backgroundColor: Colors.green,
-        duration: Duration(seconds: 1)));
-    setState(() {
-      _isMovingCluster = false;
-      _draggingCluster = null;
-      _dragOffset = null;
-    });
   }
 
   void _onClusterDragEnd(double width, double height) {
@@ -693,6 +897,32 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       _draggingCluster = null;
       _dragOffset = null;
       _dragAnchorOffset = null;
+    });
+  }
+
+  /// 爆点拖动结束，保存爆点位置
+  void _onImpactClusterDragEnd(double width, double height) {
+    if (_draggingImpactCluster == null || _impactDragOffset == null) {
+      setState(() {
+        _draggingImpactCluster = null;
+        _impactDragOffset = null;
+        _impactDragAnchorOffset = null;
+      });
+      return;
+    }
+    final isar = ref.read(isarProvider);
+    isar.writeTxnSync(() {
+      for (final g in _draggingImpactCluster!.grenades) {
+        g.impactXRatio = _impactDragOffset!.dx;
+        g.impactYRatio = _impactDragOffset!.dy;
+        g.updatedAt = DateTime.now();
+        isar.grenades.putSync(g);
+      }
+    });
+    setState(() {
+      _draggingImpactCluster = null;
+      _impactDragOffset = null;
+      _impactDragAnchorOffset = null;
     });
   }
 
@@ -939,8 +1169,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-            color:
-                isSelected ? activeColor.withValues(alpha: 0.2) : Colors.transparent,
+            color: isSelected
+                ? activeColor.withValues(alpha: 0.2)
+                : Colors.transparent,
             border: Border.all(
                 color: isSelected
                     ? activeColor
@@ -969,15 +1200,147 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-            color: isSelected ? color.withValues(alpha: 0.2) : Colors.transparent,
+            color:
+                isSelected ? color.withValues(alpha: 0.2) : Colors.transparent,
             border: Border.all(
-                color: isSelected ? color : unselectedColor.withValues(alpha: 0.4)),
+                color: isSelected
+                    ? color
+                    : unselectedColor.withValues(alpha: 0.4)),
             borderRadius: BorderRadius.circular(20)),
         child: Text(label,
             style: TextStyle(
                 color: isSelected ? color : unselectedColor,
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                 fontSize: 12)),
+      ),
+    );
+  }
+
+  Widget _buildImpactClusterMarker(
+      GrenadeCluster cluster,
+      BoxConstraints constraints,
+      bool isEditMode,
+      int layerId,
+      double markerScale,
+      ({
+        double width,
+        double height,
+        double offsetX,
+        double offsetY
+      }) imageBounds) {
+    if (cluster.grenades.isEmpty) return const SizedBox.shrink();
+
+    const double size = 20.0;
+    const double baseHalfSize = size / 2;
+
+    // 计算实时位置（考虑拖动状态）
+    double effectiveX = cluster.xRatio;
+    double effectiveY = cluster.yRatio;
+
+    if (_isSameCluster(_draggingImpactCluster, cluster) &&
+        _impactDragOffset != null) {
+      effectiveX = _impactDragOffset!.dx;
+      effectiveY = _impactDragOffset!.dy;
+    }
+
+    final left =
+        imageBounds.offsetX + effectiveX * imageBounds.width - baseHalfSize;
+    final top =
+        imageBounds.offsetY + effectiveY * imageBounds.height - baseHalfSize;
+
+    final isSelected = _selectedClusterForImpact == cluster;
+    final isDragging = _isSameCluster(_draggingImpactCluster, cluster);
+
+    return Positioned(
+      left: left,
+      top: top,
+      child: Transform.scale(
+        scale: markerScale,
+        alignment: Alignment.center,
+        child: GestureDetector(
+          onTap: () {
+            _handleClusterTap(cluster, layerId);
+          },
+          // 长按开始拖动（仅编辑模式）
+          onLongPressStart: isEditMode
+              ? (details) {
+                  final touchRatio = _getLocalPosition(details.globalPosition);
+                  if (touchRatio == null) return;
+
+                  setState(() {
+                    _draggingImpactCluster = cluster;
+                    _impactDragAnchorOffset =
+                        touchRatio - Offset(cluster.xRatio, cluster.yRatio);
+                    _impactDragOffset = Offset(cluster.xRatio, cluster.yRatio);
+                  });
+                }
+              : null,
+          // 拖动更新位置
+          onLongPressMoveUpdate: isEditMode
+              ? (details) {
+                  if (_impactDragAnchorOffset == null) return;
+
+                  final touchRatio = _getLocalPosition(details.globalPosition);
+                  if (touchRatio == null) return;
+
+                  setState(() {
+                    final newPos = touchRatio - _impactDragAnchorOffset!;
+                    _impactDragOffset = Offset(
+                      newPos.dx.clamp(0.0, 1.0),
+                      newPos.dy.clamp(0.0, 1.0),
+                    );
+                  });
+                }
+              : null,
+          // 拖动结束，保存位置
+          onLongPressEnd: isEditMode
+              ? (_) => _onImpactClusterDragEnd(
+                  constraints.maxWidth, constraints.maxHeight)
+              : null,
+          child: Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              color: isDragging
+                  ? Colors.cyan.withValues(alpha: 0.6)
+                  : Colors.black.withValues(alpha: 0.4),
+              shape: BoxShape.circle,
+              border: Border.all(
+                  color: isDragging
+                      ? Colors.cyan
+                      : (isSelected ? Colors.white : Colors.purpleAccent),
+                  width: isDragging ? 3 : 2),
+              boxShadow: isDragging
+                  ? [
+                      BoxShadow(
+                        color: Colors.cyan.withValues(alpha: 0.5),
+                        blurRadius: 8,
+                        spreadRadius: 3,
+                      )
+                    ]
+                  : isSelected
+                      ? [
+                          BoxShadow(
+                            color: Colors.purpleAccent.withValues(alpha: 0.6),
+                            blurRadius: 6,
+                            spreadRadius: 2,
+                          )
+                        ]
+                      : [
+                          BoxShadow(
+                            color: Colors.purpleAccent.withValues(alpha: 0.3),
+                            blurRadius: 4,
+                            spreadRadius: 1,
+                          ),
+                        ],
+            ),
+            child: Icon(isDragging ? Icons.open_with : Icons.close,
+                size: size * 0.6,
+                color: isDragging
+                    ? Colors.white
+                    : (isSelected ? Colors.white : Colors.purpleAccent)),
+          ),
+        ),
       ),
     );
   }
@@ -994,6 +1357,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         double offsetX,
         double offsetY
       }) imageBounds) {
+    // 隐藏逻辑：如果处于爆点模式，且该 cluster 不是选中的爆点对应的 cluster，则不显示
+    // 实际上我们在 build 方法中已经做了过滤，这里只需要负责渲染
+    // 但如果我们需要在爆点模式下，选中爆点后显示对应的投掷点，这里是需要的渲染逻辑
+
     final color = _getTeamColor(cluster.primaryTeam);
     final icon = _getTypeIcon(cluster.primaryType);
     final count = cluster.grenades.length;
@@ -1125,6 +1492,56 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     );
   }
 
+  /// 构建投掷点标记（爆点模式下显示关联的投掷位置）
+  Widget _buildThrowPointMarker(
+      Grenade grenade,
+      BoxConstraints constraints,
+      double markerScale,
+      ({
+        double width,
+        double height,
+        double offsetX,
+        double offsetY
+      }) imageBounds) {
+    final icon = _getTypeIcon(grenade.type);
+
+    const double baseHalfSize = 10.0;
+    final left =
+        imageBounds.offsetX + grenade.xRatio * imageBounds.width - baseHalfSize;
+    final top = imageBounds.offsetY +
+        grenade.yRatio * imageBounds.height -
+        baseHalfSize;
+
+    return Positioned(
+      left: left,
+      top: top,
+      child: Transform.scale(
+        scale: markerScale,
+        alignment: Alignment.center,
+        child: Container(
+          width: 20,
+          height: 20,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.5),
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: Colors.orangeAccent,
+              width: 2,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.orangeAccent.withValues(alpha: 0.4),
+                blurRadius: 4,
+                spreadRadius: 1,
+              ),
+            ],
+          ),
+          child: Icon(icon, size: 10, color: _getTypeColor(grenade.type)),
+        ),
+      ),
+    );
+  }
+
   /// 构建爆点标记（紫色圆形外圈 + X 内部）
   Widget _buildImpactMarker(
       Grenade grenade,
@@ -1178,6 +1595,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   /// 构建投掷点到爆点的连线
   Widget _buildConnectionLine(
       Grenade grenade,
+      double scale,
       ({
         double width,
         double height,
@@ -1195,16 +1613,20 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final endY =
         imageBounds.offsetY + grenade.impactYRatio! * imageBounds.height;
 
+    final lineColorVal = ref.watch(mapLineColorProvider);
+    final lineOpacity = ref.watch(mapLineOpacityProvider);
+    final lineColor = Color(lineColorVal).withValues(alpha: lineOpacity);
+
     return Positioned.fill(
       child: IgnorePointer(
         child: CustomPaint(
           painter: _DashedLinePainter(
             start: Offset(startX, startY),
             end: Offset(endX, endY),
-            color: Colors.purpleAccent.withValues(alpha: 0.6),
-            strokeWidth: 1.5,
-            dashLength: 4,
-            gapLength: 4,
+            color: lineColor,
+            strokeWidth: 1.5 * scale,
+            dashLength: 6 * scale,
+            gapLength: 4 * scale,
           ),
         ),
       ),
@@ -1255,8 +1677,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               decoration: BoxDecoration(
                 color: color.withValues(alpha: 0.5),
                 borderRadius: BorderRadius.circular(3),
-                border:
-                    Border.all(color: Colors.white.withValues(alpha: 0.5), width: 1),
+                border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.5), width: 1),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.2),
@@ -1553,7 +1975,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       child: asyncData.when(
         data: (grenades) {
           final favs = grenades.where((g) => g.isFavorite).toList();
-          if (favs.isEmpty){
+          if (favs.isEmpty) {
             return const Center(
                 child: Text("暂无本层常用道具",
                     style: TextStyle(color: Colors.grey, fontSize: 12)));
@@ -1602,7 +2024,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final currentLayer = (layers.isNotEmpty && layerIndex < layers.length)
         ? layers[layerIndex]
         : (layers.isNotEmpty ? layers.last : null);
-    if (currentLayer == null){
+    if (currentLayer == null) {
       return const Scaffold(body: Center(child: Text("数据错误：无楼层信息")));
     }
 
@@ -1632,8 +2054,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                         Theme.of(context).colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(18),
                     border: Border.all(
-                        color:
-                            Theme.of(context).dividerColor.withValues(alpha: 0.1))),
+                        color: Theme.of(context)
+                            .dividerColor
+                            .withValues(alpha: 0.1))),
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 child: Row(
                   children: [
@@ -1650,7 +2073,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                       margin: const EdgeInsets.symmetric(horizontal: 8),
                       width: 1,
                       height: 16,
-                      color: Theme.of(context).dividerColor.withValues(alpha: 0.3),
+                      color:
+                          Theme.of(context).dividerColor.withValues(alpha: 0.3),
                     ),
                     Icon(Icons.search,
                         color: Theme.of(context).hintColor, size: 16),
@@ -1831,8 +2255,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                   constraints.maxWidth, constraints.maxHeight);
 
                               return GestureDetector(
-                                  onTapUp: (d) => _handleTap(d, constraints.maxWidth,
-                                      constraints.maxHeight, currentLayer.id),
+                                  onTapUp: (d) => _handleTap(
+                                      d,
+                                      constraints.maxWidth,
+                                      constraints.maxHeight,
+                                      currentLayer.id),
                                   child: Stack(key: _stackKey, children: [
                                     Image.asset(currentLayer.assetPath,
                                         width: constraints.maxWidth,
@@ -1844,65 +2271,119 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                         data: (list) {
                                           final clusterThreshold =
                                               scale >= 2.0 ? 0.008 : 0.02;
-                                          final clusters = clusterGrenades(list,
-                                              threshold: clusterThreshold);
-                                          
-                                          // 如果有选中的点位，只显示选中的点位
-                                          final visibleClusters = _selectedClusterForImpact == null
-                                              ? clusters
-                                              : clusters.where((c) => _isSameCluster(c, _selectedClusterForImpact)).toList();
-                                          
-                                          return visibleClusters.map((c) =>
-                                              _buildClusterMarker(
-                                                  c,
-                                                  constraints,
-                                                  isEditMode,
-                                                  currentLayer.id,
-                                                  markerScale,
-                                                  imageBounds));
+
+                                          if (_isImpactMode) {
+                                            // 爆点模式：显示爆点聚合
+                                            final impactClusters =
+                                                clusterGrenadesByImpact(list,
+                                                    threshold:
+                                                        clusterThreshold);
+
+                                            return impactClusters.map((c) =>
+                                                _buildImpactClusterMarker(
+                                                    c,
+                                                    constraints,
+                                                    isEditMode,
+                                                    currentLayer.id,
+                                                    markerScale,
+                                                    imageBounds));
+                                          } else {
+                                            // 标准模式：显示投掷点聚合
+                                            final clusters = clusterGrenades(
+                                                list,
+                                                threshold: clusterThreshold);
+
+                                            // 如果有选中的点位，只显示选中的点位
+                                            final visibleClusters =
+                                                _selectedClusterForImpact ==
+                                                        null
+                                                    ? clusters
+                                                    : clusters
+                                                        .where((c) =>
+                                                            _isSameCluster(c,
+                                                                _selectedClusterForImpact))
+                                                        .toList();
+
+                                            return visibleClusters.map((c) =>
+                                                _buildClusterMarker(
+                                                    c,
+                                                    constraints,
+                                                    isEditMode,
+                                                    currentLayer.id,
+                                                    markerScale,
+                                                    imageBounds));
+                                          }
                                         },
                                         error: (_, __) => [],
                                         loading: () => []),
-                                    // 爆点连线（选中点位时显示）
+                                    // 爆点连线
                                     if (_selectedClusterForImpact != null)
                                       ..._selectedClusterForImpact!.grenades
                                           .where((g) =>
                                               g.impactXRatio != null &&
                                               g.impactYRatio != null &&
-                                              g.type != GrenadeType.wallbang) // 穿点类型不显示爆点
-                                          .map((g) => _buildConnectionLine(g, imageBounds)),
-                                    // 爆点标记（选中点位时显示）
-                                    if (_selectedClusterForImpact != null)
+                                              g.type !=
+                                                  GrenadeType
+                                                      .wallbang) // 穿点类型不显示爆点
+                                          .map((g) => _buildConnectionLine(
+                                              g, markerScale, imageBounds)),
+                                    // 标准模式下的爆点标记（选中点位时显示）
+                                    if (!_isImpactMode &&
+                                        _selectedClusterForImpact != null)
                                       ..._selectedClusterForImpact!.grenades
                                           .where((g) =>
                                               g.impactXRatio != null &&
                                               g.impactYRatio != null &&
-                                              g.type != GrenadeType.wallbang) // 穿点类型不显示爆点
+                                              g.type !=
+                                                  GrenadeType
+                                                      .wallbang) // 穿点类型不显示爆点
                                           .map((g) => _buildImpactMarker(
-                                              g, constraints, markerScale, imageBounds)),
+                                              g,
+                                              constraints,
+                                              markerScale,
+                                              imageBounds)),
+                                    // 爆点模式下的投掷点标记（选中爆点时显示）
+                                    if (_isImpactMode &&
+                                        _selectedClusterForImpact != null)
+                                      ..._selectedClusterForImpact!.grenades
+                                          .map((g) => _buildThrowPointMarker(
+                                              g,
+                                              constraints,
+                                              markerScale,
+                                              imageBounds)),
+                                    // 移动投掷点时显示原始位置标记（爆点模式）
+                                    if (_isImpactMode &&
+                                        _movingSingleGrenade != null)
+                                      _buildThrowPointMarker(
+                                          _movingSingleGrenade!,
+                                          constraints,
+                                          markerScale,
+                                          imageBounds),
                                     // 出生点标记（后渲染，在上层，但不响应点击）
                                     if (showSpawnPoints && spawnConfig != null)
                                       IgnorePointer(
                                         child: Stack(
                                           children: [
-                                            ...spawnConfig.ctSpawns.map((spawn) =>
-                                                _buildSpawnPointMarker(
-                                                    spawn,
-                                                    true,
-                                                    constraints,
-                                                    markerScale,
-                                                    imageBounds,
-                                                    currentLayer.id,
-                                                    isEditMode)),
-                                            ...spawnConfig.tSpawns.map((spawn) =>
-                                                _buildSpawnPointMarker(
-                                                    spawn,
-                                                    false,
-                                                    constraints,
-                                                    markerScale,
-                                                    imageBounds,
-                                                    currentLayer.id,
-                                                    isEditMode)),
+                                            ...spawnConfig.ctSpawns.map(
+                                                (spawn) =>
+                                                    _buildSpawnPointMarker(
+                                                        spawn,
+                                                        true,
+                                                        constraints,
+                                                        markerScale,
+                                                        imageBounds,
+                                                        currentLayer.id,
+                                                        isEditMode)),
+                                            ...spawnConfig.tSpawns.map(
+                                                (spawn) =>
+                                                    _buildSpawnPointMarker(
+                                                        spawn,
+                                                        false,
+                                                        constraints,
+                                                        markerScale,
+                                                        imageBounds,
+                                                        currentLayer.id,
+                                                        isEditMode)),
                                           ],
                                         ),
                                       ),
@@ -1910,10 +2391,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                         _dragOffset != null)
                                       Positioned(
                                           left: imageBounds.offsetX +
-                                              _dragOffset!.dx * imageBounds.width -
+                                              _dragOffset!.dx *
+                                                  imageBounds.width -
                                               14.0, // Fixed offset, not scaled
                                           top: imageBounds.offsetY +
-                                              _dragOffset!.dy * imageBounds.height -
+                                              _dragOffset!.dy *
+                                                  imageBounds.height -
                                               14.0, // Fixed offset, not scaled
                                           child: Transform.scale(
                                             scale: markerScale,
@@ -1928,8 +2411,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                                     border: Border.all(
                                                         color: Colors.cyan,
                                                         width: 2)),
-                                                child: const Icon(Icons.open_with,
-                                                    size: 14, color: Colors.white)),
+                                                child: const Icon(
+                                                    Icons.open_with,
+                                                    size: 14,
+                                                    color: Colors.white)),
                                           )),
                                     if (_tempTapPosition != null)
                                       Positioned(
@@ -1944,7 +2429,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                           child: Transform.scale(
                                             scale: markerScale,
                                             child: const Icon(Icons.add_circle,
-                                                color: Colors.greenAccent, size: 24),
+                                                color: Colors.greenAccent,
+                                                size: 24),
                                           )),
                                   ]));
                             },
@@ -1957,8 +2443,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   right: 0,
                   child: SafeArea(
                       child: Padding(
-                          padding:
-                              const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 8),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             mainAxisSize: MainAxisSize.min,
@@ -1966,9 +2452,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                               Container(
                                   padding: const EdgeInsets.all(8),
                                   decoration: BoxDecoration(
-                                      color: Colors.black.withValues(alpha: 0.85),
+                                      color:
+                                          Colors.black.withValues(alpha: 0.85),
                                       borderRadius: BorderRadius.circular(16),
-                                      border: Border.all(color: Colors.white12)),
+                                      border:
+                                          Border.all(color: Colors.white12)),
                                   child: Row(
                                       mainAxisAlignment:
                                           MainAxisAlignment.spaceAround,
@@ -2009,6 +2497,37 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                             ],
                           ))),
                 ),
+                // 爆点模式切换按钮
+                Positioned(
+                  left: 16,
+                  bottom: 80, // 下方导航栏高度约 60-80
+                  child: FloatingActionButton(
+                    heroTag: 'impact_mode_toggle',
+                    backgroundColor:
+                        _isImpactMode ? Colors.redAccent : Colors.blueGrey,
+                    onPressed: () {
+                      setState(() {
+                        _isImpactMode = !_isImpactMode;
+                        // 切换模式时清除选中状态
+                        _selectedClusterForImpact = null;
+                      });
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(_isImpactMode ? "已开启爆点浏览模式" : "已切换回标准模式"),
+                        duration: const Duration(seconds: 2),
+                        behavior: SnackBarBehavior.floating,
+                      ));
+                    },
+                    mini: true,
+                    child: Icon(
+                      _isImpactMode
+                          ? FontAwesomeIcons.crosshairs
+                          : FontAwesomeIcons.locationDot,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                  ),
+                ),
+
                 // 楼层切换按钮
                 if (layers.length > 1)
                   Positioned(
@@ -2039,8 +2558,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                     fontWeight: FontWeight.bold))),
                         FloatingActionButton.small(
                             heroTag: "btn_down",
-                            backgroundColor:
-                                layerIndex > 0 ? Colors.orange : Colors.grey[800],
+                            backgroundColor: layerIndex > 0
+                                ? Colors.orange
+                                : Colors.grey[800],
                             onPressed: layerIndex > 0
                                 ? () => ref
                                     .read(selectedLayerIndexProvider.notifier)
@@ -2049,7 +2569,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                             child: const Icon(Icons.arrow_downward)),
                       ])),
                 // 出生点侧边栏
-                if (showSpawnPoints && spawnConfig != null && _selectedClusterForImpact == null)
+                if (showSpawnPoints &&
+                    spawnConfig != null &&
+                    _selectedClusterForImpact == null)
                   Positioned(
                     right: 0,
                     top: 0,
@@ -2105,7 +2627,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 children: [
                   // 头部
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     child: Row(
                       children: [
                         Text(
@@ -2129,25 +2652,40 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                   onPressed: selectedIds.isEmpty
                                       ? null
                                       : () async {
-                                          final confirm = await showDialog<bool>(
+                                          final confirm =
+                                              await showDialog<bool>(
                                             context: context,
                                             builder: (ctx) => AlertDialog(
-                                              backgroundColor: Theme.of(ctx).colorScheme.surface,
+                                              backgroundColor: Theme.of(ctx)
+                                                  .colorScheme
+                                                  .surface,
                                               title: Text("批量删除",
                                                   style: TextStyle(
-                                                      color: Theme.of(ctx).textTheme.bodyLarge?.color)),
+                                                      color: Theme.of(ctx)
+                                                          .textTheme
+                                                          .bodyLarge
+                                                          ?.color)),
                                               content: Text(
                                                   "确定要删除选中的 ${selectedIds.length} 个道具吗？",
                                                   style: TextStyle(
-                                                      color: Theme.of(ctx).textTheme.bodySmall?.color)),
+                                                      color: Theme.of(ctx)
+                                                          .textTheme
+                                                          .bodySmall
+                                                          ?.color)),
                                               actions: [
                                                 TextButton(
-                                                    onPressed: () => Navigator.pop(ctx, false),
+                                                    onPressed: () =>
+                                                        Navigator.pop(
+                                                            ctx, false),
                                                     child: const Text("取消")),
                                                 TextButton(
-                                                    onPressed: () => Navigator.pop(ctx, true),
+                                                    onPressed: () =>
+                                                        Navigator.pop(
+                                                            ctx, true),
                                                     child: const Text("删除",
-                                                        style: TextStyle(color: Colors.red))),
+                                                        style: TextStyle(
+                                                            color:
+                                                                Colors.red))),
                                               ],
                                             ),
                                           );
@@ -2157,12 +2695,16 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                               final g = grenades.firstWhere(
                                                   (g) => g.id == id,
                                                   orElse: () => grenades.first);
-                                              if (!toDelete.any((x) => x.id == g.id)) {
+                                              if (!toDelete
+                                                  .any((x) => x.id == g.id)) {
                                                 toDelete.add(g);
                                               }
                                             }
-                                            await _deleteGrenadesInBatch(toDelete);
-                                            if (grenades.isEmpty || toDelete.length == grenades.length) {
+                                            await _deleteGrenadesInBatch(
+                                                toDelete);
+                                            if (grenades.isEmpty ||
+                                                toDelete.length ==
+                                                    grenades.length) {
                                               _closeClusterPanel();
                                             } else {
                                               setPanelState(() {
@@ -2174,7 +2716,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                         },
                                   icon: const Icon(Icons.delete, size: 16),
                                   label: Text("删除(${selectedIds.length})"),
-                                  style: TextButton.styleFrom(foregroundColor: Colors.red),
+                                  style: TextButton.styleFrom(
+                                      foregroundColor: Colors.red),
                                 )
                               else
                                 IconButton(
@@ -2188,7 +2731,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                   tooltip: "批量删除",
                                   iconSize: 18,
                                   padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                  constraints: const BoxConstraints(
+                                      minWidth: 32, minHeight: 32),
                                 ),
                               // 取消多选按钮
                               if (isMultiSelectMode)
@@ -2203,7 +2747,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                   color: Colors.grey,
                                   iconSize: 18,
                                   padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                  constraints: const BoxConstraints(
+                                      minWidth: 32, minHeight: 32),
                                 ),
                               // 移动整体按钮
                               if (!isMultiSelectMode)
@@ -2217,7 +2762,23 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                   tooltip: "移动整体",
                                   iconSize: 18,
                                   padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                  constraints: const BoxConstraints(
+                                      minWidth: 32, minHeight: 32),
+                                ),
+                              // 移动到爆点按钮（仅在爆点模式下显示）
+                              if (!isMultiSelectMode && _isImpactMode)
+                                IconButton(
+                                  onPressed: () {
+                                    _closeClusterPanel();
+                                    _startMoveImpactCluster(cluster);
+                                  },
+                                  icon: const Icon(Icons.gps_fixed),
+                                  color: Colors.purpleAccent,
+                                  tooltip: "移动爆点",
+                                  iconSize: 18,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(
+                                      minWidth: 32, minHeight: 32),
                                 ),
                               // 添加按钮
                               if (!isMultiSelectMode)
@@ -2231,7 +2792,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                   tooltip: "添加道具",
                                   iconSize: 18,
                                   padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                  constraints: const BoxConstraints(
+                                      minWidth: 32, minHeight: 32),
                                 ),
                             ],
                           ),
@@ -2242,7 +2804,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                           color: Colors.grey,
                           iconSize: 18,
                           padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                          constraints:
+                              const BoxConstraints(minWidth: 32, minHeight: 32),
                         ),
                       ],
                     ),
@@ -2298,7 +2861,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                           title: Text(
                             g.title,
                             style: TextStyle(
-                              color: Theme.of(context).textTheme.bodyLarge?.color,
+                              color:
+                                  Theme.of(context).textTheme.bodyLarge?.color,
                               fontWeight: FontWeight.w500,
                               fontSize: 12,
                             ),
@@ -2307,7 +2871,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                           subtitle: Text(
                             "${_getTypeName(g.type)} • ${_getTeamName(g.team)}",
                             style: TextStyle(
-                              color: Theme.of(context).textTheme.bodySmall?.color,
+                              color:
+                                  Theme.of(context).textTheme.bodySmall?.color,
                               fontSize: 10,
                             ),
                           ),
@@ -2315,35 +2880,60 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               if (g.isFavorite)
-                                const Icon(Icons.star, color: Colors.amber, size: 12),
+                                const Icon(Icons.star,
+                                    color: Colors.amber, size: 12),
                               if (g.isNewImport)
                                 Container(
                                   margin: const EdgeInsets.only(left: 2),
-                                  padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 2, vertical: 1),
                                   decoration: BoxDecoration(
                                     color: Colors.red,
                                     borderRadius: BorderRadius.circular(3),
                                   ),
                                   child: const Text(
                                     "NEW",
-                                    style: TextStyle(fontSize: 6, color: Colors.white),
+                                    style: TextStyle(
+                                        fontSize: 6, color: Colors.white),
                                   ),
                                 ),
                               // 单独移动按钮
                               if (isEditMode && !isMultiSelectMode)
-                                IconButton(
-                                  onPressed: () {
-                                    _closeClusterPanel();
-                                    _startMoveSingleGrenade(g);
-                                  },
-                                  icon: const Icon(Icons.open_with),
-                                  color: Colors.cyan,
-                                  iconSize: 14,
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (_isImpactMode)
+                                      IconButton(
+                                        onPressed: () {
+                                          _closeClusterPanel();
+                                          _startMoveSingleGrenadeImpact(g);
+                                        },
+                                        icon: const Icon(Icons.gps_fixed),
+                                        color: Colors.purpleAccent,
+                                        tooltip: "移动爆点",
+                                        iconSize: 18,
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(
+                                            minWidth: 32, minHeight: 32),
+                                      ),
+                                    IconButton(
+                                      onPressed: () {
+                                        _closeClusterPanel();
+                                        _startMoveSingleGrenade(g);
+                                      },
+                                      icon: const Icon(Icons.open_with),
+                                      color: Colors.cyan,
+                                      tooltip: "移动投掷点",
+                                      iconSize: 18,
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(
+                                          minWidth: 32, minHeight: 32),
+                                    ),
+                                  ],
                                 ),
                               if (!isMultiSelectMode)
-                                const Icon(Icons.chevron_right, color: Colors.grey, size: 16),
+                                const Icon(Icons.chevron_right,
+                                    color: Colors.grey, size: 16),
                             ],
                           ),
                           onTap: isMultiSelectMode
@@ -2371,27 +2961,38 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                               alignment: Alignment.centerRight,
                               padding: const EdgeInsets.only(right: 16),
                               color: Colors.red,
-                              child: const Icon(Icons.delete, color: Colors.white),
+                              child:
+                                  const Icon(Icons.delete, color: Colors.white),
                             ),
                             confirmDismiss: (_) async {
                               return await showDialog<bool>(
                                 context: context,
                                 builder: (ctx) => AlertDialog(
-                                  backgroundColor: Theme.of(ctx).colorScheme.surface,
+                                  backgroundColor:
+                                      Theme.of(ctx).colorScheme.surface,
                                   title: Text("删除道具",
                                       style: TextStyle(
-                                          color: Theme.of(ctx).textTheme.bodyLarge?.color)),
+                                          color: Theme.of(ctx)
+                                              .textTheme
+                                              .bodyLarge
+                                              ?.color)),
                                   content: Text("确定要删除 \"${g.title}\" 吗？",
                                       style: TextStyle(
-                                          color: Theme.of(ctx).textTheme.bodySmall?.color)),
+                                          color: Theme.of(ctx)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.color)),
                                   actions: [
                                     TextButton(
-                                        onPressed: () => Navigator.pop(ctx, false),
+                                        onPressed: () =>
+                                            Navigator.pop(ctx, false),
                                         child: const Text("取消")),
                                     TextButton(
-                                        onPressed: () => Navigator.pop(ctx, true),
+                                        onPressed: () =>
+                                            Navigator.pop(ctx, true),
                                         child: const Text("删除",
-                                            style: TextStyle(color: Colors.red))),
+                                            style:
+                                                TextStyle(color: Colors.red))),
                                   ],
                                 ),
                               );
@@ -2456,7 +3057,8 @@ class _DashedLinePainter extends CustomPainter {
 
     while (currentLength < totalLength) {
       final segmentLength = draw ? dashLength : gapLength;
-      final nextLength = (currentLength + segmentLength).clamp(0.0, totalLength);
+      final nextLength =
+          (currentLength + segmentLength).clamp(0.0, totalLength);
       final nextPoint = start + direction * nextLength;
 
       if (draw) {
