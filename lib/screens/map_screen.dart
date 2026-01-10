@@ -706,11 +706,23 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     _showClusterBottomSheet(cluster, layerId);
   }
 
-  void _showClusterBottomSheet(GrenadeCluster cluster, int layerId) {
+  void _showClusterBottomSheet(GrenadeCluster cluster, int layerId) async {
     // 设置选中状态，触发爆点显示和底部面板显示
     setState(() {
       _selectedClusterForImpact = cluster;
     });
+
+    // 清除该点位所有道具的红点标记（新导入标记）
+    final newImportGrenades = cluster.grenades.where((g) => g.isNewImport).toList();
+    if (newImportGrenades.isNotEmpty) {
+      final isar = ref.read(isarProvider);
+      await isar.writeTxn(() async {
+        for (final g in newImportGrenades) {
+          g.isNewImport = false;
+          await isar.grenades.put(g);
+        }
+      });
+    }
   }
 
   /// 关闭底部道具列表面板
