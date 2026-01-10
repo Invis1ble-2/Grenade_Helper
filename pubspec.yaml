@@ -61,6 +61,7 @@ dependencies:
   shared_preferences: ^2.5.4   # 用户设置存储
   desktop_drop: ^0.7.0         # 文件拖拽
   desktop_multi_window: ^0.3.0 # 多窗口支持（独立悬浮窗）
+  font_awesome_flutter: ^10.12.0
 
 
 
