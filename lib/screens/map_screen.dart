@@ -157,6 +157,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   GrenadeCluster? _joystickCluster; // 摇杆模式下选中的标点
   Offset? _joystickOriginalOffset; // 摇杆移动前的原始位置
 
+  // 爆点摇杆模式相关状态
+  GrenadeCluster? _joystickImpactCluster; // 摇杆模式下选中的爆点
+  Offset? _joystickImpactOriginalOffset; // 爆点摇杆移动前的原始位置
+  Offset? _impactJoystickDragOffset; // 爆点摇杆移动时的实时位置
+
   // 爆点显示相关状态
   GrenadeCluster? _selectedClusterForImpact; // 选中的点位（用于显示爆点）
 
@@ -1040,6 +1045,92 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     });
   }
 
+  /// 显示爆点摇杆底部弹窗
+  Future<void> _showJoystickSheetForImpact(GrenadeCluster cluster) async {
+    // 从 SharedPreferences 读取摇杆设置
+    final prefs = await SharedPreferences.getInstance();
+    final opacity = prefs.getDouble('joystick_opacity') ?? 0.8;
+    final speed = prefs.getInt('joystick_speed') ?? 3;
+
+    setState(() {
+      _joystickImpactCluster = cluster;
+      _joystickImpactOriginalOffset = Offset(cluster.xRatio, cluster.yRatio);
+      _impactJoystickDragOffset = Offset(cluster.xRatio, cluster.yRatio);
+    });
+
+    if (!mounted) return;
+
+    await showJoystickBottomSheet(
+      context: context,
+      barrierColor: Colors.transparent,
+      opacity: opacity,
+      speedLevel: speed,
+      clusterName:
+          cluster.grenades.isNotEmpty ? '爆点: ${cluster.grenades.first.title}' : '爆点',
+      onMove: (direction) => _handleJoystickMoveForImpact(direction, speed),
+      onConfirm: _confirmJoystickMoveForImpact,
+      onCancel: _cancelJoystickMoveForImpact,
+    );
+  }
+
+  /// 处理爆点摇杆移动
+  void _handleJoystickMoveForImpact(Offset direction, int speedLevel) {
+    if (_joystickImpactCluster == null || _impactJoystickDragOffset == null) return;
+
+    // 根据速度档位计算移动步长 (1档=0.0005, 5档=0.0025)
+    final step = 0.0005 + (speedLevel - 1) * 0.0005;
+
+    final newX = (_impactJoystickDragOffset!.dx + direction.dx * step).clamp(0.0, 1.0);
+    final newY = (_impactJoystickDragOffset!.dy + direction.dy * step).clamp(0.0, 1.0);
+
+    setState(() {
+      _impactJoystickDragOffset = Offset(newX, newY);
+    });
+
+    // 平移地图使爆点居中
+    _centerMapOnPoint(newX, newY);
+  }
+
+  /// 确认爆点摇杆移动
+  void _confirmJoystickMoveForImpact() {
+    if (_joystickImpactCluster == null || _impactJoystickDragOffset == null) {
+      _cancelJoystickMoveForImpact();
+      return;
+    }
+
+    final isar = ref.read(isarProvider);
+    isar.writeTxnSync(() {
+      for (final g in _joystickImpactCluster!.grenades) {
+        g.impactXRatio = _impactJoystickDragOffset!.dx;
+        g.impactYRatio = _impactJoystickDragOffset!.dy;
+        g.updatedAt = DateTime.now();
+        isar.grenades.putSync(g);
+      }
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text("✓ 爆点已移动"),
+      backgroundColor: Colors.purpleAccent,
+      duration: Duration(seconds: 1),
+    ));
+
+    setState(() {
+      _joystickImpactCluster = null;
+      _joystickImpactOriginalOffset = null;
+      _impactJoystickDragOffset = null;
+    });
+  }
+
+  /// 取消爆点摇杆移动
+  void _cancelJoystickMoveForImpact() {
+    setState(() {
+      _impactJoystickDragOffset = _joystickImpactOriginalOffset;
+      _joystickImpactCluster = null;
+      _joystickImpactOriginalOffset = null;
+      _impactJoystickDragOffset = null;
+    });
+  }
+
   /// 处理鼠标滚轮缩放（以鼠标指针为中心）
   void _handleMouseWheelZoom(
       PointerScrollEvent event, BoxConstraints constraints) {
@@ -1233,14 +1324,21 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     const double size = 20.0;
     const double baseHalfSize = size / 2;
 
-    // 计算实时位置（考虑拖动状态）
+    // 计算实时位置（考虑拖动状态和摇杆状态）
     double effectiveX = cluster.xRatio;
     double effectiveY = cluster.yRatio;
 
+    // 拖动模式下使用 _impactDragOffset
     if (_isSameCluster(_draggingImpactCluster, cluster) &&
         _impactDragOffset != null) {
       effectiveX = _impactDragOffset!.dx;
       effectiveY = _impactDragOffset!.dy;
+    }
+    // 摇杆模式下使用 _impactJoystickDragOffset
+    if (_isSameCluster(_joystickImpactCluster, cluster) &&
+        _impactJoystickDragOffset != null) {
+      effectiveX = _impactJoystickDragOffset!.dx;
+      effectiveY = _impactJoystickDragOffset!.dy;
     }
 
     final left =
@@ -1250,6 +1348,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
     final isSelected = _selectedClusterForImpact == cluster;
     final isDragging = _isSameCluster(_draggingImpactCluster, cluster);
+    final isJoystickMoving = _isSameCluster(_joystickImpactCluster, cluster);
 
     return Positioned(
       left: left,
@@ -1261,9 +1360,21 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           onTap: () {
             _handleClusterTap(cluster, layerId);
           },
-          // 长按开始拖动（仅编辑模式）
+          // 长按开始拖动或摇杆移动（仅编辑模式）
           onLongPressStart: isEditMode
-              ? (details) {
+              ? (details) async {
+                  // 移动端检查是否使用摇杆模式
+                  if (Platform.isAndroid || Platform.isIOS) {
+                    final prefs = await SharedPreferences.getInstance();
+                    final markerMoveMode =
+                        prefs.getInt('marker_move_mode') ?? 0;
+                    if (markerMoveMode == 1) {
+                      // 摇杆模式：弹出摇杆底部弹窗
+                      _showJoystickSheetForImpact(cluster);
+                      return;
+                    }
+                  }
+                  // 长按拖动模式（桌面端或移动端选择此模式）
                   final touchRatio = _getLocalPosition(details.globalPosition);
                   if (touchRatio == null) return;
 
@@ -1301,16 +1412,16 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             width: size,
             height: size,
             decoration: BoxDecoration(
-              color: isDragging
+              color: (isDragging || isJoystickMoving)
                   ? Colors.cyan.withValues(alpha: 0.6)
                   : Colors.black.withValues(alpha: 0.4),
               shape: BoxShape.circle,
               border: Border.all(
-                  color: isDragging
+                  color: (isDragging || isJoystickMoving)
                       ? Colors.cyan
                       : (isSelected ? Colors.white : Colors.purpleAccent),
-                  width: isDragging ? 3 : 2),
-              boxShadow: isDragging
+                  width: (isDragging || isJoystickMoving) ? 3 : 2),
+              boxShadow: (isDragging || isJoystickMoving)
                   ? [
                       BoxShadow(
                         color: Colors.cyan.withValues(alpha: 0.5),
@@ -1334,9 +1445,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                           ),
                         ],
             ),
-            child: Icon(isDragging ? Icons.open_with : Icons.close,
+            child: Icon((isDragging || isJoystickMoving) ? Icons.open_with : Icons.close,
                 size: size * 0.6,
-                color: isDragging
+                color: (isDragging || isJoystickMoving)
                     ? Colors.white
                     : (isSelected ? Colors.white : Colors.purpleAccent)),
           ),
