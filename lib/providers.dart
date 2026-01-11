@@ -52,6 +52,7 @@ final showSpawnPointsProvider = StateProvider.autoDispose<bool>((ref) => false);
 final mapLineColorProvider =
     StateProvider<int>((ref) => 0xFFE040FB); // 默认 PurpleAccent (0xFFE040FB)
 final mapLineOpacityProvider = StateProvider<double>((ref) => 0.6);
+final impactAreaOpacityProvider = StateProvider<double>((ref) => 0.4);
 
 // ==================== Isar 数据流 ====================
 
