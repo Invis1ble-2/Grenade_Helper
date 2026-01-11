@@ -2150,6 +2150,3 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     );
   }
 }
-
-
-
