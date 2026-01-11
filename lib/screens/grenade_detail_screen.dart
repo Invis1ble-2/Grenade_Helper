@@ -205,8 +205,10 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     if (team != null) grenade!.team = team;
     if (isFavorite != null) grenade!.isFavorite = isFavorite;
     if (author != null) grenade!.author = author.isEmpty ? null : author;
-    if (sourceUrl != null) grenade!.sourceUrl = sourceUrl.isEmpty ? null : sourceUrl;
-    if (sourceNote != null) grenade!.sourceNote = sourceNote.isEmpty ? null : sourceNote;
+    if (sourceUrl != null)
+      grenade!.sourceUrl = sourceUrl.isEmpty ? null : sourceUrl;
+    if (sourceNote != null)
+      grenade!.sourceNote = sourceNote.isEmpty ? null : sourceNote;
 
     grenade!.updatedAt = DateTime.now();
     await isar.writeTxn(() async {
@@ -1224,7 +1226,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (grenade == null){
+    if (grenade == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     final isEditing = widget.isEditing;
@@ -1406,8 +1408,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
               padding: const EdgeInsets.only(bottom: 12),
               child: Row(
                 children: [
-                  Icon(Icons.location_on,
-                      size: 14, color: Colors.grey[500]),
+                  Icon(Icons.location_on, size: 14, color: Colors.grey[500]),
                   const SizedBox(width: 4),
                   Text(
                     '坐标: (${grenade!.impactXRatio!.toStringAsFixed(3)}, ${grenade!.impactYRatio!.toStringAsFixed(3)})',
@@ -1458,6 +1459,29 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
               ],
             ],
           ),
+          if (widget.isEditing &&
+              (grenade!.type == GrenadeType.smoke ||
+                  grenade!.type == GrenadeType.molotov)) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context, 'draw_impact_area');
+                },
+                icon: const Icon(Icons.brush, size: 18),
+                label: const Text('绘制爆点范围'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.purpleAccent,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -1913,7 +1937,8 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
   /// 编辑原始出处
   void _editSource() {
     final urlController = TextEditingController(text: grenade?.sourceUrl ?? '');
-    final noteController = TextEditingController(text: grenade?.sourceNote ?? '');
+    final noteController =
+        TextEditingController(text: grenade?.sourceNote ?? '');
 
     showModalBottomSheet(
       context: context,
@@ -2014,7 +2039,8 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
       } else {
         // 只有链接，显示简化的链接文本
         final url = grenade!.sourceUrl!;
-        sourceDisplayText = url.length > 30 ? '${url.substring(0, 30)}...' : url;
+        sourceDisplayText =
+            url.length > 30 ? '${url.substring(0, 30)}...' : url;
       }
     } else {
       sourceDisplayText = '未设置';
@@ -2093,14 +2119,16 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                     "出处: $sourceDisplayText",
                     style: TextStyle(
                       color: hasSource
-                          ? (grenade!.sourceUrl?.isNotEmpty == true && !isEditing
+                          ? (grenade!.sourceUrl?.isNotEmpty == true &&
+                                  !isEditing
                               ? Colors.blueAccent
                               : Colors.grey)
                           : Colors.grey,
                       fontSize: 12,
-                      decoration: grenade!.sourceUrl?.isNotEmpty == true && !isEditing
-                          ? TextDecoration.underline
-                          : null,
+                      decoration:
+                          grenade!.sourceUrl?.isNotEmpty == true && !isEditing
+                              ? TextDecoration.underline
+                              : null,
                     ),
                   ),
                   if (isEditing) ...[

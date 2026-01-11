@@ -781,6 +781,8 @@ class _MainAppState extends ConsumerState<MainApp> {
           globalSettingsService!.getMapLineColor();
       ref.read(mapLineOpacityProvider.notifier).state =
           globalSettingsService!.getMapLineOpacity();
+      ref.read(impactAreaOpacityProvider.notifier).state =
+          globalSettingsService!.getImpactAreaOpacity();
     }
   }
 
