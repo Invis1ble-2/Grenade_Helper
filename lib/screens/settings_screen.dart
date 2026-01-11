@@ -32,6 +32,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // 地图连线设置
   late int _mapLineColor;
   late double _mapLineOpacity;
+  late double _impactAreaOpacity;
   // 摇杆相关设置（仅移动端）
   late int _markerMoveMode;
   late double _joystickOpacity;
@@ -67,6 +68,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _overlayNavSpeed = widget.settingsService!.getOverlayNavSpeed();
       _mapLineColor = widget.settingsService!.getMapLineColor();
       _mapLineOpacity = widget.settingsService!.getMapLineOpacity();
+      _impactAreaOpacity = widget.settingsService!.getImpactAreaOpacity();
+      // 同步到 Provider
+      ref.read(impactAreaOpacityProvider.notifier).state = _impactAreaOpacity;
+
       _markerMoveMode = widget.settingsService!.getMarkerMoveMode();
       _joystickOpacity = widget.settingsService!.getJoystickOpacity();
       _joystickSpeed = widget.settingsService!.getJoystickSpeed();
@@ -83,6 +88,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _overlayNavSpeed = 3;
       _mapLineColor = 0xFFE040FB;
       _mapLineOpacity = 0.6;
+      _impactAreaOpacity = 0.4;
       _markerMoveMode = 0;
       _joystickOpacity = 0.8;
       _joystickSpeed = 3;
@@ -396,6 +402,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ref.read(mapLineOpacityProvider.notifier).state = value;
                     if (widget.settingsService != null) {
                       await widget.settingsService!.setMapLineOpacity(value);
+                    }
+                  },
+                ),
+              ),
+            ),
+            ListTile(
+              title: const Text('爆点区域透明度'),
+              subtitle: Text('${(_impactAreaOpacity * 100).toInt()}%'),
+              trailing: SizedBox(
+                width: 200,
+                child: Slider(
+                  value: _impactAreaOpacity,
+                  min: 0.1,
+                  max: 1.0,
+                  divisions: 9,
+                  onChanged: (value) async {
+                    setState(() => _impactAreaOpacity = value);
+                    ref.read(impactAreaOpacityProvider.notifier).state = value;
+                    if (widget.settingsService != null) {
+                      await widget.settingsService!.setImpactAreaOpacity(value);
                     }
                   },
                 ),

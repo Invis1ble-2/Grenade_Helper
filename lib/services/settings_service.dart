@@ -125,6 +125,7 @@ class SettingsService {
   static const String _keyDonationDialogShown = 'donation_dialog_shown';
   static const String _keyMapLineColor = 'map_line_color'; // int value of color
   static const String _keyMapLineOpacity = 'map_line_opacity';
+  static const String _keyImpactAreaOpacity = 'impact_area_opacity';
 
   // 移动端使用 SharedPreferences
   SharedPreferences? _prefs;
@@ -295,6 +296,10 @@ class SettingsService {
       }
       if (prefs.containsKey(_keyMapLineOpacity)) {
         _cache[_keyMapLineOpacity] = prefs.getDouble(_keyMapLineOpacity);
+        migrated = true;
+      }
+      if (prefs.containsKey(_keyImpactAreaOpacity)) {
+        _cache[_keyImpactAreaOpacity] = prefs.getDouble(_keyImpactAreaOpacity);
         migrated = true;
       }
 
@@ -711,6 +716,25 @@ class SettingsService {
       await _saveValue(_keyMapLineOpacity, value);
     } else {
       await _prefs?.setDouble(_keyMapLineOpacity, value);
+    }
+  }
+
+  // ==================== 爆点区域设置 ====================
+
+  /// 获取爆点区域透明度 (0.0 - 1.0)，默认为 0.4 (40%)
+  double getImpactAreaOpacity() {
+    if (isDesktop) {
+      return (_cache[_keyImpactAreaOpacity] as num?)?.toDouble() ?? 0.4;
+    }
+    return _prefs?.getDouble(_keyImpactAreaOpacity) ?? 0.4;
+  }
+
+  Future<void> setImpactAreaOpacity(double value) async {
+    if (isDesktop) {
+      _cache[_keyImpactAreaOpacity] = value;
+      await _saveValue(_keyImpactAreaOpacity, value);
+    } else {
+      await _prefs?.setDouble(_keyImpactAreaOpacity, value);
     }
   }
 

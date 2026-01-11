@@ -209,8 +209,10 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     if (team != null) grenade!.team = team;
     if (isFavorite != null) grenade!.isFavorite = isFavorite;
     if (author != null) grenade!.author = author.isEmpty ? null : author;
-    if (sourceUrl != null) grenade!.sourceUrl = sourceUrl.isEmpty ? null : sourceUrl;
-    if (sourceNote != null) grenade!.sourceNote = sourceNote.isEmpty ? null : sourceNote;
+    if (sourceUrl != null)
+      grenade!.sourceUrl = sourceUrl.isEmpty ? null : sourceUrl;
+    if (sourceNote != null)
+      grenade!.sourceNote = sourceNote.isEmpty ? null : sourceNote;
 
     grenade!.updatedAt = DateTime.now();
     await isar.writeTxn(() async {
@@ -298,7 +300,22 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     );
 
     if (confirm == true) {
-      await _updateImpactPoint(null, null);
+      // 清除爆点坐标和绘制区域
+      final isar = ref.read(isarProvider);
+
+      grenade!.impactXRatio = null;
+      grenade!.impactYRatio = null;
+      grenade!.impactAreaStrokes = null; // 同时清除绘制范围
+      grenade!.updatedAt = DateTime.now();
+
+      await isar.writeTxn(() async {
+        await isar.grenades.put(grenade!);
+      });
+
+      await _markAsLocallyEdited();
+      _loadData(resetTitle: false);
+      sendOverlayCommand('reload_data');
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('爆点已清除'),
@@ -553,12 +570,14 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
             ),
             const SizedBox(height: 20),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: Colors.blueAccent),
+              leading:
+                  const Icon(Icons.photo_library, color: Colors.blueAccent),
               title: const Text("从图库选择"),
               onTap: () => Navigator.pop(ctx, _MediaSource.gallery),
             ),
             ListTile(
-              leading: const Icon(Icons.content_paste, color: Colors.orangeAccent),
+              leading:
+                  const Icon(Icons.content_paste, color: Colors.orangeAccent),
               title: const Text("从剪切板粘贴"),
               subtitle: const Text("读取已复制的媒体文件"),
               onTap: () => Navigator.pop(ctx, _MediaSource.clipboard),
@@ -574,18 +593,26 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
   Future<String?> _processImageFromClipboard(String dataPath) async {
     // 首先尝试读取剪切板中的图片数据
     final imageBytes = await Pasteboard.image;
-    
+
     File? tempFile;
     if (imageBytes != null && imageBytes.isNotEmpty) {
       // 剪切板中有图片数据，写入临时文件
-      final tempPath = p.join(dataPath, "_clipboard_temp_${DateTime.now().millisecondsSinceEpoch}.png");
+      final tempPath = p.join(dataPath,
+          "_clipboard_temp_${DateTime.now().millisecondsSinceEpoch}.png");
       tempFile = File(tempPath);
       await tempFile.writeAsBytes(imageBytes);
     } else {
       // 尝试从剪切板文件列表中查找图片
       final files = await Pasteboard.files();
       if (files.isNotEmpty) {
-        const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'];
+        const imageExtensions = [
+          '.jpg',
+          '.jpeg',
+          '.png',
+          '.gif',
+          '.bmp',
+          '.webp'
+        ];
         for (final filePath in files) {
           final ext = p.extension(filePath).toLowerCase();
           if (imageExtensions.contains(ext)) {
@@ -650,7 +677,15 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
       return null;
     }
 
-    const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.wmv', '.flv', '.webm'];
+    const videoExtensions = [
+      '.mp4',
+      '.mov',
+      '.avi',
+      '.mkv',
+      '.wmv',
+      '.flv',
+      '.webm'
+    ];
     String? videoPath;
     for (final filePath in files) {
       final ext = p.extension(filePath).toLowerCase();
@@ -670,7 +705,8 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     }
 
     try {
-      final fileName = "${DateTime.now().millisecondsSinceEpoch}${p.extension(videoPath)}";
+      final fileName =
+          "${DateTime.now().millisecondsSinceEpoch}${p.extension(videoPath)}";
       final savePath = p.join(dataPath, fileName);
       await File(videoPath).copy(savePath);
       return savePath;
@@ -750,16 +786,14 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
             ),
             ReactiveWidget(
               stream: rebuildStream,
-              builder: (_) =>
-                  FrostedGlassTextAppbar(textEditor: textEditor),
+              builder: (_) => FrostedGlassTextAppbar(textEditor: textEditor),
             ),
             ReactiveWidget(
               stream: rebuildStream,
               builder: (_) => FrostedGlassTextBottomBar(
                 configs: textEditor.configs,
                 initColor: textEditor.primaryColor,
-                onColorChanged: (color) =>
-                    textEditor.primaryColor = color,
+                onColorChanged: (color) => textEditor.primaryColor = color,
                 selectedStyle: textEditor.selectedTextStyle,
                 onFontChange: textEditor.setTextStyle,
               ),
@@ -770,8 +804,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
       cropRotateEditor: CropRotateEditorConfigs(
         widgets: CropRotateEditorWidgets(
           appBar: (cropRotateEditor, rebuildStream) => null,
-          bottomBar: (cropRotateEditor, rebuildStream) =>
-              ReactiveWidget(
+          bottomBar: (cropRotateEditor, rebuildStream) => ReactiveWidget(
             stream: rebuildStream,
             builder: (_) => FrostedGlassCropRotateToolbar(
               configs: cropRotateEditor.configs,
@@ -802,8 +835,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
           bodyItems: (blurEditor, rebuildStream) => [
             ReactiveWidget(
               stream: rebuildStream,
-              builder: (_) =>
-                  FrostedGlassBlurAppbar(blurEditor: blurEditor),
+              builder: (_) => FrostedGlassBlurAppbar(blurEditor: blurEditor),
             ),
           ],
         ),
@@ -815,21 +847,18 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
           bodyItems: (tuneEditor, rebuildStream) => [
             ReactiveWidget(
               stream: rebuildStream,
-              builder: (_) =>
-                  FrostedGlassTuneAppbar(tuneEditor: tuneEditor),
+              builder: (_) => FrostedGlassTuneAppbar(tuneEditor: tuneEditor),
             ),
             ReactiveWidget(
               stream: rebuildStream,
-              builder: (_) =>
-                  FrostedGlassTuneBottombar(tuneEditor: tuneEditor),
+              builder: (_) => FrostedGlassTuneBottombar(tuneEditor: tuneEditor),
             ),
           ],
         ),
       ),
       dialogConfigs: DialogConfigs(
         widgets: DialogWidgets(
-          loadingDialog: (message, configs) =>
-              FrostedGlassLoadingDialog(
+          loadingDialog: (message, configs) => FrostedGlassLoadingDialog(
             message: message,
             configs: configs,
           ),
@@ -918,7 +947,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
 
     // 仅在桌面端显示来源选择对话框，移动端直接从图库导入
     final isDesktop = Platform.isWindows || Platform.isLinux;
-    
+
     if (isDesktop) {
       final source = await _showMediaSourcePicker(isImage);
       if (source == null) return null;
@@ -1406,7 +1435,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (grenade == null){
+    if (grenade == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     final isEditing = widget.isEditing;
@@ -1588,8 +1617,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
               padding: const EdgeInsets.only(bottom: 12),
               child: Row(
                 children: [
-                  Icon(Icons.location_on,
-                      size: 14, color: Colors.grey[500]),
+                  Icon(Icons.location_on, size: 14, color: Colors.grey[500]),
                   const SizedBox(width: 4),
                   Text(
                     '坐标: (${grenade!.impactXRatio!.toStringAsFixed(3)}, ${grenade!.impactYRatio!.toStringAsFixed(3)})',
@@ -1621,7 +1649,9 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                   ),
                 ),
               ),
-              if (hasImpactPoint) ...[
+              if (hasImpactPoint ||
+                  (grenade!.impactAreaStrokes != null &&
+                      grenade!.impactAreaStrokes!.isNotEmpty)) ...[
                 const SizedBox(width: 8),
                 OutlinedButton.icon(
                   onPressed: _clearImpactPoint,
@@ -1640,6 +1670,26 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
               ],
             ],
           ),
+          if (grenade!.type == GrenadeType.smoke ||
+              grenade!.type == GrenadeType.molotov) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () => Navigator.pop(context, 'draw_impact_area'),
+                icon: const Icon(Icons.brush, size: 18),
+                label: const Text('绘制爆点范围'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.pinkAccent,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -2095,7 +2145,8 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
   /// 编辑原始出处
   void _editSource() {
     final urlController = TextEditingController(text: grenade?.sourceUrl ?? '');
-    final noteController = TextEditingController(text: grenade?.sourceNote ?? '');
+    final noteController =
+        TextEditingController(text: grenade?.sourceNote ?? '');
 
     showModalBottomSheet(
       context: context,
@@ -2196,7 +2247,8 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
       } else {
         // 只有链接，显示简化的链接文本
         final url = grenade!.sourceUrl!;
-        sourceDisplayText = url.length > 30 ? '${url.substring(0, 30)}...' : url;
+        sourceDisplayText =
+            url.length > 30 ? '${url.substring(0, 30)}...' : url;
       }
     } else {
       sourceDisplayText = '未设置';
@@ -2270,23 +2322,25 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                     Icon(
                       hasSource ? Icons.link : Icons.link_off,
                       size: 14,
-                      color: (!isEditing && grenade!.sourceUrl?.isNotEmpty == true)
-                          ? Colors.blueAccent
-                          : Colors.grey,
+                      color:
+                          (!isEditing && grenade!.sourceUrl?.isNotEmpty == true)
+                              ? Colors.blueAccent
+                              : Colors.grey,
                     ),
                     const SizedBox(width: 4),
                     Flexible(
                       child: Text(
                         "出处: $sourceDisplayText",
                         style: TextStyle(
-                          color: (!isEditing && grenade!.sourceUrl?.isNotEmpty == true)
+                          color: (!isEditing &&
+                                  grenade!.sourceUrl?.isNotEmpty == true)
                               ? Colors.blueAccent
                               : Colors.grey,
                           fontSize: 12,
-                          decoration:
-                              (!isEditing && grenade!.sourceUrl?.isNotEmpty == true)
-                                  ? TextDecoration.underline
-                                  : null,
+                          decoration: (!isEditing &&
+                                  grenade!.sourceUrl?.isNotEmpty == true)
+                              ? TextDecoration.underline
+                              : null,
                           decorationColor: Colors.blueAccent,
                         ),
                         maxLines: 1,

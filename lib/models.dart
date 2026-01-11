@@ -106,6 +106,10 @@ class Grenade {
   /// 爆点 Y 坐标比例 (0-1)，null 表示未设置爆点
   double? impactYRatio;
 
+  /// 爆点区域笔画数据 (JSON 格式)
+  /// 格式: [{"points": [[x1,y1], [x2,y2], ...], "strokeWidth": 10.0, "isEraser": false}, ...]
+  String? impactAreaStrokes;
+
   // 反向链接到 MapLayer
   @Backlink(to: 'grenades')
   final layer = IsarLink<MapLayer>();

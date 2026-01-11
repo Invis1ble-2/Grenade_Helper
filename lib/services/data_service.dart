@@ -52,9 +52,10 @@ class PackagePreviewResult {
   });
 
   bool get isMultiMap => grenadesByMap.keys.length > 1;
-  
-  int get totalCount => grenadesByMap.values.fold(0, (sum, list) => sum + list.length);
-  
+
+  int get totalCount =>
+      grenadesByMap.values.fold(0, (sum, list) => sum + list.length);
+
   List<String> get mapNames => grenadesByMap.keys.toList();
 }
 
@@ -76,7 +77,7 @@ class _PackageParams {
 /// 在 isolate 中执行文件复制和压缩（顶层函数）
 Future<void> _packageFilesInIsolate(_PackageParams params) async {
   final exportDir = Directory(params.exportDirPath);
-  
+
   // 清理并创建目录
   if (exportDir.existsSync()) exportDir.deleteSync(recursive: true);
   exportDir.createSync(recursive: true);
@@ -169,11 +170,12 @@ class DataService {
           : DateTime.now();
 
       // 生成临时 uniqueId（如果没有）
-      final uniqueId = importedUniqueId ?? '${mapName}_${title}_${xRatio}_$yRatio';
+      final uniqueId =
+          importedUniqueId ?? '${mapName}_${title}_${xRatio}_$yRatio';
 
       // 计算导入状态
       ImportStatus status = ImportStatus.newItem;
-      
+
       // 查找地图
       final map = await isar.gameMaps.filter().nameEqualTo(mapName).findFirst();
       if (map != null) {
@@ -186,24 +188,28 @@ class DataService {
           }
         }
         layer ??= map.layers.isNotEmpty ? map.layers.first : null;
-        
+
         if (layer != null) {
           // 查找已有道具
           Grenade? existing;
-          
+
           if (importedUniqueId != null && importedUniqueId.isNotEmpty) {
             final allGrenades = await isar.grenades.where().findAll();
-            existing = allGrenades.where((g) => g.uniqueId == importedUniqueId).firstOrNull;
+            existing = allGrenades
+                .where((g) => g.uniqueId == importedUniqueId)
+                .firstOrNull;
           }
-          
+
           if (existing == null && importedUniqueId == null) {
             await layer.grenades.load();
-            existing = layer.grenades.where((g) =>
-                g.title == title &&
-                (g.xRatio - xRatio).abs() < 0.01 &&
-                (g.yRatio - yRatio).abs() < 0.01).firstOrNull;
+            existing = layer.grenades
+                .where((g) =>
+                    g.title == title &&
+                    (g.xRatio - xRatio).abs() < 0.01 &&
+                    (g.yRatio - yRatio).abs() < 0.01)
+                .firstOrNull;
           }
-          
+
           if (existing != null) {
             if (importedUpdatedAt.isAfter(existing.updatedAt)) {
               status = ImportStatus.update;
@@ -240,7 +246,8 @@ class DataService {
   // --- 导出 (分享) ---
 
   /// 导出选中的道具列表
-  Future<void> exportSelectedGrenades(BuildContext context, List<Grenade> grenades) async {
+  Future<void> exportSelectedGrenades(
+      BuildContext context, List<Grenade> grenades) async {
     if (grenades.isEmpty) return;
 
     // 构建 JSON 数据结构
@@ -279,6 +286,9 @@ class DataService {
         'hasLocalEdits': g.hasLocalEdits,
         'x': g.xRatio,
         'y': g.yRatio,
+        'impactX': g.impactXRatio,
+        'impactY': g.impactYRatio,
+        'impactAreaStrokes': g.impactAreaStrokes,
         'steps': stepsData,
         'createdAt': g.createdAt.millisecondsSinceEpoch,
         'updatedAt': g.updatedAt.millisecondsSinceEpoch,
@@ -304,7 +314,8 @@ class DataService {
     if (!context.mounted) return;
 
     // 根据平台显示不同的分享选项
-    final isDesktop = Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+    final isDesktop =
+        Platform.isWindows || Platform.isMacOS || Platform.isLinux;
 
     if (isDesktop) {
       await _saveToFolderWithCustomName(context, zipPath);
@@ -332,12 +343,15 @@ class DataService {
                     style: TextStyle(color: Colors.white)),
                 onTap: () {
                   Navigator.pop(ctx);
-                  SharePlus.instance.share(ShareParams(files: [XFile(zipPath)], text: "CS2 道具数据分享"));
+                  SharePlus.instance.share(
+                      ShareParams(files: [XFile(zipPath)], text: "CS2 道具数据分享"));
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.folder_open, color: Colors.orangeAccent),
-                title: const Text("保存到文件夹", style: TextStyle(color: Colors.white)),
+                leading:
+                    const Icon(Icons.folder_open, color: Colors.orangeAccent),
+                title:
+                    const Text("保存到文件夹", style: TextStyle(color: Colors.white)),
                 onTap: () async {
                   Navigator.pop(ctx);
                   await _saveToFolderWithCustomName(context, zipPath);
@@ -407,6 +421,9 @@ class DataService {
         'hasLocalEdits': g.hasLocalEdits,
         'x': g.xRatio,
         'y': g.yRatio,
+        'impactX': g.impactXRatio,
+        'impactY': g.impactYRatio,
+        'impactAreaStrokes': g.impactAreaStrokes,
         'steps': stepsData,
         'createdAt': g.createdAt.millisecondsSinceEpoch,
         'updatedAt': g.updatedAt.millisecondsSinceEpoch,
@@ -463,7 +480,8 @@ class DataService {
                     style: TextStyle(color: Colors.white)),
                 onTap: () {
                   Navigator.pop(ctx);
-                  SharePlus.instance.share(ShareParams(files: [XFile(zipPath)], text: "CS2 道具数据分享"));
+                  SharePlus.instance.share(
+                      ShareParams(files: [XFile(zipPath)], text: "CS2 道具数据分享"));
                 },
               ),
               ListTile(
@@ -665,7 +683,8 @@ class DataService {
           final layerName = item['layerName'];
 
           // 查找地图
-          final map = await isar.gameMaps.filter().nameEqualTo(mapName).findFirst();
+          final map =
+              await isar.gameMaps.filter().nameEqualTo(mapName).findFirst();
           if (map == null) continue;
 
           await map.layers.load();
@@ -691,20 +710,25 @@ class DataService {
 
           if (importedUniqueId != null && importedUniqueId.isNotEmpty) {
             final allGrenades = await isar.grenades.where().findAll();
-            existing = allGrenades.where((g) => g.uniqueId == importedUniqueId).firstOrNull;
+            existing = allGrenades
+                .where((g) => g.uniqueId == importedUniqueId)
+                .firstOrNull;
           }
 
           if (existing == null && importedUniqueId == null) {
             await layer.grenades.load();
-            existing = layer.grenades.where((g) =>
-                g.title == title &&
-                (g.xRatio - xRatio).abs() < 0.01 &&
-                (g.yRatio - yRatio).abs() < 0.01).firstOrNull;
+            existing = layer.grenades
+                .where((g) =>
+                    g.title == title &&
+                    (g.xRatio - xRatio).abs() < 0.01 &&
+                    (g.yRatio - yRatio).abs() < 0.01)
+                .firstOrNull;
           }
 
           if (existing != null) {
             if (importedUpdatedAt.isAfter(existing.updatedAt)) {
-              await _updateExistingGrenade(existing, item, memoryImages, dataPath);
+              await _updateExistingGrenade(
+                  existing, item, memoryImages, dataPath);
               importedGrenades.add(existing);
               updatedCount++;
             } else {
@@ -760,6 +784,9 @@ class DataService {
     existing.isImported = true; // 标记为导入的道具
     existing.xRatio = (item['x'] as num).toDouble();
     existing.yRatio = (item['y'] as num).toDouble();
+    existing.impactXRatio = (item['impactX'] as num?)?.toDouble();
+    existing.impactYRatio = (item['impactY'] as num?)?.toDouble();
+    existing.impactAreaStrokes = item['impactAreaStrokes'] as String?;
     existing.updatedAt = DateTime.fromMillisecondsSinceEpoch(item['updatedAt']);
     existing.isNewImport = true;
     await isar.grenades.put(existing);
@@ -844,6 +871,9 @@ class DataService {
           : DateTime.now(),
     );
     g.author = item['author'] as String?;
+    g.impactXRatio = (item['impactX'] as num?)?.toDouble();
+    g.impactYRatio = (item['impactY'] as num?)?.toDouble();
+    g.impactAreaStrokes = item['impactAreaStrokes'] as String?;
     await isar.grenades.put(g);
 
     // 设置关联

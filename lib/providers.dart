@@ -53,6 +53,9 @@ final mapLineColorProvider =
     StateProvider<int>((ref) => 0xFFE040FB); // 默认 PurpleAccent (0xFFE040FB)
 final mapLineOpacityProvider = StateProvider<double>((ref) => 0.6);
 
+// 爆点区域透明度 Provider
+final impactAreaOpacityProvider = StateProvider<double>((ref) => 0.4);
+
 // ==================== Isar 数据流 ====================
 
 // 层级 1: 原始数据源 (Raw Data)
