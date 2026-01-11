@@ -913,23 +913,28 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
   }
 
   Future<String?> _pickAndProcessMedia(bool isImage) async {
-    // 显示来源选择对话框
-    final source = await _showMediaSourcePicker(isImage);
-    if (source == null) return null;
-
     final isar = ref.read(isarProvider);
     final dataPath = isar.directory ?? '';
 
-    if (source == _MediaSource.clipboard) {
-      // 从剪切板导入
-      if (isImage) {
-        return _processImageFromClipboard(dataPath);
-      } else {
-        return _processVideoFromClipboard(dataPath);
+    // 仅在桌面端显示来源选择对话框，移动端直接从图库导入
+    final isDesktop = Platform.isWindows || Platform.isLinux;
+    
+    if (isDesktop) {
+      final source = await _showMediaSourcePicker(isImage);
+      if (source == null) return null;
+
+      if (source == _MediaSource.clipboard) {
+        // 从剪切板导入
+        if (isImage) {
+          return _processImageFromClipboard(dataPath);
+        } else {
+          return _processVideoFromClipboard(dataPath);
+        }
       }
     }
 
-    // 从图库导入（原有逻辑）
+    // 从图库导入（移动端直接进入，桌面端选择图库后进入）
+
     final picker = ImagePicker();
 
     if (isImage) {
