@@ -14,6 +14,7 @@ import 'package:intl/intl.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:pasteboard/pasteboard.dart';
 
 import '../models.dart';
 import '../providers.dart';
@@ -109,6 +110,9 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     );
   }
 }
+
+/// 媒体来源枚举
+enum _MediaSource { gallery, clipboard }
 
 // --- 主页面 ---
 class GrenadeDetailScreen extends ConsumerStatefulWidget {
@@ -525,12 +529,408 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     }
   }
 
-  Future<String?> _pickAndProcessMedia(bool isImage) async {
-    final picker = ImagePicker();
+  /// 显示媒体来源选择对话框
+  Future<_MediaSource?> _showMediaSourcePicker(bool isImage) async {
+    return showModalBottomSheet<_MediaSource>(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              isImage ? "选择图片来源" : "选择视频来源",
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Theme.of(ctx).textTheme.bodyLarge?.color,
+              ),
+            ),
+            const SizedBox(height: 20),
+            ListTile(
+              leading: const Icon(Icons.photo_library, color: Colors.blueAccent),
+              title: const Text("从图库选择"),
+              onTap: () => Navigator.pop(ctx, _MediaSource.gallery),
+            ),
+            ListTile(
+              leading: const Icon(Icons.content_paste, color: Colors.orangeAccent),
+              title: const Text("从剪切板粘贴"),
+              subtitle: const Text("读取已复制的媒体文件"),
+              onTap: () => Navigator.pop(ctx, _MediaSource.clipboard),
+            ),
+            const SizedBox(height: 10),
+          ],
+        ),
+      ),
+    );
+  }
 
-    // 使用当前 isar 实例的目录作为数据存储目录
+  /// 从剪切板读取图片并打开编辑器
+  Future<String?> _processImageFromClipboard(String dataPath) async {
+    // 首先尝试读取剪切板中的图片数据
+    final imageBytes = await Pasteboard.image;
+    
+    File? tempFile;
+    if (imageBytes != null && imageBytes.isNotEmpty) {
+      // 剪切板中有图片数据，写入临时文件
+      final tempPath = p.join(dataPath, "_clipboard_temp_${DateTime.now().millisecondsSinceEpoch}.png");
+      tempFile = File(tempPath);
+      await tempFile.writeAsBytes(imageBytes);
+    } else {
+      // 尝试从剪切板文件列表中查找图片
+      final files = await Pasteboard.files();
+      if (files.isNotEmpty) {
+        const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'];
+        for (final filePath in files) {
+          final ext = p.extension(filePath).toLowerCase();
+          if (imageExtensions.contains(ext)) {
+            tempFile = File(filePath);
+            break;
+          }
+        }
+      }
+    }
+
+    if (tempFile == null || !tempFile.existsSync()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("剪切板中没有找到图片")),
+        );
+      }
+      return null;
+    }
+
+    if (!mounted) return null;
+
+    // 打开图片编辑器
+    String? resultPath;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ProImageEditor.file(
+          tempFile!,
+          callbacks: ProImageEditorCallbacks(
+            onImageEditingComplete: (Uint8List bytes) async {
+              final fileName = "${DateTime.now().millisecondsSinceEpoch}.jpg";
+              final savePath = p.join(dataPath, fileName);
+              await File(savePath).writeAsBytes(bytes);
+              resultPath = savePath;
+              if (mounted) Navigator.pop(context);
+            },
+          ),
+          configs: _buildImageEditorConfigs(),
+        ),
+      ),
+    );
+
+    // 清理临时文件（如果是从剪切板数据创建的）
+    if (imageBytes != null && tempFile.existsSync()) {
+      try {
+        await tempFile.delete();
+      } catch (_) {}
+    }
+
+    return resultPath;
+  }
+
+  /// 从剪切板读取视频
+  Future<String?> _processVideoFromClipboard(String dataPath) async {
+    final files = await Pasteboard.files();
+    if (files.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("剪切板中没有找到文件")),
+        );
+      }
+      return null;
+    }
+
+    const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.wmv', '.flv', '.webm'];
+    String? videoPath;
+    for (final filePath in files) {
+      final ext = p.extension(filePath).toLowerCase();
+      if (videoExtensions.contains(ext)) {
+        videoPath = filePath;
+        break;
+      }
+    }
+
+    if (videoPath == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("剪切板中没有找到视频文件")),
+        );
+      }
+      return null;
+    }
+
+    try {
+      final fileName = "${DateTime.now().millisecondsSinceEpoch}${p.extension(videoPath)}";
+      final savePath = p.join(dataPath, fileName);
+      await File(videoPath).copy(savePath);
+      return savePath;
+    } catch (e) {
+      debugPrint('Video copy error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("复制视频失败: $e")),
+        );
+      }
+      return null;
+    }
+  }
+
+  /// 构建图片编辑器配置（提取公共配置）
+  ProImageEditorConfigs _buildImageEditorConfigs() {
+    return ProImageEditorConfigs(
+      designMode: ImageEditorDesignMode.cupertino,
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: Colors.black,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      mainEditor: MainEditorConfigs(
+        tools: const [
+          SubEditorMode.paint,
+          SubEditorMode.text,
+          SubEditorMode.cropRotate,
+          SubEditorMode.tune,
+          SubEditorMode.filter,
+          SubEditorMode.blur,
+          SubEditorMode.emoji,
+        ],
+        widgets: MainEditorWidgets(
+          appBar: (editor, rebuildStream) => null,
+          bottomBar: (editor, rebuildStream, key) => null,
+          bodyItems: (editor, rebuildStream) => [
+            ReactiveWidget(
+              stream: rebuildStream,
+              builder: (_) => FrostedGlassActionBar(
+                editor: editor,
+                openStickerEditor: () {},
+              ),
+            ),
+          ],
+        ),
+      ),
+      paintEditor: PaintEditorConfigs(
+        widgets: PaintEditorWidgets(
+          appBar: (paintEditor, rebuildStream) => null,
+          bottomBar: (paintEditor, rebuildStream) => null,
+          bodyItems: (paintEditor, rebuildStream) => [
+            ReactiveWidget(
+              stream: rebuildStream,
+              builder: (_) => paintEditor.isActive
+                  ? const SizedBox.shrink()
+                  : FrostedGlassPaintAppbar(paintEditor: paintEditor),
+            ),
+            ReactiveWidget(
+              stream: rebuildStream,
+              builder: (_) =>
+                  FrostedGlassPaintBottomBar(paintEditor: paintEditor),
+            ),
+          ],
+        ),
+      ),
+      textEditor: TextEditorConfigs(
+        widgets: TextEditorWidgets(
+          appBar: (textEditor, rebuildStream) => null,
+          bottomBar: (textEditor, rebuildStream) => null,
+          bodyItems: (textEditor, rebuildStream) => [
+            ReactiveWidget(
+              stream: rebuildStream,
+              builder: (_) => const FrostedGlassEffect(
+                radius: BorderRadius.zero,
+                child: SizedBox.expand(),
+              ),
+            ),
+            ReactiveWidget(
+              stream: rebuildStream,
+              builder: (_) =>
+                  FrostedGlassTextAppbar(textEditor: textEditor),
+            ),
+            ReactiveWidget(
+              stream: rebuildStream,
+              builder: (_) => FrostedGlassTextBottomBar(
+                configs: textEditor.configs,
+                initColor: textEditor.primaryColor,
+                onColorChanged: (color) =>
+                    textEditor.primaryColor = color,
+                selectedStyle: textEditor.selectedTextStyle,
+                onFontChange: textEditor.setTextStyle,
+              ),
+            ),
+          ],
+        ),
+      ),
+      cropRotateEditor: CropRotateEditorConfigs(
+        widgets: CropRotateEditorWidgets(
+          appBar: (cropRotateEditor, rebuildStream) => null,
+          bottomBar: (cropRotateEditor, rebuildStream) =>
+              ReactiveWidget(
+            stream: rebuildStream,
+            builder: (_) => FrostedGlassCropRotateToolbar(
+              configs: cropRotateEditor.configs,
+              onCancel: cropRotateEditor.close,
+              onRotate: cropRotateEditor.rotate,
+              onDone: cropRotateEditor.done,
+              onReset: cropRotateEditor.reset,
+              openAspectRatios: cropRotateEditor.openAspectRatioOptions,
+            ),
+          ),
+        ),
+      ),
+      filterEditor: FilterEditorConfigs(
+        widgets: FilterEditorWidgets(
+          appBar: (filterEditor, rebuildStream) => null,
+          bodyItems: (filterEditor, rebuildStream) => [
+            ReactiveWidget(
+              stream: rebuildStream,
+              builder: (_) =>
+                  FrostedGlassFilterAppbar(filterEditor: filterEditor),
+            ),
+          ],
+        ),
+      ),
+      blurEditor: BlurEditorConfigs(
+        widgets: BlurEditorWidgets(
+          appBar: (blurEditor, rebuildStream) => null,
+          bodyItems: (blurEditor, rebuildStream) => [
+            ReactiveWidget(
+              stream: rebuildStream,
+              builder: (_) =>
+                  FrostedGlassBlurAppbar(blurEditor: blurEditor),
+            ),
+          ],
+        ),
+      ),
+      tuneEditor: TuneEditorConfigs(
+        widgets: TuneEditorWidgets(
+          appBar: (tuneEditor, rebuildStream) => null,
+          bottomBar: (tuneEditor, rebuildStream) => null,
+          bodyItems: (tuneEditor, rebuildStream) => [
+            ReactiveWidget(
+              stream: rebuildStream,
+              builder: (_) =>
+                  FrostedGlassTuneAppbar(tuneEditor: tuneEditor),
+            ),
+            ReactiveWidget(
+              stream: rebuildStream,
+              builder: (_) =>
+                  FrostedGlassTuneBottombar(tuneEditor: tuneEditor),
+            ),
+          ],
+        ),
+      ),
+      dialogConfigs: DialogConfigs(
+        widgets: DialogWidgets(
+          loadingDialog: (message, configs) =>
+              FrostedGlassLoadingDialog(
+            message: message,
+            configs: configs,
+          ),
+        ),
+      ),
+      i18n: const I18n(
+        various: I18nVarious(
+          loadingDialogMsg: '正在处理...',
+          closeEditorWarningTitle: '确认关闭',
+          closeEditorWarningMessage: '确定要关闭编辑器吗？未保存的更改将丢失',
+          closeEditorWarningConfirmBtn: '确定',
+          closeEditorWarningCancelBtn: '取消',
+        ),
+        paintEditor: I18nPaintEditor(
+          bottomNavigationBarText: '画笔',
+          freestyle: '自由线',
+          arrow: '箭头',
+          line: '直线',
+          rectangle: '矩形',
+          circle: '圆形',
+          dashLine: '虚线',
+          lineWidth: '线宽',
+          toggleFill: '填充',
+          undo: '撤销',
+          redo: '重做',
+          done: '完成',
+          back: '返回',
+        ),
+        textEditor: I18nTextEditor(
+          inputHintText: '输入文字',
+          bottomNavigationBarText: '文字',
+          done: '完成',
+          back: '返回',
+          textAlign: '对齐',
+          backgroundMode: '背景模式',
+        ),
+        cropRotateEditor: I18nCropRotateEditor(
+          bottomNavigationBarText: '裁剪',
+          rotate: '旋转',
+          ratio: '比例',
+          back: '返回',
+          done: '完成',
+          reset: '重置',
+          undo: '撤销',
+          redo: '重做',
+        ),
+        filterEditor: I18nFilterEditor(
+          bottomNavigationBarText: '滤镜',
+          back: '返回',
+          done: '完成',
+        ),
+        blurEditor: I18nBlurEditor(
+          bottomNavigationBarText: '模糊',
+          back: '返回',
+          done: '完成',
+        ),
+        tuneEditor: I18nTuneEditor(
+          bottomNavigationBarText: '调色',
+          back: '返回',
+          done: '完成',
+          brightness: '亮度',
+          contrast: '对比度',
+          saturation: '饱和度',
+          exposure: '曝光',
+          hue: '色调',
+          temperature: '色温',
+          sharpness: '锐度',
+          fade: '褪色',
+          luminance: '明度',
+        ),
+        emojiEditor: I18nEmojiEditor(
+          bottomNavigationBarText: '表情',
+        ),
+        cancel: '取消',
+        undo: '撤销',
+        redo: '重做',
+        done: '完成',
+        remove: '删除',
+      ),
+    );
+  }
+
+  Future<String?> _pickAndProcessMedia(bool isImage) async {
+    // 显示来源选择对话框
+    final source = await _showMediaSourcePicker(isImage);
+    if (source == null) return null;
+
     final isar = ref.read(isarProvider);
     final dataPath = isar.directory ?? '';
+
+    if (source == _MediaSource.clipboard) {
+      // 从剪切板导入
+      if (isImage) {
+        return _processImageFromClipboard(dataPath);
+      } else {
+        return _processVideoFromClipboard(dataPath);
+      }
+    }
+
+    // 从图库导入（原有逻辑）
+    final picker = ImagePicker();
 
     if (isImage) {
       final xFile = await picker.pickImage(source: ImageSource.gallery);
@@ -552,230 +952,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                 if (mounted) Navigator.pop(context);
               },
             ),
-            configs: ProImageEditorConfigs(
-              designMode: ImageEditorDesignMode.cupertino,
-              theme: ThemeData.dark().copyWith(
-                scaffoldBackgroundColor: Colors.black,
-                iconTheme: const IconThemeData(color: Colors.white),
-              ),
-              mainEditor: MainEditorConfigs(
-                tools: const [
-                  SubEditorMode.paint,
-                  SubEditorMode.text,
-                  SubEditorMode.cropRotate,
-                  SubEditorMode.tune,
-                  SubEditorMode.filter,
-                  SubEditorMode.blur,
-                  SubEditorMode.emoji,
-                  // SubEditorMode.sticker, // 已移除
-                ],
-                widgets: MainEditorWidgets(
-                  appBar: (editor, rebuildStream) => null,
-                  bottomBar: (editor, rebuildStream, key) => null,
-                  bodyItems: (editor, rebuildStream) => [
-                    ReactiveWidget(
-                      stream: rebuildStream,
-                      builder: (_) => FrostedGlassActionBar(
-                        editor: editor,
-                        openStickerEditor: () {},
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              paintEditor: PaintEditorConfigs(
-                widgets: PaintEditorWidgets(
-                  appBar: (paintEditor, rebuildStream) => null,
-                  bottomBar: (paintEditor, rebuildStream) => null,
-                  bodyItems: (paintEditor, rebuildStream) => [
-                    ReactiveWidget(
-                      stream: rebuildStream,
-                      builder: (_) => paintEditor.isActive
-                          ? const SizedBox.shrink()
-                          : FrostedGlassPaintAppbar(paintEditor: paintEditor),
-                    ),
-                    ReactiveWidget(
-                      stream: rebuildStream,
-                      builder: (_) =>
-                          FrostedGlassPaintBottomBar(paintEditor: paintEditor),
-                    ),
-                  ],
-                ),
-              ),
-              textEditor: TextEditorConfigs(
-                widgets: TextEditorWidgets(
-                  appBar: (textEditor, rebuildStream) => null,
-                  bottomBar: (textEditor, rebuildStream) => null,
-                  bodyItems: (textEditor, rebuildStream) => [
-                    ReactiveWidget(
-                      stream: rebuildStream,
-                      builder: (_) => const FrostedGlassEffect(
-                        radius: BorderRadius.zero,
-                        child: SizedBox.expand(),
-                      ),
-                    ),
-                    ReactiveWidget(
-                      stream: rebuildStream,
-                      builder: (_) =>
-                          FrostedGlassTextAppbar(textEditor: textEditor),
-                    ),
-                    ReactiveWidget(
-                      stream: rebuildStream,
-                      builder: (_) => FrostedGlassTextBottomBar(
-                        configs: textEditor.configs,
-                        initColor: textEditor.primaryColor,
-                        onColorChanged: (color) =>
-                            textEditor.primaryColor = color,
-                        selectedStyle: textEditor.selectedTextStyle,
-                        onFontChange: textEditor.setTextStyle,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              cropRotateEditor: CropRotateEditorConfigs(
-                widgets: CropRotateEditorWidgets(
-                  appBar: (cropRotateEditor, rebuildStream) => null,
-                  bottomBar: (cropRotateEditor, rebuildStream) =>
-                      ReactiveWidget(
-                    stream: rebuildStream,
-                    builder: (_) => FrostedGlassCropRotateToolbar(
-                      configs: cropRotateEditor.configs,
-                      onCancel: cropRotateEditor.close,
-                      onRotate: cropRotateEditor.rotate,
-                      onDone: cropRotateEditor.done,
-                      onReset: cropRotateEditor.reset,
-                      openAspectRatios: cropRotateEditor.openAspectRatioOptions,
-                    ),
-                  ),
-                ),
-              ),
-              filterEditor: FilterEditorConfigs(
-                widgets: FilterEditorWidgets(
-                  appBar: (filterEditor, rebuildStream) => null,
-                  bodyItems: (filterEditor, rebuildStream) => [
-                    ReactiveWidget(
-                      stream: rebuildStream,
-                      builder: (_) =>
-                          FrostedGlassFilterAppbar(filterEditor: filterEditor),
-                    ),
-                  ],
-                ),
-              ),
-              blurEditor: BlurEditorConfigs(
-                widgets: BlurEditorWidgets(
-                  appBar: (blurEditor, rebuildStream) => null,
-                  bodyItems: (blurEditor, rebuildStream) => [
-                    ReactiveWidget(
-                      stream: rebuildStream,
-                      builder: (_) =>
-                          FrostedGlassBlurAppbar(blurEditor: blurEditor),
-                    ),
-                  ],
-                ),
-              ),
-              tuneEditor: TuneEditorConfigs(
-                widgets: TuneEditorWidgets(
-                  appBar: (tuneEditor, rebuildStream) => null,
-                  bottomBar: (tuneEditor, rebuildStream) => null,
-                  bodyItems: (tuneEditor, rebuildStream) => [
-                    ReactiveWidget(
-                      stream: rebuildStream,
-                      builder: (_) =>
-                          FrostedGlassTuneAppbar(tuneEditor: tuneEditor),
-                    ),
-                    ReactiveWidget(
-                      stream: rebuildStream,
-                      builder: (_) =>
-                          FrostedGlassTuneBottombar(tuneEditor: tuneEditor),
-                    ),
-                  ],
-                ),
-              ),
-              dialogConfigs: DialogConfigs(
-                widgets: DialogWidgets(
-                  loadingDialog: (message, configs) =>
-                      FrostedGlassLoadingDialog(
-                    message: message,
-                    configs: configs,
-                  ),
-                ),
-              ),
-              i18n: const I18n(
-                various: I18nVarious(
-                  loadingDialogMsg: '正在处理...',
-                  closeEditorWarningTitle: '确认关闭',
-                  closeEditorWarningMessage: '确定要关闭编辑器吗？未保存的更改将丢失',
-                  closeEditorWarningConfirmBtn: '确定',
-                  closeEditorWarningCancelBtn: '取消',
-                ),
-                paintEditor: I18nPaintEditor(
-                  bottomNavigationBarText: '画笔',
-                  freestyle: '自由线',
-                  arrow: '箭头',
-                  line: '直线',
-                  rectangle: '矩形',
-                  circle: '圆形',
-                  dashLine: '虚线',
-                  lineWidth: '线宽',
-                  toggleFill: '填充',
-                  undo: '撤销',
-                  redo: '重做',
-                  done: '完成',
-                  back: '返回',
-                ),
-                textEditor: I18nTextEditor(
-                  inputHintText: '输入文字',
-                  bottomNavigationBarText: '文字',
-                  done: '完成',
-                  back: '返回',
-                  textAlign: '对齐',
-                  backgroundMode: '背景模式',
-                ),
-                cropRotateEditor: I18nCropRotateEditor(
-                  bottomNavigationBarText: '裁剪',
-                  rotate: '旋转',
-                  ratio: '比例',
-                  back: '返回',
-                  done: '完成',
-                  reset: '重置',
-                  undo: '撤销',
-                  redo: '重做',
-                ),
-                filterEditor: I18nFilterEditor(
-                  bottomNavigationBarText: '滤镜',
-                  back: '返回',
-                  done: '完成',
-                ),
-                blurEditor: I18nBlurEditor(
-                  bottomNavigationBarText: '模糊',
-                  back: '返回',
-                  done: '完成',
-                ),
-                tuneEditor: I18nTuneEditor(
-                  bottomNavigationBarText: '调色',
-                  back: '返回',
-                  done: '完成',
-                  brightness: '亮度',
-                  contrast: '对比度',
-                  saturation: '饱和度',
-                  exposure: '曝光',
-                  hue: '色调',
-                  temperature: '色温',
-                  sharpness: '锐度',
-                  fade: '褪色',
-                  luminance: '明度',
-                ),
-                emojiEditor: I18nEmojiEditor(
-                  bottomNavigationBarText: '表情',
-                ),
-                cancel: '取消',
-                undo: '撤销',
-                redo: '重做',
-                done: '完成',
-                remove: '删除',
-              ),
-            ),
+            configs: _buildImageEditorConfigs(),
           ),
         ),
       );
