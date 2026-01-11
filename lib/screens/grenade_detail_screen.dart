@@ -1935,8 +1935,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
   /// 编辑原始出处
   void _editSource() {
     final urlController = TextEditingController(text: grenade?.sourceUrl ?? '');
-    final noteController =
-        TextEditingController(text: grenade?.sourceNote ?? '');
+    final noteController = TextEditingController(text: grenade?.sourceNote ?? '');
 
     showModalBottomSheet(
       context: context,
@@ -2037,8 +2036,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
       } else {
         // 只有链接，显示简化的链接文本
         final url = grenade!.sourceUrl!;
-        sourceDisplayText =
-            url.length > 30 ? '${url.substring(0, 30)}...' : url;
+        sourceDisplayText = url.length > 30 ? '${url.substring(0, 30)}...' : url;
       }
     } else {
       sourceDisplayText = '未设置';
@@ -2117,14 +2115,12 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                     "出处: $sourceDisplayText",
                     style: TextStyle(
                       color: hasSource
-                          ? (grenade!.sourceUrl?.isNotEmpty == true &&
-                                  !isEditing
+                          ? (grenade!.sourceUrl?.isNotEmpty == true && !isEditing
                               ? Colors.blueAccent
                               : Colors.grey)
                           : Colors.grey,
                       fontSize: 12,
-                      decoration:
-                          grenade!.sourceUrl?.isNotEmpty == true && !isEditing
+                      decoration: grenade!.sourceUrl?.isNotEmpty == true && !isEditing
                               ? TextDecoration.underline
                               : null,
                     ),
@@ -2154,5 +2150,6 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     );
   }
 }
+
 
 
