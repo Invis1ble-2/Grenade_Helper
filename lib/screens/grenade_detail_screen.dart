@@ -2079,35 +2079,44 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                           }
                         }
                       : null),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    hasSource ? Icons.link : Icons.link_off,
-                    size: 12,
-                    color: hasSource ? Colors.blueAccent : Colors.grey,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    "出处: $sourceDisplayText",
-                    style: TextStyle(
-                      color: hasSource
-                          ? (grenade!.sourceUrl?.isNotEmpty == true && !isEditing
-                              ? Colors.blueAccent
-                              : Colors.grey)
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      hasSource ? Icons.link : Icons.link_off,
+                      size: 14,
+                      color: (!isEditing && grenade!.sourceUrl?.isNotEmpty == true)
+                          ? Colors.blueAccent
                           : Colors.grey,
-                      fontSize: 12,
-                      decoration: grenade!.sourceUrl?.isNotEmpty == true && !isEditing
-                          ? TextDecoration.underline
-                          : null,
                     ),
-                  ),
-                  if (isEditing) ...[
                     const SizedBox(width: 4),
-                    const Icon(Icons.edit, size: 12, color: Colors.grey),
+                    Flexible(
+                      child: Text(
+                        "出处: $sourceDisplayText",
+                        style: TextStyle(
+                          color: (!isEditing && grenade!.sourceUrl?.isNotEmpty == true)
+                              ? Colors.blueAccent
+                              : Colors.grey,
+                          fontSize: 12,
+                          decoration:
+                              (!isEditing && grenade!.sourceUrl?.isNotEmpty == true)
+                                  ? TextDecoration.underline
+                                  : null,
+                          decorationColor: Colors.blueAccent,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (isEditing) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.edit, size: 12, color: Colors.grey),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ],
