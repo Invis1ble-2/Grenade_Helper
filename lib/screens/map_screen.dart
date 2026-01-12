@@ -109,7 +109,6 @@ List<GrenadeCluster> clusterGrenadesByImpact(List<Grenade> grenades,
     {double threshold = 0.0}) {
   if (grenades.isEmpty) return [];
   final List<GrenadeCluster> clusters = [];
-  // Filter only grenades with impact coordinates
   final List<Grenade> remaining = grenades
       .where((g) => g.impactXRatio != null && g.impactYRatio != null)
       .toList();
@@ -251,9 +250,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     if (box == null) return null;
 
     // 2. 将全局坐标转换为 Stack 的局部坐标
-    // 这会自动处理 PhotoView 的缩放和平移变换，以及屏幕位置
-    // 注意：因为 GlobalKey 放在 Stack 上，而 Stack 是 PhotoView 的 child，
-    // 所以这里的 localPosition 已经是经过 PhotoView 逆变换后的坐标
     final localPosition = box.globalToLocal(globalPosition);
 
     // 3. 获取 Container 尺寸（Stack 的尺寸）
@@ -489,19 +485,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         });
         return;
       }
-
-      // 处理整组点位合并：如果正在移动点位组，点击现有点位则全部合并进去
-      // 这里需要查找点击位置是否有现有的 cluster。但 _handleMoveClusterTap 之前的逻辑似乎是点击任何地方都视为移动目标？
-      // 不，之前的逻辑是：如果是点击了现有的点位 -> 合并；点击空白处 -> 移动。
-      // 由于这里只有点击空白处的逻辑（_handleTap 是 onBlankTap? 不，_handleTap 是 Stack 的 tapUp）
-
-      // 我们需要先检查点击位置是否有其他 cluster 以处理合并逻辑。
-      // 但是 _handleTap 这里的逻辑原本是 "创建新道具" (点击空白处)。
-      // 点击现有的 cluster 会触发 `_handleClusterTap`。
-      // 所以，如果是移动模式下点击空白处 -> 移动位置。
-      // 如果点击了 cluster -> _handleClusterTap 会被调用。
-
-      // 所以这里只需要处理 "移动到新位置" 的逻辑。
 
       if (_isMovingCluster && _draggingCluster != null) {
         final isar = ref.read(isarProvider);
@@ -1145,8 +1128,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
   /// 处理爆点摇杆移动
   void _handleJoystickMoveForImpact(Offset direction, int speedLevel) {
-    if (_joystickImpactCluster == null || _impactJoystickDragOffset == null)
+    if (_joystickImpactCluster == null || _impactJoystickDragOffset == null){
       return;
+    }
 
     // 根据速度档位计算移动步长 (1档=0.0005, 5档=0.0025)
     final step = 0.0005 + (speedLevel - 1) * 0.0005;
@@ -2861,12 +2845,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                             stream: _photoViewController.outputStateStream,
                             builder: (context, snapshot) {
                               final double scale = snapshot.data?.scale ?? 1.0;
-                              // Calculate scale factor (inverse of zoom)
-                              // Base scalar is 1.0, decreases as we zoom in
                               final double markerScale = 1.0 / scale;
-                              // Clamp scale to prevent markers getting too small or too big if needed
-                              // For now we use direct inverse scaling to keep visual size constant
-
+                              
                               // 计算 BoxFit.contain 模式下图片的实际显示区域
                               final imageBounds = _getImageBounds(
                                   constraints.maxWidth, constraints.maxHeight);
@@ -3506,20 +3486,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                             typeColor = Colors.white;
                         }
 
-                        // Icon border uses team color? Or type color?
-                        // User said "icon and name color match type".
-                        // Exisiting code used team color for border and icon.
-                        // I will use typeColor for Icon and Title.
-                        // For the border, maybe keep team color to distinguish CT/T?
-                        // "Icon color" usually means the icon glyph itself.
-                        // But the container border was also `color`.
-                        // I'll set Icon glyph color to typeColor.
-                        // I'll set Title color to typeColor.
-                        // I'll keep the border as Team Color to preserve that info?
-                        // User request: "Popup props icon and name color change to match type color".
-                        // It implies the visual indicator of the prop itself.
-
-                        final teamColor = _getTeamColor(g.team);
                         final icon = _getTypeIcon(g.type);
                         final isSelected = selectedIds.contains(g.id);
 

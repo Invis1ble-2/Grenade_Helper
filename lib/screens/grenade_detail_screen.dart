@@ -209,10 +209,12 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     if (team != null) grenade!.team = team;
     if (isFavorite != null) grenade!.isFavorite = isFavorite;
     if (author != null) grenade!.author = author.isEmpty ? null : author;
-    if (sourceUrl != null)
+    if (sourceUrl != null){
       grenade!.sourceUrl = sourceUrl.isEmpty ? null : sourceUrl;
-    if (sourceNote != null)
+    }
+    if (sourceNote != null){
       grenade!.sourceNote = sourceNote.isEmpty ? null : sourceNote;
+    }
 
     grenade!.updatedAt = DateTime.now();
     await isar.writeTxn(() async {
