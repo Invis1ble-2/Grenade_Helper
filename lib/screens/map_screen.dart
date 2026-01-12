@@ -1556,21 +1556,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         double offsetX,
         double offsetY
       }) imageBounds) {
-    // 隐藏逻辑：如果处于爆点模式，且该 cluster 不是选中的爆点对应的 cluster，则不显示
-    // 实际上我们在 build 方法中已经做了过滤，这里只需要负责渲染
-    // 但如果我们需要在爆点模式下，选中爆点后显示对应的投掷点，这里是需要的渲染逻辑
+
 
     final color = _getTeamColor(cluster.primaryTeam);
     final icon = _getTypeIcon(cluster.primaryType);
     final count = cluster.grenades.length;
 
-    // Base size is 20, use FIXED half-size for positioning
-    // Transform.scale only affects visual rendering, NOT layout position
-    // So positioning offset must be constant to avoid drift during zoom
     const double baseHalfSize = 10.0;
 
-    // 计算标记在 Stack 中的实际位置（考虑图片偏移）
-    // 如果正在拖动或使用摇杆，使用 _dragOffset 中的实时位置
     double effectiveX = cluster.xRatio;
     double effectiveY = cluster.yRatio;
 
@@ -3103,7 +3096,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                           title: Text(
                             g.title,
                             style: TextStyle(
-                              color: typeColor,
+                              color: Theme.of(context).textTheme.bodyLarge?.color,
                               fontWeight: FontWeight.w500,
                               fontSize: 12,
                             ),
