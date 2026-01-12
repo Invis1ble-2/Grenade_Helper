@@ -16,6 +16,7 @@ import '../spawn_point_data.dart';
 import '../widgets/joystick_widget.dart';
 import '../services/data_service.dart';
 import 'grenade_detail_screen.dart';
+import 'impact_point_picker_screen.dart';
 
 // 状态管理
 
@@ -905,6 +906,55 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       _movingSingleImpactGrenade = null;
     });
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
+  }
+
+  /// 打开绘制爆点区域界面
+  Future<void> _openImpactAreaDrawing(Grenade grenade, int layerId) async {
+    // 需要先设置爆点位置
+    if (grenade.impactXRatio == null || grenade.impactYRatio == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('请先设置爆点位置'),
+        backgroundColor: Colors.orange,
+        duration: Duration(seconds: 2),
+      ));
+      return;
+    }
+
+    final result = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ImpactPointPickerScreen(
+          grenadeId: grenade.id,
+          initialX: grenade.impactXRatio,
+          initialY: grenade.impactYRatio,
+          throwX: grenade.xRatio,
+          throwY: grenade.yRatio,
+          layerId: layerId,
+          isDrawingMode: true,
+          existingStrokes: grenade.impactAreaStrokes,
+          grenadeType: grenade.type,
+        ),
+      ),
+    );
+
+    if (result != null && result['strokes'] != null) {
+      final isar = ref.read(isarProvider);
+      await isar.writeTxn(() async {
+        final g = await isar.grenades.get(grenade.id);
+        if (g != null) {
+          g.impactAreaStrokes = result['strokes'] as String;
+          g.updatedAt = DateTime.now();
+          await isar.grenades.put(g);
+        }
+      });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('✓ 爆点区域已保存'),
+        backgroundColor: Colors.green,
+        duration: Duration(seconds: 1),
+      ));
+    }
   }
 
   void _cancelMoveSingleGrenade() {
@@ -2962,8 +3012,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                   constraints: const BoxConstraints(
                                       minWidth: 32, minHeight: 32),
                                 ),
-                              // 移动整体按钮
-                              if (!isMultiSelectMode)
+                              // 移动整体按钮（爆点模式下隐藏）
+                              if (!isMultiSelectMode && !_isImpactMode)
                                 IconButton(
                                   onPressed: () {
                                     _closeClusterPanel();
@@ -3150,19 +3200,36 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                       constraints: const BoxConstraints(
                                           minWidth: 32, minHeight: 32),
                                     ),
-                                    IconButton(
-                                      onPressed: () {
-                                        _closeClusterPanel();
-                                        _startMoveSingleGrenade(g);
-                                      },
-                                      icon: const Icon(Icons.open_with),
-                                      color: Colors.cyan,
-                                      tooltip: "移动投掷点",
-                                      iconSize: 18,
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints(
-                                          minWidth: 32, minHeight: 32),
-                                    ),
+                                    // 绘制爆点区域按钮（仅在爆点模式下显示）
+                                    if (_isImpactMode)
+                                      IconButton(
+                                        onPressed: () {
+                                          _closeClusterPanel();
+                                          _openImpactAreaDrawing(g, layerId);
+                                        },
+                                        icon: const Icon(Icons.brush),
+                                        color: Colors.amber,
+                                        tooltip: "绘制爆点区域",
+                                        iconSize: 18,
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(
+                                            minWidth: 32, minHeight: 32),
+                                      ),
+                                    // 移动投掷点按钮（爆点模式下隐藏）
+                                    if (!_isImpactMode)
+                                      IconButton(
+                                        onPressed: () {
+                                          _closeClusterPanel();
+                                          _startMoveSingleGrenade(g);
+                                        },
+                                        icon: const Icon(Icons.open_with),
+                                        color: Colors.cyan,
+                                        tooltip: "移动投掷点",
+                                        iconSize: 18,
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(
+                                            minWidth: 32, minHeight: 32),
+                                      ),
                                   ],
                                 ),
                               if (!isMultiSelectMode)
