@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:photo_view/photo_view.dart';
 import '../models.dart';
@@ -131,7 +132,7 @@ class _ImpactPointPickerScreenState
     return Offset(tapX / bounds.width, tapY / bounds.height);
   }
 
-  // ========== 选择模式方法 ==========
+  // 选择模式方法
 
   void _handleTap(TapUpDetails details) {
     final localRatio = _getLocalPosition(details.globalPosition);
@@ -160,6 +161,38 @@ class _ImpactPointPickerScreenState
     }
   }
 
+  /// 处理鼠标滚轮缩放
+  void _handleMouseWheelZoom(
+      PointerScrollEvent event, BoxConstraints constraints) {
+    final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+
+    final double scrollDelta = event.scrollDelta.dy;
+    if (scrollDelta == 0) return;
+
+    final double zoomFactor = scrollDelta > 0 ? 0.9 : 1.1;
+    final double currentScale = _photoViewController.scale ?? 1.0;
+    final Offset currentPosition = _photoViewController.position;
+
+    final minScale = 0.8;
+    final maxScale = 5.0;
+    final double newScale =
+        (currentScale * zoomFactor).clamp(minScale, maxScale);
+
+    if ((newScale - currentScale).abs() < 0.0001) return;
+
+    final Size size = renderBox.size;
+    final Offset viewportCenter = size.center(Offset.zero);
+    final Offset cursorPosition = event.localPosition - viewportCenter;
+
+    final double scaleRatio = newScale / currentScale;
+    final Offset newPosition =
+        cursorPosition * (1 - scaleRatio) + currentPosition * scaleRatio;
+
+    _photoViewController.scale = newScale;
+    _photoViewController.position = newPosition;
+  }
+
   // ========== 绘制模式方法 ==========
 
   Color _getTypeColor() {
@@ -173,7 +206,6 @@ class _ImpactPointPickerScreenState
     }
   }
 
-  /// 生成圆形路径点
   List<List<double>> _generateCirclePoints(
       Offset center, double radius, int segments) {
     final points = <List<double>>[];
@@ -186,7 +218,6 @@ class _ImpactPointPickerScreenState
     return points;
   }
 
-  /// 生成方块路径点
   List<List<double>> _generateSquarePoints(Offset center, double halfSize) {
     final left = (center.dx - halfSize).clamp(0.0, 1.0);
     final right = (center.dx + halfSize).clamp(0.0, 1.0);
@@ -201,7 +232,6 @@ class _ImpactPointPickerScreenState
     ];
   }
 
-  /// 放置形状（只能有一个）
   void _placeShapeAt(Offset center) {
     if (_selectedShapeType == 0) return;
 
@@ -220,7 +250,101 @@ class _ImpactPointPickerScreenState
         'isEraser': false,
         'isShape': true,
         'shapeType': _selectedShapeType,
+        'center': [center.dx, center.dy], // 存储中心点以便缩放
       });
+    });
+  }
+
+  void _updateActiveShapeSize() {
+    final shapeIndex = _drawingStrokes.indexWhere((s) => s['isShape'] == true);
+    if (shapeIndex == -1) return;
+
+    final shape = _drawingStrokes[shapeIndex];
+    
+    // 获取或计算中心点
+    Offset center;
+    if (shape['center'] != null) {
+      final centerList = shape['center'] as List;
+      center = Offset(
+          (centerList[0] as num).toDouble(), (centerList[1] as num).toDouble());
+    } else {
+      final pointsData = shape['points'] as List;
+      if (pointsData.isEmpty) return;
+      
+      final points = pointsData.map((p) {
+        final pointList = p as List;
+        return Offset((pointList[0] as num).toDouble(), (pointList[1] as num).toDouble());
+      }).toList();
+
+      double minX = points.first.dx;
+      double maxX = points.first.dx;
+      double minY = points.first.dy;
+      double maxY = points.first.dy;
+
+      for (var p in points) {
+        if (p.dx < minX) minX = p.dx;
+        if (p.dx > maxX) maxX = p.dx;
+        if (p.dy < minY) minY = p.dy;
+        if (p.dy > maxY) maxY = p.dy;
+      }
+      
+      center = Offset((minX + maxX) / 2, (minY + maxY) / 2);
+      shape['center'] = [center.dx, center.dy];
+    }
+
+    final type = shape['shapeType'] as int;
+    
+    // 只在当前选择的工具类型与形状类型匹配时才更新
+    // if (type != _selectedShapeType) return; // 移除类型检查，允许统一调整
+    // 但通常用户是在调整选中的工具大小。如果当前选中工具是圆，但调整的是方块（如果允许选中状态不一致的话），
+    // 由于我们分离了自动转换，这里应该总是更新为当前 Slider 的值。
+    // 然而，Slider 是绑定到 _shapeSize 的。所以无论如何，直接用 _shapeSize 更新当前形状。
+
+    List<List<double>> points;
+    if (type == 1) {
+      points = _generateCirclePoints(center, _shapeSize, 32);
+    } else {
+      points = _generateSquarePoints(center, _shapeSize);
+    }
+
+    setState(() {
+      shape['points'] = points;
+    });
+  }
+
+  void _convertExistingShapeTo(int targetType) {
+    if (targetType < 1) return;
+
+    final shapeIndex = _drawingStrokes.indexWhere((s) => s['isShape'] == true);
+    if (shapeIndex == -1) return;
+
+    final shape = _drawingStrokes[shapeIndex];
+    
+    Offset center;
+    if (shape['center'] != null) {
+      final centerList = shape['center'] as List;
+      center = Offset(
+          (centerList[0] as num).toDouble(), (centerList[1] as num).toDouble());
+    } else {
+      _updateActiveShapeSize(); 
+      if (shape['center'] != null) {
+        final centerList = shape['center'] as List;
+        center = Offset((centerList[0] as num).toDouble(), (centerList[1] as num).toDouble());
+      } else {
+        return;
+      }
+    }
+
+    List<List<double>> points;
+    if (targetType == 1) {
+      points = _generateCirclePoints(center, _shapeSize, 32);
+    } else {
+      points = _generateSquarePoints(center, _shapeSize);
+    }
+
+    setState(() {
+      shape['shapeType'] = targetType;
+      shape['points'] = points;
     });
   }
 
@@ -249,7 +373,6 @@ class _ImpactPointPickerScreenState
         centerTitle: true,
         actions: [
           if (widget.isDrawingMode) ...[
-            // 撤销按钮
             if (_drawingStrokes.isNotEmpty)
               IconButton(
                 onPressed: () {
@@ -258,7 +381,6 @@ class _ImpactPointPickerScreenState
                 icon: const Icon(Icons.undo),
                 tooltip: '撤销',
               ),
-            // 清除按钮
             IconButton(
               onPressed: _drawingStrokes.isEmpty
                   ? null
@@ -290,9 +412,46 @@ class _ImpactPointPickerScreenState
                 final imageBounds = _getImageBounds(
                     constraints.maxWidth, constraints.maxHeight);
 
-                return widget.isDrawingMode
-                    ? _buildDrawingView(constraints, imageBounds)
-                    : _buildPickerView(constraints, imageBounds);
+                return Listener(
+                  onPointerSignal: (event) {
+                    if (event is PointerScrollEvent) {
+                      _handleMouseWheelZoom(event, constraints);
+                    }
+                  },
+                  child: PhotoView.customChild(
+                    controller: _photoViewController,
+                    backgroundDecoration: const BoxDecoration(color: Colors.black),
+                    minScale: PhotoViewComputedScale.contained * 0.8,
+                    maxScale: PhotoViewComputedScale.covered * 3,
+                    initialScale: PhotoViewComputedScale.contained,
+                    child: StreamBuilder<PhotoViewControllerValue>(
+                      stream: _photoViewController.outputStateStream,
+                      builder: (context, snapshot) {
+                        final double scale = snapshot.data?.scale ?? 1.0;
+                        final double markerScale = 1.0 / scale;
+
+                        return Stack(
+                          key: _stackKey,
+                          children: [
+                            GestureDetector(
+                                onTapUp: widget.isDrawingMode ? null : _handleTap,
+                                child: Image.asset(
+                                  _layer!.assetPath,
+                                  width: constraints.maxWidth,
+                                  height: constraints.maxHeight,
+                                  fit: BoxFit.contain,
+                                )),
+                            if (widget.isDrawingMode)
+                              ..._buildDrawingLayers(constraints, imageBounds)
+                            else
+                              ..._buildPickerLayers(imageBounds, markerScale),
+                            
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                );
               },
             ),
           ),
@@ -304,46 +463,19 @@ class _ImpactPointPickerScreenState
     );
   }
 
-  // ========== 选择模式视图 ==========
+  // 选择模式视图
 
-  Widget _buildPickerView(
-    BoxConstraints constraints,
+  List<Widget> _buildPickerLayers(
     ({double width, double height, double offsetX, double offsetY}) imageBounds,
+    double markerScale,
   ) {
-    return PhotoView.customChild(
-      controller: _photoViewController,
-      backgroundDecoration: const BoxDecoration(color: Colors.black),
-      minScale: PhotoViewComputedScale.contained * 0.8,
-      maxScale: PhotoViewComputedScale.covered * 3,
-      initialScale: PhotoViewComputedScale.contained,
-      child: StreamBuilder<PhotoViewControllerValue>(
-        stream: _photoViewController.outputStateStream,
-        builder: (context, snapshot) {
-          final double scale = snapshot.data?.scale ?? 1.0;
-          final double markerScale = 1.0 / scale;
-
-          return GestureDetector(
-            onTapUp: _handleTap,
-            child: Stack(
-              key: _stackKey,
-              children: [
-                Image.asset(
-                  _layer!.assetPath,
-                  width: constraints.maxWidth,
-                  height: constraints.maxHeight,
-                  fit: BoxFit.contain,
-                ),
-                _buildThrowPointMarker(imageBounds, markerScale),
-                if (_selectedX != null && _selectedY != null)
-                  _buildConnectionLine(imageBounds),
-                if (_selectedX != null && _selectedY != null)
-                  _buildImpactMarker(imageBounds, markerScale),
-              ],
-            ),
-          );
-        },
-      ),
-    );
+    return [
+      _buildThrowPointMarker(imageBounds, markerScale),
+      if (_selectedX != null && _selectedY != null)
+        _buildConnectionLine(imageBounds),
+      if (_selectedX != null && _selectedY != null)
+        _buildImpactMarker(imageBounds, markerScale),
+    ];
   }
 
   Widget _buildPickerFooter() {
@@ -400,118 +532,106 @@ class _ImpactPointPickerScreenState
     );
   }
 
-  // ========== 绘制模式视图 ==========
+  // 绘制模式视图
 
-  Widget _buildDrawingView(
+  List<Widget> _buildDrawingLayers(
     BoxConstraints constraints,
     ({double width, double height, double offsetX, double offsetY}) imageBounds,
   ) {
     final color = _getTypeColor();
 
-    return Stack(
-      key: _stackKey,
-      children: [
-        // 地图图片
-        Image.asset(
-          _layer!.assetPath,
-          width: constraints.maxWidth,
-          height: constraints.maxHeight,
-          fit: BoxFit.contain,
-        ),
-        // 爆点标记
-        if (widget.initialX != null && widget.initialY != null)
-          _buildImpactMarkerForDrawing(imageBounds),
-        // 绘制画布
-        Positioned.fill(
-          child: GestureDetector(
-            onTapDown: (details) {
-              final localPos = details.localPosition;
-              final ratio = Offset(
-                (localPos.dx - imageBounds.offsetX) / imageBounds.width,
-                (localPos.dy - imageBounds.offsetY) / imageBounds.height,
-              );
-              if (ratio.dx >= 0 &&
-                  ratio.dx <= 1 &&
-                  ratio.dy >= 0 &&
-                  ratio.dy <= 1) {
-                if (_selectedShapeType > 0) {
-                  _placeShapeAt(ratio);
-                } else {
-                  setState(() => _currentStroke = [ratio]);
-                }
-              }
-            },
-            onTapUp: (_) {
-              if (_selectedShapeType > 0) return;
-              if (_currentStroke.isNotEmpty) {
-                setState(() {
-                  _drawingStrokes.add({
-                    'points':
-                        _currentStroke.map((o) => [o.dx, o.dy]).toList(),
-                    'strokeWidth': _brushSize,
-                    'isEraser': _isEraserMode,
-                  });
-                  _currentStroke = [];
-                });
-              }
-            },
-            onPanStart: (details) {
-              if (_selectedShapeType > 0) return;
-              final localPos = details.localPosition;
-              final ratio = Offset(
-                (localPos.dx - imageBounds.offsetX) / imageBounds.width,
-                (localPos.dy - imageBounds.offsetY) / imageBounds.height,
-              );
-              if (ratio.dx >= 0 &&
-                  ratio.dx <= 1 &&
-                  ratio.dy >= 0 &&
-                  ratio.dy <= 1) {
+    return [
+      // 爆点标记
+      if (widget.initialX != null && widget.initialY != null)
+        _buildImpactMarkerForDrawing(imageBounds),
+      // 绘制画布
+      Positioned.fill(
+        child: GestureDetector(
+          onTapDown: (details) {
+            final localPos = details.localPosition;
+            final ratio = Offset(
+              (localPos.dx - imageBounds.offsetX) / imageBounds.width,
+              (localPos.dy - imageBounds.offsetY) / imageBounds.height,
+            );
+            if (ratio.dx >= 0 &&
+                ratio.dx <= 1 &&
+                ratio.dy >= 0 &&
+                ratio.dy <= 1) {
+              if (_selectedShapeType > 0) {
+                _placeShapeAt(ratio);
+              } else {
                 setState(() => _currentStroke = [ratio]);
               }
-            },
-            onPanUpdate: (details) {
-              if (_selectedShapeType > 0) return;
-              final localPos = details.localPosition;
-              final ratio = Offset(
-                (localPos.dx - imageBounds.offsetX) / imageBounds.width,
-                (localPos.dy - imageBounds.offsetY) / imageBounds.height,
-              );
-              if (ratio.dx >= 0 &&
-                  ratio.dx <= 1 &&
-                  ratio.dy >= 0 &&
-                  ratio.dy <= 1) {
-                setState(() => _currentStroke.add(ratio));
-              }
-            },
-            onPanEnd: (_) {
-              if (_selectedShapeType > 0) return;
-              if (_currentStroke.isNotEmpty) {
-                setState(() {
-                  _drawingStrokes.add({
-                    'points':
-                        _currentStroke.map((o) => [o.dx, o.dy]).toList(),
-                    'strokeWidth': _brushSize,
-                    'isEraser': _isEraserMode,
-                  });
-                  _currentStroke = [];
+            }
+          },
+          onTapUp: (_) {
+            if (_selectedShapeType > 0) return;
+            if (_currentStroke.isNotEmpty) {
+              setState(() {
+                _drawingStrokes.add({
+                  'points': _currentStroke.map((o) => [o.dx, o.dy]).toList(),
+                  'strokeWidth': _brushSize,
+                  'isEraser': _isEraserMode,
                 });
-              }
-            },
-            child: CustomPaint(
-              painter: _ImpactAreaPainter(
-                strokes: _drawingStrokes,
-                currentStroke: _currentStroke,
-                currentStrokeWidth: _brushSize,
-                isCurrentEraser: _isEraserMode,
-                color: color,
-                imageBounds: imageBounds,
-                opacity: 0.6,
-              ),
+                _currentStroke = [];
+              });
+            }
+          },
+          onPanStart: (details) {
+            if (_selectedShapeType > 0) return;
+            final localPos = details.localPosition;
+            final ratio = Offset(
+              (localPos.dx - imageBounds.offsetX) / imageBounds.width,
+              (localPos.dy - imageBounds.offsetY) / imageBounds.height,
+            );
+            if (ratio.dx >= 0 &&
+                ratio.dx <= 1 &&
+                ratio.dy >= 0 &&
+                ratio.dy <= 1) {
+              setState(() => _currentStroke = [ratio]);
+            }
+          },
+          onPanUpdate: (details) {
+            if (_selectedShapeType > 0) return;
+            final localPos = details.localPosition;
+            final ratio = Offset(
+              (localPos.dx - imageBounds.offsetX) / imageBounds.width,
+              (localPos.dy - imageBounds.offsetY) / imageBounds.height,
+            );
+            if (ratio.dx >= 0 &&
+                ratio.dx <= 1 &&
+                ratio.dy >= 0 &&
+                ratio.dy <= 1) {
+              setState(() => _currentStroke.add(ratio));
+            }
+          },
+          onPanEnd: (_) {
+            if (_selectedShapeType > 0) return;
+            if (_currentStroke.isNotEmpty) {
+              setState(() {
+                _drawingStrokes.add({
+                  'points': _currentStroke.map((o) => [o.dx, o.dy]).toList(),
+                  'strokeWidth': _brushSize,
+                  'isEraser': _isEraserMode,
+                });
+                _currentStroke = [];
+              });
+            }
+          },
+          child: CustomPaint(
+            painter: _ImpactAreaPainter(
+              strokes: _drawingStrokes,
+              currentStroke: _currentStroke,
+              currentStrokeWidth: _brushSize,
+              isCurrentEraser: _isEraserMode,
+              color: color,
+              imageBounds: imageBounds,
+              opacity: 0.6,
             ),
           ),
         ),
-      ],
-    );
+      ),
+    ];
   }
 
   Widget _buildImpactMarkerForDrawing(
@@ -580,10 +700,13 @@ class _ImpactPointPickerScreenState
                 label: "圆形",
                 isSelected: _selectedShapeType == 1,
                 color: color,
-                onTap: () => setState(() {
-                  _selectedShapeType = 1;
-                  _isEraserMode = false;
-                }),
+                onTap: () {
+                  setState(() {
+                    _selectedShapeType = 1;
+                    _isEraserMode = false;
+                  });
+                  _convertExistingShapeTo(1);
+                },
               ),
               const SizedBox(width: 6),
               _buildToolButton(
@@ -591,10 +714,13 @@ class _ImpactPointPickerScreenState
                 label: "方块",
                 isSelected: _selectedShapeType == 2,
                 color: color,
-                onTap: () => setState(() {
-                  _selectedShapeType = 2;
-                  _isEraserMode = false;
-                }),
+                onTap: () {
+                  setState(() {
+                    _selectedShapeType = 2;
+                    _isEraserMode = false;
+                  });
+                  _convertExistingShapeTo(2);
+                },
               ),
             ],
           ),
@@ -624,8 +750,10 @@ class _ImpactPointPickerScreenState
                               min: 0.02,
                               max: 0.15,
                               activeColor: color,
-                              onChanged: (val) =>
-                                  setState(() => _shapeSize = val),
+                              onChanged: (val) {
+                                setState(() => _shapeSize = val);
+                                _updateActiveShapeSize();
+                              },
                             )
                           : Slider(
                               value: _brushSize,
@@ -684,7 +812,9 @@ class _ImpactPointPickerScreenState
     );
   }
 
-  // ========== 选择模式标记 ==========
+
+
+  // 选择模式标记
 
   Widget _buildThrowPointMarker(
       ({double width, double height, double offsetX, double offsetY})

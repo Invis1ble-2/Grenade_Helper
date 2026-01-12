@@ -3358,7 +3358,8 @@ class _ImpactAreaPainter extends CustomPainter {
           (stroke['points'] as List).map((p) => Offset(p[0], p[1])).toList();
       final width = (stroke['strokeWidth'] as num).toDouble();
       final isEraser = stroke['isEraser'] as bool? ?? false;
-      _drawStroke(canvas, points, width, isEraser);
+      final isShape = stroke['isShape'] as bool? ?? false;
+      _drawStroke(canvas, points, width, isEraser, isShape: isShape);
     }
 
     if (currentStroke.isNotEmpty) {
@@ -3368,8 +3369,8 @@ class _ImpactAreaPainter extends CustomPainter {
     canvas.restore();
   }
 
-  void _drawStroke(
-      Canvas canvas, List<Offset> points, double width, bool isEraser) {
+  void _drawStroke(Canvas canvas, List<Offset> points, double width,
+      bool isEraser, {bool isShape = false}) {
     if (points.isEmpty) return;
 
     final paint = Paint()
@@ -3379,7 +3380,7 @@ class _ImpactAreaPainter extends CustomPainter {
       ..strokeWidth = width
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
-      ..style = PaintingStyle.stroke;
+      ..style = isShape && !isEraser ? PaintingStyle.fill : PaintingStyle.stroke;
 
     if (isEraser) {
       paint.blendMode = BlendMode.clear;
@@ -3397,6 +3398,11 @@ class _ImpactAreaPainter extends CustomPainter {
     for (int i = 1; i < points.length; i++) {
       final p = _limitPoint(points[i]);
       path.lineTo(p.dx, p.dy);
+    }
+    
+    // 如果是填充模式，需要闭合路径
+    if (isShape && !isEraser) {
+      path.close();
     }
 
     canvas.drawPath(path, paint);
