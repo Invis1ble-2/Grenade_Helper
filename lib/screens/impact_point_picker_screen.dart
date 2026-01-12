@@ -50,6 +50,7 @@ class _ImpactPointPickerScreenState
   MapLayer? _layer;
 
   // 绘制状态
+  bool _isPenMode = false; // 默认移动模式
   bool _isEraserMode = false;
   double _brushSize = 15.0;
   double _shapeSize = 0.05;
@@ -356,10 +357,14 @@ class _ImpactPointPickerScreenState
       );
     }
 
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final bgColor = isDark ? const Color(0xFF1A1D21) : Colors.grey[100];
+
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: isDark ? Colors.black : Colors.grey[200],
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1A1D21),
+        backgroundColor: bgColor,
         leading: IconButton(
           icon: const Icon(Icons.close),
           onPressed: () => Navigator.pop(context),
@@ -391,8 +396,8 @@ class _ImpactPointPickerScreenState
                 widget.isDrawingMode ? _confirmDrawing : _confirmSelection,
             child: Text(
               widget.isDrawingMode ? '保存' : '确认',
-              style: const TextStyle(
-                color: Colors.greenAccent,
+              style: TextStyle(
+                color: theme.colorScheme.primary,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -474,10 +479,16 @@ class _ImpactPointPickerScreenState
   }
 
   Widget _buildPickerFooter() {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final bgColor = isDark ? const Color(0xFF1A1D21) : Colors.grey[100];
+    final textColor = isDark ? Colors.white70 : Colors.black54;
+    final markerColor = isDark ? Colors.white : Colors.black87;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
-      color: const Color(0xFF1A1D21),
+      color: bgColor,
       child: Column(
         children: [
           Row(
@@ -488,13 +499,13 @@ class _ImpactPointPickerScreenState
                 height: 12,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 2),
+                  border: Border.all(color: markerColor, width: 2),
                 ),
               ),
               const SizedBox(width: 8),
-              const Text(
+              Text(
                 '投掷点',
-                style: TextStyle(color: Colors.white70, fontSize: 12),
+                style: TextStyle(color: textColor, fontSize: 12),
               ),
               const SizedBox(width: 24),
               Container(
@@ -508,9 +519,9 @@ class _ImpactPointPickerScreenState
                     size: 8, color: Colors.purpleAccent),
               ),
               const SizedBox(width: 8),
-              const Text(
+              Text(
                 '爆点',
-                style: TextStyle(color: Colors.white70, fontSize: 12),
+                style: TextStyle(color: textColor, fontSize: 12),
               ),
             ],
           ),
@@ -518,7 +529,7 @@ class _ImpactPointPickerScreenState
           Text(
             _selectedX != null ? '已选择爆点，点击确认保存' : '💡 点击地图任意位置设置爆点',
             style: TextStyle(
-              color: _selectedX != null ? Colors.greenAccent : Colors.grey,
+              color: _selectedX != null ? theme.colorScheme.primary : Colors.grey,
               fontSize: 13,
             ),
           ),
@@ -539,89 +550,93 @@ class _ImpactPointPickerScreenState
       // 爆点
       if (widget.initialX != null && widget.initialY != null)
         _buildImpactMarkerForDrawing(imageBounds),
-      // 画布
+      // 画布 - 移动模式时忽略绘图事件
       Positioned.fill(
-        child: GestureDetector(
-          onTapDown: (details) {
-            final localPos = details.localPosition;
-            final ratio = Offset(
-              (localPos.dx - imageBounds.offsetX) / imageBounds.width,
-              (localPos.dy - imageBounds.offsetY) / imageBounds.height,
-            );
-            if (ratio.dx >= 0 &&
-                ratio.dx <= 1 &&
-                ratio.dy >= 0 &&
-                ratio.dy <= 1) {
-              if (_selectedShapeType > 0) {
-                _placeShapeAt(ratio);
-              } else {
+        child: IgnorePointer(
+          ignoring: !_isPenMode,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapDown: (details) {
+              final localPos = details.localPosition;
+              final ratio = Offset(
+                (localPos.dx - imageBounds.offsetX) / imageBounds.width,
+                (localPos.dy - imageBounds.offsetY) / imageBounds.height,
+              );
+              if (ratio.dx >= 0 &&
+                  ratio.dx <= 1 &&
+                  ratio.dy >= 0 &&
+                  ratio.dy <= 1) {
+                if (_selectedShapeType > 0) {
+                  _placeShapeAt(ratio);
+                } else {
+                  setState(() => _currentStroke = [ratio]);
+                }
+              }
+            },
+            onTapUp: (_) {
+              if (_selectedShapeType > 0) return;
+              if (_currentStroke.isNotEmpty) {
+                setState(() {
+                  _drawingStrokes.add({
+                    'points': _currentStroke.map((o) => [o.dx, o.dy]).toList(),
+                    'strokeWidth': _brushSize,
+                    'isEraser': _isEraserMode,
+                  });
+                  _currentStroke = [];
+                });
+              }
+            },
+            onPanStart: (details) {
+              if (_selectedShapeType > 0) return;
+              final localPos = details.localPosition;
+              final ratio = Offset(
+                (localPos.dx - imageBounds.offsetX) / imageBounds.width,
+                (localPos.dy - imageBounds.offsetY) / imageBounds.height,
+              );
+              if (ratio.dx >= 0 &&
+                  ratio.dx <= 1 &&
+                  ratio.dy >= 0 &&
+                  ratio.dy <= 1) {
                 setState(() => _currentStroke = [ratio]);
               }
-            }
-          },
-          onTapUp: (_) {
-            if (_selectedShapeType > 0) return;
-            if (_currentStroke.isNotEmpty) {
-              setState(() {
-                _drawingStrokes.add({
-                  'points': _currentStroke.map((o) => [o.dx, o.dy]).toList(),
-                  'strokeWidth': _brushSize,
-                  'isEraser': _isEraserMode,
+            },
+            onPanUpdate: (details) {
+              if (_selectedShapeType > 0) return;
+              final localPos = details.localPosition;
+              final ratio = Offset(
+                (localPos.dx - imageBounds.offsetX) / imageBounds.width,
+                (localPos.dy - imageBounds.offsetY) / imageBounds.height,
+              );
+              if (ratio.dx >= 0 &&
+                  ratio.dx <= 1 &&
+                  ratio.dy >= 0 &&
+                  ratio.dy <= 1) {
+                setState(() => _currentStroke.add(ratio));
+              }
+            },
+            onPanEnd: (_) {
+              if (_selectedShapeType > 0) return;
+              if (_currentStroke.isNotEmpty) {
+                setState(() {
+                  _drawingStrokes.add({
+                    'points': _currentStroke.map((o) => [o.dx, o.dy]).toList(),
+                    'strokeWidth': _brushSize,
+                    'isEraser': _isEraserMode,
+                  });
+                  _currentStroke = [];
                 });
-                _currentStroke = [];
-              });
-            }
-          },
-          onPanStart: (details) {
-            if (_selectedShapeType > 0) return;
-            final localPos = details.localPosition;
-            final ratio = Offset(
-              (localPos.dx - imageBounds.offsetX) / imageBounds.width,
-              (localPos.dy - imageBounds.offsetY) / imageBounds.height,
-            );
-            if (ratio.dx >= 0 &&
-                ratio.dx <= 1 &&
-                ratio.dy >= 0 &&
-                ratio.dy <= 1) {
-              setState(() => _currentStroke = [ratio]);
-            }
-          },
-          onPanUpdate: (details) {
-            if (_selectedShapeType > 0) return;
-            final localPos = details.localPosition;
-            final ratio = Offset(
-              (localPos.dx - imageBounds.offsetX) / imageBounds.width,
-              (localPos.dy - imageBounds.offsetY) / imageBounds.height,
-            );
-            if (ratio.dx >= 0 &&
-                ratio.dx <= 1 &&
-                ratio.dy >= 0 &&
-                ratio.dy <= 1) {
-              setState(() => _currentStroke.add(ratio));
-            }
-          },
-          onPanEnd: (_) {
-            if (_selectedShapeType > 0) return;
-            if (_currentStroke.isNotEmpty) {
-              setState(() {
-                _drawingStrokes.add({
-                  'points': _currentStroke.map((o) => [o.dx, o.dy]).toList(),
-                  'strokeWidth': _brushSize,
-                  'isEraser': _isEraserMode,
-                });
-                _currentStroke = [];
-              });
-            }
-          },
-          child: CustomPaint(
-            painter: _ImpactAreaPainter(
-              strokes: _drawingStrokes,
-              currentStroke: _currentStroke,
-              currentStrokeWidth: _brushSize,
-              isCurrentEraser: _isEraserMode,
-              color: color,
-              imageBounds: imageBounds,
-              opacity: 0.6,
+              }
+            },
+            child: CustomPaint(
+              painter: _ImpactAreaPainter(
+                strokes: _drawingStrokes,
+                currentStroke: _currentStroke,
+                currentStrokeWidth: _brushSize,
+                isCurrentEraser: _isEraserMode,
+                color: color,
+                imageBounds: imageBounds,
+                opacity: 0.6,
+              ),
             ),
           ),
         ),
@@ -658,112 +673,134 @@ class _ImpactPointPickerScreenState
 
   Widget _buildDrawingToolbar() {
     final color = _getTypeColor();
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final bgColor = isDark ? const Color(0xFF1A1D21) : Colors.grey[100];
+    final textColor = isDark ? Colors.grey : Colors.grey[600];
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      color: const Color(0xFF1A1D21),
+      color: bgColor,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // 工具栏
-          Row(
-            children: [
-              _buildToolButton(
-                icon: Icons.brush,
-                label: "笔刷",
-                isSelected: _selectedShapeType == 0 && !_isEraserMode,
-                color: color,
-                onTap: () => setState(() {
-                  _selectedShapeType = 0;
-                  _isEraserMode = false;
-                }),
-              ),
-              const SizedBox(width: 6),
-              _buildToolButton(
-                icon: Icons.auto_fix_high,
-                label: "橡皮",
-                isSelected: _isEraserMode,
-                color: Colors.grey,
-                onTap: () => setState(() {
-                  _selectedShapeType = 0;
-                  _isEraserMode = true;
-                }),
-              ),
-              const SizedBox(width: 6),
-              _buildToolButton(
-                icon: Icons.circle,
-                label: "圆形",
-                isSelected: _selectedShapeType == 1,
-                color: color,
-                onTap: () {
-                  setState(() {
-                    _selectedShapeType = 1;
-                    _isEraserMode = false;
-                  });
-                  _convertExistingShapeTo(1);
-                },
-              ),
-              const SizedBox(width: 6),
-              _buildToolButton(
-                icon: Icons.square,
-                label: "方块",
-                isSelected: _selectedShapeType == 2,
-                color: color,
-                onTap: () {
-                  setState(() {
-                    _selectedShapeType = 2;
-                    _isEraserMode = false;
-                  });
-                  _convertExistingShapeTo(2);
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          // 大小滑块
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _selectedShapeType > 0
-                          ? "形状大小: ${(_shapeSize * 100).round()}%"
-                          : "笔刷大小: ${_brushSize.round()}",
-                      style: const TextStyle(fontSize: 11, color: Colors.grey),
-                    ),
-                    SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        trackHeight: 4,
-                        thumbShape:
-                            const RoundSliderThumbShape(enabledThumbRadius: 8),
-                      ),
-                      child: _selectedShapeType > 0
-                          ? Slider(
-                              value: _shapeSize,
-                              min: 0.02,
-                              max: 0.15,
-                              activeColor: color,
-                              onChanged: (val) {
-                                setState(() => _shapeSize = val);
-                                _updateActiveShapeSize();
-                              },
-                            )
-                          : Slider(
-                              value: _brushSize,
-                              min: 5,
-                              max: 30,
-                              activeColor: _isEraserMode ? Colors.grey : color,
-                              onChanged: (val) =>
-                                  setState(() => _brushSize = val),
-                            ),
-                    ),
-                  ],
+          // 模式切换 + 工具栏
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                // 移动/绘制模式切换
+                _buildToolButton(
+                  icon: Icons.pan_tool,
+                  label: "移动",
+                  isSelected: !_isPenMode,
+                  color: theme.colorScheme.primary,
+                  onTap: () => setState(() => _isPenMode = false),
                 ),
-              ),
-            ],
+                const SizedBox(width: 6),
+                _buildToolButton(
+                  icon: Icons.brush,
+                  label: "笔刷",
+                  isSelected: _isPenMode && _selectedShapeType == 0 && !_isEraserMode,
+                  color: color,
+                  onTap: () => setState(() {
+                    _isPenMode = true;
+                    _selectedShapeType = 0;
+                    _isEraserMode = false;
+                  }),
+                ),
+                const SizedBox(width: 6),
+                _buildToolButton(
+                  icon: Icons.auto_fix_high,
+                  label: "橡皮",
+                  isSelected: _isPenMode && _isEraserMode,
+                  color: Colors.grey,
+                  onTap: () => setState(() {
+                    _isPenMode = true;
+                    _selectedShapeType = 0;
+                    _isEraserMode = true;
+                  }),
+                ),
+                const SizedBox(width: 6),
+                _buildToolButton(
+                  icon: Icons.circle,
+                  label: "圆形",
+                  isSelected: _isPenMode && _selectedShapeType == 1,
+                  color: color,
+                  onTap: () {
+                    setState(() {
+                      _isPenMode = true;
+                      _selectedShapeType = 1;
+                      _isEraserMode = false;
+                    });
+                    _convertExistingShapeTo(1);
+                  },
+                ),
+                const SizedBox(width: 6),
+                _buildToolButton(
+                  icon: Icons.square,
+                  label: "方块",
+                  isSelected: _isPenMode && _selectedShapeType == 2,
+                  color: color,
+                  onTap: () {
+                    setState(() {
+                      _isPenMode = true;
+                      _selectedShapeType = 2;
+                      _isEraserMode = false;
+                    });
+                    _convertExistingShapeTo(2);
+                  },
+                ),
+              ],
+            ),
           ),
+          // 大小滑块 - 只在绘制模式时显示
+          if (_isPenMode) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _selectedShapeType > 0
+                            ? "形状大小: ${(_shapeSize * 100).round()}%"
+                            : "笔刷大小: ${_brushSize.round()}",
+                        style: TextStyle(fontSize: 11, color: textColor),
+                      ),
+                      SliderTheme(
+                        data: SliderTheme.of(context).copyWith(
+                          trackHeight: 4,
+                          thumbShape:
+                              const RoundSliderThumbShape(enabledThumbRadius: 8),
+                        ),
+                        child: _selectedShapeType > 0
+                            ? Slider(
+                                value: _shapeSize,
+                                min: 0.02,
+                                max: 0.15,
+                                activeColor: color,
+                                onChanged: (val) {
+                                  setState(() => _shapeSize = val);
+                                  _updateActiveShapeSize();
+                                },
+                              )
+                            : Slider(
+                                value: _brushSize,
+                                min: 5,
+                                max: 30,
+                                activeColor: _isEraserMode ? Colors.grey : color,
+                                onChanged: (val) =>
+                                    setState(() => _brushSize = val),
+                              ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -776,28 +813,35 @@ class _ImpactPointPickerScreenState
     required Color color,
     required VoidCallback onTap,
   }) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    // 浅色主题下，如果选中色太浅则使用深色版本
+    final displayColor = isSelected 
+        ? (isDark ? color : HSLColor.fromColor(color).withLightness(0.4).toColor())
+        : Colors.grey;
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: isSelected ? color.withValues(alpha: 0.2) : Colors.transparent,
+          color: isSelected ? color.withValues(alpha: 0.15) : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: isSelected ? color : Colors.grey.withValues(alpha: 0.5),
+            color: isSelected ? displayColor : Colors.grey.withValues(alpha: 0.4),
             width: isSelected ? 2 : 1,
           ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 18, color: isSelected ? color : Colors.grey),
+            Icon(icon, size: 16, color: displayColor),
             const SizedBox(width: 4),
             Text(
               label,
               style: TextStyle(
-                fontSize: 12,
-                color: isSelected ? color : Colors.grey,
+                fontSize: 11,
+                color: displayColor,
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
               ),
             ),
