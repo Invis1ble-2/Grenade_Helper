@@ -442,7 +442,7 @@ class _ImpactPointPickerScreenState
                                   fit: BoxFit.contain,
                                 )),
                             if (widget.isDrawingMode)
-                              ..._buildDrawingLayers(constraints, imageBounds)
+                              ..._buildDrawingLayers(constraints, imageBounds, markerScale)
                             else
                               ..._buildPickerLayers(imageBounds, markerScale),
                             
@@ -543,13 +543,14 @@ class _ImpactPointPickerScreenState
   List<Widget> _buildDrawingLayers(
     BoxConstraints constraints,
     ({double width, double height, double offsetX, double offsetY}) imageBounds,
+    double markerScale,
   ) {
     final color = _getTypeColor();
 
     return [
       // 爆点
       if (widget.initialX != null && widget.initialY != null)
-        _buildImpactMarkerForDrawing(imageBounds),
+        _buildImpactMarkerForDrawing(imageBounds, markerScale),
       // 画布 - 移动模式时忽略绘图事件
       Positioned.fill(
         child: IgnorePointer(
@@ -646,6 +647,7 @@ class _ImpactPointPickerScreenState
 
   Widget _buildImpactMarkerForDrawing(
     ({double width, double height, double offsetX, double offsetY}) imageBounds,
+    double markerScale,
   ) {
     const double baseHalfSize = 10.0;
     final left =
@@ -657,15 +659,19 @@ class _ImpactPointPickerScreenState
       left: left,
       top: top,
       child: IgnorePointer(
-        child: Container(
-          width: 20,
-          height: 20,
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.5),
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.purpleAccent, width: 2),
+        child: Transform.scale(
+          scale: markerScale,
+          alignment: Alignment.center,
+          child: Container(
+            width: 20,
+            height: 20,
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.5),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.purpleAccent, width: 2),
+            ),
+            child: const Icon(Icons.close, size: 12, color: Colors.purpleAccent),
           ),
-          child: const Icon(Icons.close, size: 12, color: Colors.purpleAccent),
         ),
       ),
     );
