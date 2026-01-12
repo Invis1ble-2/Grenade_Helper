@@ -2503,20 +2503,29 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                         width: constraints.maxWidth,
                                         height: constraints.maxHeight,
                                         fit: BoxFit.contain),
-                                    // 爆点区域显示（最底层）
-                                    if (_selectedClusterForImpact != null)
-                                      ..._selectedClusterForImpact!.grenades
-                                          .where((g) =>
-                                              g.impactAreaStrokes != null &&
-                                              g.impactAreaStrokes!.isNotEmpty)
-                                          .map((g) => _buildImpactAreaOverlay(
-                                              g, constraints)),
-                                    // 道具点位标记（先渲染，在下层）
-                                    // 缩放 200% 以上时禁用合并，显示完整细节
+                                    // 道具点位标记和所有依赖选中状态的元素
                                     ...grenadesAsync.when(
                                         data: (list) {
                                           final clusterThreshold =
                                               scale >= 2.0 ? 0.008 : 0.02;
+                                          
+                                          // 根据当前筛选结果过滤选中的grenades
+                                          final filteredIds = list.map((g) => g.id).toSet();
+                                          final filteredSelectedGrenades = _selectedClusterForImpact?.grenades
+                                              .where((g) => filteredIds.contains(g.id))
+                                              .toList() ?? [];
+
+                                          final widgets = <Widget>[];
+                                          
+                                          // 爆点区域显示（最底层）
+                                          if (_selectedClusterForImpact != null) {
+                                            widgets.addAll(filteredSelectedGrenades
+                                                .where((g) =>
+                                                    g.impactAreaStrokes != null &&
+                                                    g.impactAreaStrokes!.isNotEmpty)
+                                                .map((g) => _buildImpactAreaOverlay(
+                                                    g, constraints)));
+                                          }
 
                                           if (_isImpactMode) {
                                             // 爆点模式：显示爆点聚合
@@ -2525,14 +2534,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                                     threshold:
                                                         clusterThreshold);
 
-                                            return impactClusters.map((c) =>
+                                            widgets.addAll(impactClusters.map((c) =>
                                                 _buildImpactClusterMarker(
                                                     c,
                                                     constraints,
                                                     isEditMode,
                                                     currentLayer.id,
                                                     markerScale,
-                                                    imageBounds));
+                                                    imageBounds)));
                                           } else {
                                             // 标准模式：显示投掷点聚合
                                             final clusters = clusterGrenades(
@@ -2550,44 +2559,55 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                                                 _selectedClusterForImpact))
                                                         .toList();
 
-                                            return visibleClusters.map((c) =>
+                                            widgets.addAll(visibleClusters.map((c) =>
                                                 _buildClusterMarker(
                                                     c,
                                                     constraints,
                                                     isEditMode,
                                                     currentLayer.id,
                                                     markerScale,
-                                                    imageBounds));
+                                                    imageBounds)));
                                           }
+                                          
+                                          // 爆点连线
+                                          if (_selectedClusterForImpact != null) {
+                                            widgets.addAll(filteredSelectedGrenades
+                                                .where((g) =>
+                                                    g.impactXRatio != null &&
+                                                    g.impactYRatio != null &&
+                                                    g.type != GrenadeType.wallbang)
+                                                .map((g) => _buildConnectionLine(
+                                                    g, markerScale, imageBounds)));
+                                          }
+                                          
+                                          // 标准模式下的爆点标记（选中点位时显示）
+                                          if (!_isImpactMode && _selectedClusterForImpact != null) {
+                                            widgets.addAll(filteredSelectedGrenades
+                                                .where((g) =>
+                                                    g.impactXRatio != null &&
+                                                    g.impactYRatio != null &&
+                                                    g.type != GrenadeType.wallbang)
+                                                .map((g) => _buildImpactMarker(
+                                                    g,
+                                                    constraints,
+                                                    markerScale,
+                                                    imageBounds)));
+                                          }
+                                          
+                                          // 爆点模式下的投掷点标记（选中爆点时显示）
+                                          if (_isImpactMode && _selectedClusterForImpact != null) {
+                                            widgets.addAll(filteredSelectedGrenades
+                                                .map((g) => _buildThrowPointMarker(
+                                                    g,
+                                                    constraints,
+                                                    markerScale,
+                                                    imageBounds)));
+                                          }
+                                          
+                                          return widgets;
                                         },
                                         error: (_, __) => [],
                                         loading: () => []),
-                                    // 爆点连线
-                                    if (_selectedClusterForImpact != null)
-                                      ..._selectedClusterForImpact!.grenades
-                                          .where((g) =>
-                                              g.impactXRatio != null &&
-                                              g.impactYRatio != null &&
-                                              g.type !=
-                                                  GrenadeType
-                                                      .wallbang) // 穿点类型不显示爆点
-                                          .map((g) => _buildConnectionLine(
-                                              g, markerScale, imageBounds)),
-                                    // 标准模式下的爆点标记（选中点位时显示）
-                                    if (!_isImpactMode &&
-                                        _selectedClusterForImpact != null)
-                                      ..._selectedClusterForImpact!.grenades
-                                          .where((g) =>
-                                              g.impactXRatio != null &&
-                                              g.impactYRatio != null &&
-                                              g.type !=
-                                                  GrenadeType
-                                                      .wallbang) // 穿点类型不显示爆点
-                                          .map((g) => _buildImpactMarker(
-                                              g,
-                                              constraints,
-                                              markerScale,
-                                              imageBounds)),
                                     // 移动单个爆点时显示其原始位置及连线（无论在哪种模式）
                                     if (_movingSingleImpactGrenade != null) ...[
                                       if (_movingSingleImpactGrenade!.type !=
@@ -2602,15 +2622,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                           markerScale,
                                           imageBounds),
                                     ],
-                                    // 爆点模式下的投掷点标记（选中爆点时显示）
-                                    if (_isImpactMode &&
-                                        _selectedClusterForImpact != null)
-                                      ..._selectedClusterForImpact!.grenades
-                                          .map((g) => _buildThrowPointMarker(
-                                              g,
-                                              constraints,
-                                              markerScale,
-                                              imageBounds)),
                                     // 移动投掷点时显示原始位置标记（爆点模式）
                                     if (_isImpactMode &&
                                         _movingSingleGrenade != null)
@@ -2862,31 +2873,63 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   /// 构建底部道具列表面板
   Widget _buildClusterListPanel(int layerId, bool isEditMode) {
     final cluster = _selectedClusterForImpact!;
-    final grenades = cluster.grenades;
 
-    return StatefulBuilder(
-      builder: (context, setInnerState) {
-        // 多选删除模式状态
-        bool isMultiSelectMode = false;
-        Set<int> selectedIds = {};
+    return Consumer(
+      builder: (context, ref, _) {
+        final grenadesAsync = ref.watch(_filteredGrenadesProvider(layerId));
+        
+        return grenadesAsync.when(
+          data: (filteredList) {
+            // 根据筛选结果过滤cluster中的grenades
+            final filteredIds = filteredList.map((g) => g.id).toSet();
+            final grenades = cluster.grenades
+                .where((g) => filteredIds.contains(g.id))
+                .toList();
+            
+            // 如果所有道具都被筛选掉，自动关闭面板
+            if (grenades.isEmpty) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) {
+                  _closeClusterPanel();
+                }
+              });
+              return const SizedBox.shrink();
+            }
+            
+            return _buildClusterListPanelContent(
+                grenades, cluster, layerId, isEditMode);
+          },
+          error: (_, __) => const SizedBox.shrink(),
+          loading: () => const SizedBox.shrink(),
+        );
+      },
+    );
+  }
 
-        return Container(
-          height: 220,
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.3),
-                blurRadius: 10,
-                offset: const Offset(0, -2),
-              ),
-            ],
+  /// 构建底部道具列表面板内容
+  Widget _buildClusterListPanelContent(
+      List<Grenade> grenades, GrenadeCluster cluster, int layerId, bool isEditMode) {
+    // 多选删除模式状态
+    bool isMultiSelectMode = false;
+    Set<int> selectedIds = {};
+
+    return Container(
+      height: 220,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.3),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
           ),
-          child: StatefulBuilder(
-            builder: (context, setPanelState) {
-              return Column(
-                children: [
+        ],
+      ),
+      child: StatefulBuilder(
+        builder: (context, setPanelState) {
+          return Column(
+            children: [
                   // 头部
                   Container(
                     padding:
@@ -3317,8 +3360,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             },
           ),
         );
-      },
-    );
   }
 }
 
