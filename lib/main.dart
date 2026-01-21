@@ -8,6 +8,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:window_manager/window_manager.dart';
 import 'models.dart';
+import 'models/tag.dart';
+import 'models/grenade_tag.dart';
+import 'models/map_area.dart';
 import 'providers.dart';
 import 'screens/home_screen.dart';
 import 'screens/overlay_window.dart';
@@ -138,7 +141,11 @@ Future<void> _runMainWindow() async {
       GrenadeSchema,
       GrenadeStepSchema,
       StepMediaSchema,
-      ImportHistorySchema
+      ImportHistorySchema,
+      ImpactGroupSchema,
+      TagSchema,
+      GrenadeTagSchema,
+      MapAreaSchema,
     ],
     directory: dataPath,
   );
@@ -299,10 +306,12 @@ Future<void> _runOverlayWindow(
       GrenadeSchema,
       GrenadeStepSchema,
       StepMediaSchema,
-      ImportHistorySchema
+      ImportHistorySchema,
+      ImpactGroupSchema,
+      TagSchema,
+      GrenadeTagSchema,
     ],
     directory: dataPath,
-    // 使用默认实例名，与主窗口共享数据库
   );
 
   // 初始化状态服务

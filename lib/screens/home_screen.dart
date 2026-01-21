@@ -49,7 +49,7 @@ class GlobalSearchDelegate extends SearchDelegate {
         g.layer.value?.map.loadSync();
         final mapName = g.layer.value?.map.value?.name ?? "";
         return ListTile(
-          leading: const Icon(Icons.ads_click),
+          leading: Icon(_getTypeIcon(g.type)),
           title: Text(g.title),
           subtitle: Text(mapName, style: const TextStyle(color: Colors.orange)),
           onTap: () {
@@ -62,6 +62,23 @@ class GlobalSearchDelegate extends SearchDelegate {
         );
       },
     );
+  }
+
+  IconData _getTypeIcon(int type) {
+    switch (type) {
+      case GrenadeType.smoke:
+        return Icons.cloud;
+      case GrenadeType.flash:
+        return Icons.flash_on;
+      case GrenadeType.molotov:
+        return Icons.local_fire_department;
+      case GrenadeType.he:
+        return Icons.trip_origin;
+      case GrenadeType.wallbang:
+        return Icons.apps; // 穿点使用网格图标表示墙体
+      default:
+        return Icons.circle;
+    }
   }
 }
 

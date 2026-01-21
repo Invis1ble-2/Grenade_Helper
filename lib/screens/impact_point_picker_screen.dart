@@ -638,7 +638,7 @@ class _ImpactPointPickerScreenState
                 isCurrentEraser: _isEraserMode,
                 color: color,
                 imageBounds: imageBounds,
-                opacity: 0.6,
+                opacity: ref.watch(impactAreaOpacityProvider),
               ),
             ),
           ),
