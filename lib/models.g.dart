@@ -1655,83 +1655,93 @@ const GrenadeSchema = CollectionSchema(
       name: r'createdAt',
       type: IsarType.dateTime,
     ),
-    r'hasLocalEdits': PropertySchema(
+    r'description': PropertySchema(
       id: 2,
+      name: r'description',
+      type: IsarType.string,
+    ),
+    r'hasLocalEdits': PropertySchema(
+      id: 3,
       name: r'hasLocalEdits',
       type: IsarType.bool,
     ),
     r'impactAreaStrokes': PropertySchema(
-      id: 3,
+      id: 4,
       name: r'impactAreaStrokes',
       type: IsarType.string,
     ),
+    r'impactGroupId': PropertySchema(
+      id: 5,
+      name: r'impactGroupId',
+      type: IsarType.long,
+    ),
     r'impactXRatio': PropertySchema(
-      id: 4,
+      id: 6,
       name: r'impactXRatio',
       type: IsarType.double,
     ),
     r'impactYRatio': PropertySchema(
-      id: 5,
+      id: 7,
       name: r'impactYRatio',
       type: IsarType.double,
     ),
     r'isFavorite': PropertySchema(
-      id: 6,
+      id: 8,
       name: r'isFavorite',
       type: IsarType.bool,
     ),
     r'isImported': PropertySchema(
-      id: 7,
+      id: 9,
       name: r'isImported',
       type: IsarType.bool,
     ),
     r'isNewImport': PropertySchema(
-      id: 8,
+      id: 10,
       name: r'isNewImport',
       type: IsarType.bool,
     ),
     r'sourceNote': PropertySchema(
-      id: 9,
+      id: 11,
       name: r'sourceNote',
       type: IsarType.string,
     ),
     r'sourceUrl': PropertySchema(
-      id: 10,
+      id: 12,
       name: r'sourceUrl',
       type: IsarType.string,
     ),
     r'team': PropertySchema(
-      id: 11,
+      id: 13,
       name: r'team',
       type: IsarType.long,
     ),
     r'title': PropertySchema(
-      id: 12,
+      id: 14,
       name: r'title',
       type: IsarType.string,
     ),
     r'type': PropertySchema(
-      id: 13,
+      id: 15,
       name: r'type',
       type: IsarType.long,
     ),
     r'uniqueId': PropertySchema(
-      id: 14,
+      id: 16,
       name: r'uniqueId',
       type: IsarType.string,
     ),
     r'updatedAt': PropertySchema(
-      id: 15,
+      id: 17,
       name: r'updatedAt',
       type: IsarType.dateTime,
     ),
     r'xRatio': PropertySchema(
-      id: 16,
+      id: 18,
       name: r'xRatio',
       type: IsarType.double,
     ),
     r'yRatio': PropertySchema(
-      id: 17,
+      id: 19,
       name: r'yRatio',
       type: IsarType.double,
     )
@@ -1791,6 +1801,12 @@ int _grenadeEstimateSize(
     }
   }
   {
+    final value = object.description;
+    if (value != null) {
+      bytesCount += 3 + value.length * 3;
+    }
+  }
+  {
     final value = object.impactAreaStrokes;
     if (value != null) {
       bytesCount += 3 + value.length * 3;
@@ -1826,22 +1842,24 @@ void _grenadeSerialize(
 ) {
   writer.writeString(offsets[0], object.author);
   writer.writeDateTime(offsets[1], object.createdAt);
-  writer.writeBool(offsets[2], object.hasLocalEdits);
-  writer.writeString(offsets[3], object.impactAreaStrokes);
-  writer.writeDouble(offsets[4], object.impactXRatio);
-  writer.writeDouble(offsets[5], object.impactYRatio);
-  writer.writeBool(offsets[6], object.isFavorite);
-  writer.writeBool(offsets[7], object.isImported);
-  writer.writeBool(offsets[8], object.isNewImport);
-  writer.writeString(offsets[9], object.sourceNote);
-  writer.writeString(offsets[10], object.sourceUrl);
-  writer.writeLong(offsets[11], object.team);
-  writer.writeString(offsets[12], object.title);
-  writer.writeLong(offsets[13], object.type);
-  writer.writeString(offsets[14], object.uniqueId);
-  writer.writeDateTime(offsets[15], object.updatedAt);
-  writer.writeDouble(offsets[16], object.xRatio);
-  writer.writeDouble(offsets[17], object.yRatio);
+  writer.writeString(offsets[2], object.description);
+  writer.writeBool(offsets[3], object.hasLocalEdits);
+  writer.writeString(offsets[4], object.impactAreaStrokes);
+  writer.writeLong(offsets[5], object.impactGroupId);
+  writer.writeDouble(offsets[6], object.impactXRatio);
+  writer.writeDouble(offsets[7], object.impactYRatio);
+  writer.writeBool(offsets[8], object.isFavorite);
+  writer.writeBool(offsets[9], object.isImported);
+  writer.writeBool(offsets[10], object.isNewImport);
+  writer.writeString(offsets[11], object.sourceNote);
+  writer.writeString(offsets[12], object.sourceUrl);
+  writer.writeLong(offsets[13], object.team);
+  writer.writeString(offsets[14], object.title);
+  writer.writeLong(offsets[15], object.type);
+  writer.writeString(offsets[16], object.uniqueId);
+  writer.writeDateTime(offsets[17], object.updatedAt);
+  writer.writeDouble(offsets[18], object.xRatio);
+  writer.writeDouble(offsets[19], object.yRatio);
 }
 
 Grenade _grenadeDeserialize(
@@ -1851,26 +1869,28 @@ Grenade _grenadeDeserialize(
   Map<Type, List<int>> allOffsets,
 ) {
   final object = Grenade(
-    hasLocalEdits: reader.readBoolOrNull(offsets[2]) ?? false,
-    isFavorite: reader.readBoolOrNull(offsets[6]) ?? false,
-    isImported: reader.readBoolOrNull(offsets[7]) ?? false,
-    isNewImport: reader.readBoolOrNull(offsets[8]) ?? false,
-    team: reader.readLongOrNull(offsets[11]) ?? 0,
-    title: reader.readString(offsets[12]),
-    type: reader.readLong(offsets[13]),
-    uniqueId: reader.readStringOrNull(offsets[14]),
-    xRatio: reader.readDouble(offsets[16]),
-    yRatio: reader.readDouble(offsets[17]),
+    hasLocalEdits: reader.readBoolOrNull(offsets[3]) ?? false,
+    isFavorite: reader.readBoolOrNull(offsets[8]) ?? false,
+    isImported: reader.readBoolOrNull(offsets[9]) ?? false,
+    isNewImport: reader.readBoolOrNull(offsets[10]) ?? false,
+    team: reader.readLongOrNull(offsets[13]) ?? 0,
+    title: reader.readString(offsets[14]),
+    type: reader.readLong(offsets[15]),
+    uniqueId: reader.readStringOrNull(offsets[16]),
+    xRatio: reader.readDouble(offsets[18]),
+    yRatio: reader.readDouble(offsets[19]),
   );
   object.author = reader.readStringOrNull(offsets[0]);
   object.createdAt = reader.readDateTime(offsets[1]);
+  object.description = reader.readStringOrNull(offsets[2]);
   object.id = id;
-  object.impactAreaStrokes = reader.readStringOrNull(offsets[3]);
-  object.impactXRatio = reader.readDoubleOrNull(offsets[4]);
-  object.impactYRatio = reader.readDoubleOrNull(offsets[5]);
-  object.sourceNote = reader.readStringOrNull(offsets[9]);
-  object.sourceUrl = reader.readStringOrNull(offsets[10]);
-  object.updatedAt = reader.readDateTime(offsets[15]);
+  object.impactAreaStrokes = reader.readStringOrNull(offsets[4]);
+  object.impactGroupId = reader.readLongOrNull(offsets[5]);
+  object.impactXRatio = reader.readDoubleOrNull(offsets[6]);
+  object.impactYRatio = reader.readDoubleOrNull(offsets[7]);
+  object.sourceNote = reader.readStringOrNull(offsets[11]);
+  object.sourceUrl = reader.readStringOrNull(offsets[12]);
+  object.updatedAt = reader.readDateTime(offsets[17]);
   return object;
 }
 
@@ -1886,36 +1906,40 @@ P _grenadeDeserializeProp<P>(
     case 1:
       return (reader.readDateTime(offset)) as P;
     case 2:
-      return (reader.readBoolOrNull(offset) ?? false) as P;
-    case 3:
       return (reader.readStringOrNull(offset)) as P;
+    case 3:
+      return (reader.readBoolOrNull(offset) ?? false) as P;
     case 4:
-      return (reader.readDoubleOrNull(offset)) as P;
+      return (reader.readStringOrNull(offset)) as P;
     case 5:
-      return (reader.readDoubleOrNull(offset)) as P;
+      return (reader.readLongOrNull(offset)) as P;
     case 6:
-      return (reader.readBoolOrNull(offset) ?? false) as P;
+      return (reader.readDoubleOrNull(offset)) as P;
     case 7:
-      return (reader.readBoolOrNull(offset) ?? false) as P;
+      return (reader.readDoubleOrNull(offset)) as P;
     case 8:
       return (reader.readBoolOrNull(offset) ?? false) as P;
     case 9:
-      return (reader.readStringOrNull(offset)) as P;
+      return (reader.readBoolOrNull(offset) ?? false) as P;
     case 10:
-      return (reader.readStringOrNull(offset)) as P;
+      return (reader.readBoolOrNull(offset) ?? false) as P;
     case 11:
-      return (reader.readLongOrNull(offset) ?? 0) as P;
-    case 12:
-      return (reader.readString(offset)) as P;
-    case 13:
-      return (reader.readLong(offset)) as P;
-    case 14:
       return (reader.readStringOrNull(offset)) as P;
+    case 12:
+      return (reader.readStringOrNull(offset)) as P;
+    case 13:
+      return (reader.readLongOrNull(offset) ?? 0) as P;
+    case 14:
+      return (reader.readString(offset)) as P;
     case 15:
-      return (reader.readDateTime(offset)) as P;
+      return (reader.readLong(offset)) as P;
     case 16:
-      return (reader.readDouble(offset)) as P;
+      return (reader.readStringOrNull(offset)) as P;
     case 17:
+      return (reader.readDateTime(offset)) as P;
+    case 18:
+      return (reader.readDouble(offset)) as P;
+    case 19:
       return (reader.readDouble(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -2277,6 +2301,153 @@ extension GrenadeQueryFilter
     });
   }
 
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> descriptionIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNull(
+        property: r'description',
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> descriptionIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNotNull(
+        property: r'description',
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> descriptionEqualTo(
+    String? value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'description',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> descriptionGreaterThan(
+    String? value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'description',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> descriptionLessThan(
+    String? value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'description',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> descriptionBetween(
+    String? lower,
+    String? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'description',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> descriptionStartsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.startsWith(
+        property: r'description',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> descriptionEndsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.endsWith(
+        property: r'description',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> descriptionContains(
+      String value,
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.contains(
+        property: r'description',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> descriptionMatches(
+      String pattern,
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.matches(
+        property: r'description',
+        wildcard: pattern,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> descriptionIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'description',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition>
+      descriptionIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        property: r'description',
+        value: '',
+      ));
+    });
+  }
+
   QueryBuilder<Grenade, Grenade, QAfterFilterCondition> hasLocalEditsEqualTo(
       bool value) {
     return QueryBuilder.apply(this, (query) {
@@ -2489,6 +2660,77 @@ extension GrenadeQueryFilter
       return query.addFilterCondition(FilterCondition.greaterThan(
         property: r'impactAreaStrokes',
         value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> impactGroupIdIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNull(
+        property: r'impactGroupId',
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition>
+      impactGroupIdIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNotNull(
+        property: r'impactGroupId',
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> impactGroupIdEqualTo(
+      int? value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'impactGroupId',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition>
+      impactGroupIdGreaterThan(
+    int? value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'impactGroupId',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> impactGroupIdLessThan(
+    int? value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'impactGroupId',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> impactGroupIdBetween(
+    int? lower,
+    int? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'impactGroupId',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
       ));
     });
   }
@@ -3631,6 +3873,18 @@ extension GrenadeQuerySortBy on QueryBuilder<Grenade, Grenade, QSortBy> {
     });
   }
 
+  QueryBuilder<Grenade, Grenade, QAfterSortBy> sortByDescription() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'description', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterSortBy> sortByDescriptionDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'description', Sort.desc);
+    });
+  }
+
   QueryBuilder<Grenade, Grenade, QAfterSortBy> sortByHasLocalEdits() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'hasLocalEdits', Sort.asc);
@@ -3652,6 +3906,18 @@ extension GrenadeQuerySortBy on QueryBuilder<Grenade, Grenade, QSortBy> {
   QueryBuilder<Grenade, Grenade, QAfterSortBy> sortByImpactAreaStrokesDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'impactAreaStrokes', Sort.desc);
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterSortBy> sortByImpactGroupId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'impactGroupId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterSortBy> sortByImpactGroupIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'impactGroupId', Sort.desc);
     });
   }
 
@@ -3850,6 +4116,18 @@ extension GrenadeQuerySortThenBy
     });
   }
 
+  QueryBuilder<Grenade, Grenade, QAfterSortBy> thenByDescription() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'description', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterSortBy> thenByDescriptionDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'description', Sort.desc);
+    });
+  }
+
   QueryBuilder<Grenade, Grenade, QAfterSortBy> thenByHasLocalEdits() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'hasLocalEdits', Sort.asc);
@@ -3883,6 +4161,18 @@ extension GrenadeQuerySortThenBy
   QueryBuilder<Grenade, Grenade, QAfterSortBy> thenByImpactAreaStrokesDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'impactAreaStrokes', Sort.desc);
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterSortBy> thenByImpactGroupId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'impactGroupId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterSortBy> thenByImpactGroupIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'impactGroupId', Sort.desc);
     });
   }
 
@@ -4070,6 +4360,13 @@ extension GrenadeQueryWhereDistinct
     });
   }
 
+  QueryBuilder<Grenade, Grenade, QDistinct> distinctByDescription(
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'description', caseSensitive: caseSensitive);
+    });
+  }
+
   QueryBuilder<Grenade, Grenade, QDistinct> distinctByHasLocalEdits() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'hasLocalEdits');
@@ -4081,6 +4378,12 @@ extension GrenadeQueryWhereDistinct
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'impactAreaStrokes',
           caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QDistinct> distinctByImpactGroupId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'impactGroupId');
     });
   }
 
@@ -4193,6 +4496,12 @@ extension GrenadeQueryProperty
     });
   }
 
+  QueryBuilder<Grenade, String?, QQueryOperations> descriptionProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'description');
+    });
+  }
+
   QueryBuilder<Grenade, bool, QQueryOperations> hasLocalEditsProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'hasLocalEdits');
@@ -4202,6 +4511,12 @@ extension GrenadeQueryProperty
   QueryBuilder<Grenade, String?, QQueryOperations> impactAreaStrokesProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'impactAreaStrokes');
+    });
+  }
+
+  QueryBuilder<Grenade, int?, QQueryOperations> impactGroupIdProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'impactGroupId');
     });
   }
 
@@ -6661,6 +6976,1128 @@ extension ImportHistoryQueryProperty
   QueryBuilder<ImportHistory, int, QQueryOperations> updatedCountProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'updatedCount');
+    });
+  }
+}
+
+// coverage:ignore-file
+// ignore_for_file: duplicate_ignore, non_constant_identifier_names, constant_identifier_names, invalid_use_of_protected_member, unnecessary_cast, prefer_const_constructors, lines_longer_than_80_chars, require_trailing_commas, inference_failure_on_function_invocation, unnecessary_parenthesis, unnecessary_raw_strings, unnecessary_null_checks, join_return_with_assignment, prefer_final_locals, avoid_js_rounded_ints, avoid_positional_boolean_parameters, always_specify_types
+
+extension GetImpactGroupCollection on Isar {
+  IsarCollection<ImpactGroup> get impactGroups => this.collection();
+}
+
+const ImpactGroupSchema = CollectionSchema(
+  name: r'ImpactGroup',
+  id: 421530539802024653,
+  properties: {
+    r'createdAt': PropertySchema(
+      id: 0,
+      name: r'createdAt',
+      type: IsarType.dateTime,
+    ),
+    r'impactXRatio': PropertySchema(
+      id: 1,
+      name: r'impactXRatio',
+      type: IsarType.double,
+    ),
+    r'impactYRatio': PropertySchema(
+      id: 2,
+      name: r'impactYRatio',
+      type: IsarType.double,
+    ),
+    r'layerId': PropertySchema(
+      id: 3,
+      name: r'layerId',
+      type: IsarType.long,
+    ),
+    r'name': PropertySchema(
+      id: 4,
+      name: r'name',
+      type: IsarType.string,
+    ),
+    r'type': PropertySchema(
+      id: 5,
+      name: r'type',
+      type: IsarType.long,
+    )
+  },
+  estimateSize: _impactGroupEstimateSize,
+  serialize: _impactGroupSerialize,
+  deserialize: _impactGroupDeserialize,
+  deserializeProp: _impactGroupDeserializeProp,
+  idName: r'id',
+  indexes: {
+    r'name': IndexSchema(
+      id: 879695947855722453,
+      name: r'name',
+      unique: false,
+      replace: false,
+      properties: [
+        IndexPropertySchema(
+          name: r'name',
+          type: IndexType.hash,
+          caseSensitive: true,
+        )
+      ],
+    ),
+    r'layerId': IndexSchema(
+      id: -2423084235737779352,
+      name: r'layerId',
+      unique: false,
+      replace: false,
+      properties: [
+        IndexPropertySchema(
+          name: r'layerId',
+          type: IndexType.value,
+          caseSensitive: false,
+        )
+      ],
+    )
+  },
+  links: {},
+  embeddedSchemas: {},
+  getId: _impactGroupGetId,
+  getLinks: _impactGroupGetLinks,
+  attach: _impactGroupAttach,
+  version: '3.3.0',
+);
+
+int _impactGroupEstimateSize(
+  ImpactGroup object,
+  List<int> offsets,
+  Map<Type, List<int>> allOffsets,
+) {
+  var bytesCount = offsets.last;
+  bytesCount += 3 + object.name.length * 3;
+  return bytesCount;
+}
+
+void _impactGroupSerialize(
+  ImpactGroup object,
+  IsarWriter writer,
+  List<int> offsets,
+  Map<Type, List<int>> allOffsets,
+) {
+  writer.writeDateTime(offsets[0], object.createdAt);
+  writer.writeDouble(offsets[1], object.impactXRatio);
+  writer.writeDouble(offsets[2], object.impactYRatio);
+  writer.writeLong(offsets[3], object.layerId);
+  writer.writeString(offsets[4], object.name);
+  writer.writeLong(offsets[5], object.type);
+}
+
+ImpactGroup _impactGroupDeserialize(
+  Id id,
+  IsarReader reader,
+  List<int> offsets,
+  Map<Type, List<int>> allOffsets,
+) {
+  final object = ImpactGroup(
+    impactXRatio: reader.readDouble(offsets[1]),
+    impactYRatio: reader.readDouble(offsets[2]),
+    layerId: reader.readLong(offsets[3]),
+    name: reader.readString(offsets[4]),
+    type: reader.readLong(offsets[5]),
+  );
+  object.createdAt = reader.readDateTime(offsets[0]);
+  object.id = id;
+  return object;
+}
+
+P _impactGroupDeserializeProp<P>(
+  IsarReader reader,
+  int propertyId,
+  int offset,
+  Map<Type, List<int>> allOffsets,
+) {
+  switch (propertyId) {
+    case 0:
+      return (reader.readDateTime(offset)) as P;
+    case 1:
+      return (reader.readDouble(offset)) as P;
+    case 2:
+      return (reader.readDouble(offset)) as P;
+    case 3:
+      return (reader.readLong(offset)) as P;
+    case 4:
+      return (reader.readString(offset)) as P;
+    case 5:
+      return (reader.readLong(offset)) as P;
+    default:
+      throw IsarError('Unknown property with id $propertyId');
+  }
+}
+
+Id _impactGroupGetId(ImpactGroup object) {
+  return object.id;
+}
+
+List<IsarLinkBase<dynamic>> _impactGroupGetLinks(ImpactGroup object) {
+  return [];
+}
+
+void _impactGroupAttach(
+    IsarCollection<dynamic> col, Id id, ImpactGroup object) {
+  object.id = id;
+}
+
+extension ImpactGroupQueryWhereSort
+    on QueryBuilder<ImpactGroup, ImpactGroup, QWhere> {
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterWhere> anyId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(const IdWhereClause.any());
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterWhere> anyLayerId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        const IndexWhereClause.any(indexName: r'layerId'),
+      );
+    });
+  }
+}
+
+extension ImpactGroupQueryWhere
+    on QueryBuilder<ImpactGroup, ImpactGroup, QWhereClause> {
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterWhereClause> idEqualTo(Id id) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IdWhereClause.between(
+        lower: id,
+        upper: id,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterWhereClause> idNotEqualTo(
+      Id id) {
+    return QueryBuilder.apply(this, (query) {
+      if (query.whereSort == Sort.asc) {
+        return query
+            .addWhereClause(
+              IdWhereClause.lessThan(upper: id, includeUpper: false),
+            )
+            .addWhereClause(
+              IdWhereClause.greaterThan(lower: id, includeLower: false),
+            );
+      } else {
+        return query
+            .addWhereClause(
+              IdWhereClause.greaterThan(lower: id, includeLower: false),
+            )
+            .addWhereClause(
+              IdWhereClause.lessThan(upper: id, includeUpper: false),
+            );
+      }
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterWhereClause> idGreaterThan(Id id,
+      {bool include = false}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IdWhereClause.greaterThan(lower: id, includeLower: include),
+      );
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterWhereClause> idLessThan(Id id,
+      {bool include = false}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IdWhereClause.lessThan(upper: id, includeUpper: include),
+      );
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterWhereClause> idBetween(
+    Id lowerId,
+    Id upperId, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IdWhereClause.between(
+        lower: lowerId,
+        includeLower: includeLower,
+        upper: upperId,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterWhereClause> nameEqualTo(
+      String name) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IndexWhereClause.equalTo(
+        indexName: r'name',
+        value: [name],
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterWhereClause> nameNotEqualTo(
+      String name) {
+    return QueryBuilder.apply(this, (query) {
+      if (query.whereSort == Sort.asc) {
+        return query
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'name',
+              lower: [],
+              upper: [name],
+              includeUpper: false,
+            ))
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'name',
+              lower: [name],
+              includeLower: false,
+              upper: [],
+            ));
+      } else {
+        return query
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'name',
+              lower: [name],
+              includeLower: false,
+              upper: [],
+            ))
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'name',
+              lower: [],
+              upper: [name],
+              includeUpper: false,
+            ));
+      }
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterWhereClause> layerIdEqualTo(
+      int layerId) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IndexWhereClause.equalTo(
+        indexName: r'layerId',
+        value: [layerId],
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterWhereClause> layerIdNotEqualTo(
+      int layerId) {
+    return QueryBuilder.apply(this, (query) {
+      if (query.whereSort == Sort.asc) {
+        return query
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'layerId',
+              lower: [],
+              upper: [layerId],
+              includeUpper: false,
+            ))
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'layerId',
+              lower: [layerId],
+              includeLower: false,
+              upper: [],
+            ));
+      } else {
+        return query
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'layerId',
+              lower: [layerId],
+              includeLower: false,
+              upper: [],
+            ))
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'layerId',
+              lower: [],
+              upper: [layerId],
+              includeUpper: false,
+            ));
+      }
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterWhereClause> layerIdGreaterThan(
+    int layerId, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IndexWhereClause.between(
+        indexName: r'layerId',
+        lower: [layerId],
+        includeLower: include,
+        upper: [],
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterWhereClause> layerIdLessThan(
+    int layerId, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IndexWhereClause.between(
+        indexName: r'layerId',
+        lower: [],
+        upper: [layerId],
+        includeUpper: include,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterWhereClause> layerIdBetween(
+    int lowerLayerId,
+    int upperLayerId, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IndexWhereClause.between(
+        indexName: r'layerId',
+        lower: [lowerLayerId],
+        includeLower: includeLower,
+        upper: [upperLayerId],
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+}
+
+extension ImpactGroupQueryFilter
+    on QueryBuilder<ImpactGroup, ImpactGroup, QFilterCondition> {
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition>
+      createdAtEqualTo(DateTime value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'createdAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition>
+      createdAtGreaterThan(
+    DateTime value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'createdAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition>
+      createdAtLessThan(
+    DateTime value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'createdAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition>
+      createdAtBetween(
+    DateTime lower,
+    DateTime upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'createdAt',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition> idEqualTo(
+      Id value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'id',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition> idGreaterThan(
+    Id value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'id',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition> idLessThan(
+    Id value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'id',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition> idBetween(
+    Id lower,
+    Id upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'id',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition>
+      impactXRatioEqualTo(
+    double value, {
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'impactXRatio',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition>
+      impactXRatioGreaterThan(
+    double value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'impactXRatio',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition>
+      impactXRatioLessThan(
+    double value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'impactXRatio',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition>
+      impactXRatioBetween(
+    double lower,
+    double upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'impactXRatio',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition>
+      impactYRatioEqualTo(
+    double value, {
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'impactYRatio',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition>
+      impactYRatioGreaterThan(
+    double value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'impactYRatio',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition>
+      impactYRatioLessThan(
+    double value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'impactYRatio',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition>
+      impactYRatioBetween(
+    double lower,
+    double upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'impactYRatio',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition> layerIdEqualTo(
+      int value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'layerId',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition>
+      layerIdGreaterThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'layerId',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition> layerIdLessThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'layerId',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition> layerIdBetween(
+    int lower,
+    int upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'layerId',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition> nameEqualTo(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'name',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition> nameGreaterThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'name',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition> nameLessThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'name',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition> nameBetween(
+    String lower,
+    String upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'name',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition> nameStartsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.startsWith(
+        property: r'name',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition> nameEndsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.endsWith(
+        property: r'name',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition> nameContains(
+      String value,
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.contains(
+        property: r'name',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition> nameMatches(
+      String pattern,
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.matches(
+        property: r'name',
+        wildcard: pattern,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition> nameIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'name',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition>
+      nameIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        property: r'name',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition> typeEqualTo(
+      int value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'type',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition> typeGreaterThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'type',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition> typeLessThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'type',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition> typeBetween(
+    int lower,
+    int upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'type',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+}
+
+extension ImpactGroupQueryObject
+    on QueryBuilder<ImpactGroup, ImpactGroup, QFilterCondition> {}
+
+extension ImpactGroupQueryLinks
+    on QueryBuilder<ImpactGroup, ImpactGroup, QFilterCondition> {}
+
+extension ImpactGroupQuerySortBy
+    on QueryBuilder<ImpactGroup, ImpactGroup, QSortBy> {
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> sortByCreatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'createdAt', Sort.asc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> sortByCreatedAtDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'createdAt', Sort.desc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> sortByImpactXRatio() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'impactXRatio', Sort.asc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy>
+      sortByImpactXRatioDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'impactXRatio', Sort.desc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> sortByImpactYRatio() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'impactYRatio', Sort.asc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy>
+      sortByImpactYRatioDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'impactYRatio', Sort.desc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> sortByLayerId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'layerId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> sortByLayerIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'layerId', Sort.desc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> sortByName() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'name', Sort.asc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> sortByNameDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'name', Sort.desc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> sortByType() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'type', Sort.asc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> sortByTypeDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'type', Sort.desc);
+    });
+  }
+}
+
+extension ImpactGroupQuerySortThenBy
+    on QueryBuilder<ImpactGroup, ImpactGroup, QSortThenBy> {
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> thenByCreatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'createdAt', Sort.asc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> thenByCreatedAtDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'createdAt', Sort.desc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> thenById() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'id', Sort.asc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> thenByIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'id', Sort.desc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> thenByImpactXRatio() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'impactXRatio', Sort.asc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy>
+      thenByImpactXRatioDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'impactXRatio', Sort.desc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> thenByImpactYRatio() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'impactYRatio', Sort.asc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy>
+      thenByImpactYRatioDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'impactYRatio', Sort.desc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> thenByLayerId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'layerId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> thenByLayerIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'layerId', Sort.desc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> thenByName() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'name', Sort.asc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> thenByNameDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'name', Sort.desc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> thenByType() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'type', Sort.asc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> thenByTypeDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'type', Sort.desc);
+    });
+  }
+}
+
+extension ImpactGroupQueryWhereDistinct
+    on QueryBuilder<ImpactGroup, ImpactGroup, QDistinct> {
+  QueryBuilder<ImpactGroup, ImpactGroup, QDistinct> distinctByCreatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'createdAt');
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QDistinct> distinctByImpactXRatio() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'impactXRatio');
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QDistinct> distinctByImpactYRatio() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'impactYRatio');
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QDistinct> distinctByLayerId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'layerId');
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QDistinct> distinctByName(
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'name', caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QDistinct> distinctByType() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'type');
+    });
+  }
+}
+
+extension ImpactGroupQueryProperty
+    on QueryBuilder<ImpactGroup, ImpactGroup, QQueryProperty> {
+  QueryBuilder<ImpactGroup, int, QQueryOperations> idProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'id');
+    });
+  }
+
+  QueryBuilder<ImpactGroup, DateTime, QQueryOperations> createdAtProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'createdAt');
+    });
+  }
+
+  QueryBuilder<ImpactGroup, double, QQueryOperations> impactXRatioProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'impactXRatio');
+    });
+  }
+
+  QueryBuilder<ImpactGroup, double, QQueryOperations> impactYRatioProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'impactYRatio');
+    });
+  }
+
+  QueryBuilder<ImpactGroup, int, QQueryOperations> layerIdProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'layerId');
+    });
+  }
+
+  QueryBuilder<ImpactGroup, String, QQueryOperations> nameProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'name');
+    });
+  }
+
+  QueryBuilder<ImpactGroup, int, QQueryOperations> typeProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'type');
     });
   }
 }

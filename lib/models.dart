@@ -100,9 +100,15 @@ class Grenade {
   /// 出处备注
   String? sourceNote;
 
+  /// 爆点名称/位置描述
+  String? description;
+
   double? impactXRatio;
   double? impactYRatio;
   String? impactAreaStrokes;
+  
+  /// 爆点分组ID（用于自定义分组筛选）
+  int? impactGroupId;
 
   @Backlink(to: 'grenades')
   final layer = IsarLink<MapLayer>();
@@ -188,4 +194,37 @@ class ImportHistory {
     this.updatedCount = 0,
     this.skippedCount = 0,
   });
+}
+
+/// 爆点分组（用于在同一爆点下对投掷点进行自定义分组）
+@collection
+class ImpactGroup {
+  Id id = Isar.autoIncrement;
+
+  /// 分组名称
+  @Index()
+  String name;
+  
+  /// 道具类型（GrenadeType）
+  int type;
+  
+  /// 关联的爆点坐标（用于限定分组范围）
+  double impactXRatio;
+  double impactYRatio;
+  
+  /// 关联的图层ID
+  @Index()
+  int layerId;
+  
+  /// 创建时间
+  DateTime createdAt;
+
+  ImpactGroup({
+    required this.name,
+    required this.type,
+    required this.impactXRatio,
+    required this.impactYRatio,
+    required this.layerId,
+    DateTime? created,
+  }) : createdAt = created ?? DateTime.now();
 }
