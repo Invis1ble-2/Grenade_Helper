@@ -283,6 +283,7 @@ class _GrenadeSelectDeleteScreenState extends ConsumerState<GrenadeSelectDeleteS
     final typeIcon = _getTypeIcon(grenade.type);
     grenade.layer.loadSync();
     final layerName = grenade.layer.value?.name ?? '';
+    final hasImpact = grenade.impactXRatio != null && grenade.impactYRatio != null;
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
@@ -316,11 +317,33 @@ class _GrenadeSelectDeleteScreenState extends ConsumerState<GrenadeSelectDeleteS
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      grenade.title,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            grenade.title,
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (hasImpact)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.green.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.my_location, size: 10, color: Colors.green),
+                                SizedBox(width: 2),
+                                Text('爆点', style: TextStyle(fontSize: 10, color: Colors.green)),
+                              ],
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 4),
                     Row(
@@ -335,9 +358,12 @@ class _GrenadeSelectDeleteScreenState extends ConsumerState<GrenadeSelectDeleteS
                           const SizedBox(width: 12),
                           Icon(Icons.person, size: 12, color: Colors.grey[600]),
                           const SizedBox(width: 4),
-                          Text(
-                            grenade.author!,
-                            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                          Flexible(
+                            child: Text(
+                              grenade.author!,
+                              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         ],
                       ],

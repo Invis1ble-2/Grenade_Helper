@@ -18,6 +18,7 @@ class ImpactPointPickerScreen extends ConsumerStatefulWidget {
   final bool isDrawingMode;
   final String? existingStrokes; // 现有笔画 JSON
   final int grenadeType; // 道具类型（用于颜色）
+  final bool readOnly; // 只读模式，仅查看不可编辑
 
   const ImpactPointPickerScreen({
     super.key,
@@ -30,6 +31,7 @@ class ImpactPointPickerScreen extends ConsumerStatefulWidget {
     this.isDrawingMode = false,
     this.existingStrokes,
     this.grenadeType = GrenadeType.smoke,
+    this.readOnly = false,
   });
 
   @override
@@ -66,8 +68,8 @@ class _ImpactPointPickerScreenState
     _selectedY = widget.initialY;
     _loadLayer();
 
-    // 解析笔画
-    if (widget.isDrawingMode && widget.existingStrokes != null) {
+    // 解析笔画（绘制模式或只读模式都需要解析）
+    if ((widget.isDrawingMode || widget.readOnly) && widget.existingStrokes != null) {
       try {
         final parsed = jsonDecode(widget.existingStrokes!) as List;
         _drawingStrokes =
@@ -368,39 +370,43 @@ class _ImpactPointPickerScreenState
           icon: const Icon(Icons.close),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text(widget.isDrawingMode ? '绘制爆点区域' : '选择爆点位置'),
+        title: Text(widget.readOnly 
+            ? '查看爆点位置' 
+            : (widget.isDrawingMode ? '绘制爆点区域' : '选择爆点位置')),
         centerTitle: true,
         actions: [
-          if (widget.isDrawingMode) ...[
-            if (_drawingStrokes.isNotEmpty)
+          if (!widget.readOnly) ...[
+            if (widget.isDrawingMode) ...[
+              if (_drawingStrokes.isNotEmpty)
+                IconButton(
+                  onPressed: () {
+                    setState(() => _drawingStrokes.removeLast());
+                  },
+                  icon: const Icon(Icons.undo),
+                  tooltip: '撤销',
+                ),
               IconButton(
-                onPressed: () {
-                  setState(() => _drawingStrokes.removeLast());
-                },
-                icon: const Icon(Icons.undo),
-                tooltip: '撤销',
+                onPressed: _drawingStrokes.isEmpty
+                    ? null
+                    : () {
+                        setState(() => _drawingStrokes.clear());
+                      },
+                icon: const Icon(Icons.delete_outline),
+                tooltip: '清除全部',
               ),
-            IconButton(
-              onPressed: _drawingStrokes.isEmpty
-                  ? null
-                  : () {
-                      setState(() => _drawingStrokes.clear());
-                    },
-              icon: const Icon(Icons.delete_outline),
-              tooltip: '清除全部',
+            ],
+            TextButton(
+              onPressed:
+                  widget.isDrawingMode ? _confirmDrawing : _confirmSelection,
+              child: Text(
+                widget.isDrawingMode ? '保存' : '确认',
+                style: TextStyle(
+                  color: colorScheme.primary,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           ],
-          TextButton(
-            onPressed:
-                widget.isDrawingMode ? _confirmDrawing : _confirmSelection,
-            child: Text(
-              widget.isDrawingMode ? '保存' : '确认',
-              style: TextStyle(
-                color: colorScheme.primary,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
         ],
       ),
       body: Column(
@@ -434,7 +440,7 @@ class _ImpactPointPickerScreenState
                           key: _stackKey,
                           children: [
                             GestureDetector(
-                                onTapUp: widget.isDrawingMode ? null : _handleTap,
+                                onTapUp: (widget.isDrawingMode || widget.readOnly) ? null : _handleTap,
                                 child: Image.asset(
                                   _layer!.assetPath,
                                   width: constraints.maxWidth,
@@ -444,7 +450,7 @@ class _ImpactPointPickerScreenState
                             if (widget.isDrawingMode)
                               ..._buildDrawingLayers(constraints, imageBounds, markerScale)
                             else
-                              ..._buildPickerLayers(imageBounds, markerScale),
+                              ..._buildPickerLayers(constraints, imageBounds, markerScale),
                             
                           ],
                         );
@@ -455,9 +461,10 @@ class _ImpactPointPickerScreenState
               },
             ),
           ),
-          widget.isDrawingMode
-              ? _buildDrawingToolbar()
-              : _buildPickerFooter(),
+          if (!widget.readOnly)
+            widget.isDrawingMode
+                ? _buildDrawingToolbar()
+                : _buildPickerFooter(),
         ],
       ),
     );
@@ -466,15 +473,35 @@ class _ImpactPointPickerScreenState
   // 选择视图
 
   List<Widget> _buildPickerLayers(
+    BoxConstraints constraints,
     ({double width, double height, double offsetX, double offsetY}) imageBounds,
     double markerScale,
   ) {
+    final color = _getTypeColor();
+    
     return [
       _buildThrowPointMarker(imageBounds, markerScale),
       if (_selectedX != null && _selectedY != null)
         _buildConnectionLine(imageBounds),
       if (_selectedX != null && _selectedY != null)
         _buildImpactMarker(imageBounds, markerScale),
+      // 只读模式下显示已绘制的爆点范围
+      if (widget.readOnly && _drawingStrokes.isNotEmpty)
+        Positioned.fill(
+          child: IgnorePointer(
+            child: CustomPaint(
+              painter: _ImpactAreaPainter(
+                strokes: _drawingStrokes,
+                currentStroke: const [],
+                currentStrokeWidth: 15.0,
+                isCurrentEraser: false,
+                color: color,
+                imageBounds: imageBounds,
+                opacity: 0.6,
+              ),
+            ),
+          ),
+        ),
     ];
   }
 
