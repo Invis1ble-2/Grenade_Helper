@@ -3,8 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:isar_community/isar.dart';
 import '../services/settings_service.dart';
 import '../services/seasonal_theme_service.dart';
+import '../services/data_service.dart';
+import '../models.dart';
 import '../providers.dart';
 import '../main.dart' show sendOverlayCommand;
 
@@ -252,6 +255,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ),
               ),
             ],
+          ],
+        ),
+        const SizedBox(height: 16),
+        _buildSection(
+          title: '🗄️ 数据管理',
+          children: [
+            ListTile(
+              leading: const Icon(Icons.delete_sweep, color: Colors.redAccent),
+              title: const Text('清空地图道具'),
+              subtitle: const Text('删除选定地图的所有道具数据'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _showDeleteMapGrenadesDialog(),
+            ),
           ],
         ),
       ],
@@ -537,8 +553,190 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ],
         ),
+        const SizedBox(height: 16),
+        _buildSection(
+          title: '🗄️ 数据管理',
+          children: [
+            ListTile(
+              leading: const Icon(Icons.delete_sweep, color: Colors.redAccent),
+              title: const Text('清空地图道具'),
+              subtitle: const Text('删除选定地图的所有道具数据'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _showDeleteMapGrenadesDialog(),
+            ),
+          ],
+        ),
       ],
     );
+  }
+
+  /// 删除地图道具对话框
+  Future<void> _showDeleteMapGrenadesDialog() async {
+    final isar = ref.read(isarProvider);
+    final maps = await isar.gameMaps.where().findAll();
+    if (maps.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('暂无地图数据')),
+        );
+      }
+      return;
+    }
+
+    // 预加载数据
+    final mapGrenadeCount = <int, int>{};
+    for (final map in maps) {
+      await map.layers.load();
+      int count = 0;
+      for (final layer in map.layers) {
+        await layer.grenades.load();
+        count += layer.grenades.length;
+      }
+      mapGrenadeCount[map.id] = count;
+    }
+
+    if (!mounted) return;
+    GameMap? selectedMap;
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.delete_sweep, color: Colors.redAccent),
+              const SizedBox(width: 8),
+              const Text('清空地图道具'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('选择要清空道具的地图：'),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<GameMap>(
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                ),
+                hint: const Text('选择地图'),
+                value: selectedMap,
+                items: maps.map((map) {
+                  final count = mapGrenadeCount[map.id] ?? 0;
+                  return DropdownMenuItem(
+                    value: map,
+                    child: Text('${map.name} ($count 个道具)'),
+                  );
+                }).toList(),
+                onChanged: (value) => setDialogState(() => selectedMap = value),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning, color: Colors.red[400], size: 20),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        '此操作不可撤销！所有道具及其媒体文件将被永久删除。',
+                        style: TextStyle(fontSize: 12, color: Colors.red[400]),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消'),
+            ),
+            ElevatedButton(
+              onPressed: selectedMap == null ? null : () async {
+                Navigator.pop(ctx);
+                await _performDeleteMapGrenades(selectedMap!);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('确认删除'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 执行删除操作
+  Future<void> _performDeleteMapGrenades(GameMap map) async {
+    final isar = ref.read(isarProvider);
+    final dataService = DataService(isar);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('二次确认'),
+        content: Text('确定要删除「${map.name}」地图的所有道具吗？\n\n此操作无法恢复！'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('确定删除'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 16),
+            Text('正在删除...'),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      final deletedCount = await dataService.deleteAllGrenadesForMap(map);
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('已删除「${map.name}」的 $deletedCount 个道具'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('删除失败: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   /// 更改目录

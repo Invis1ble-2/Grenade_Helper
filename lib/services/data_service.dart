@@ -124,6 +124,34 @@ class DataService {
     }
   }
 
+  /// 删除某个地图的所有道具
+  Future<int> deleteAllGrenadesForMap(GameMap map) async {
+    int deletedCount = 0;
+    await map.layers.load();
+
+    await isar.writeTxn(() async {
+      for (final layer in map.layers) {
+        await layer.grenades.load();
+        for (final grenade in layer.grenades.toList()) {
+          await grenade.steps.load();
+          for (final step in grenade.steps) {
+            await step.medias.load();
+            for (final media in step.medias) {
+              await deleteMediaFile(media.localPath);
+              await isar.stepMedias.delete(media.id);
+            }
+            await isar.grenadeSteps.delete(step.id);
+          }
+          await isar.grenades.delete(grenade.id);
+          deletedCount++;
+        }
+        layer.grenades.clear();
+        await layer.grenades.save();
+      }
+    });
+    return deletedCount;
+  }
+
   /// 预览包
   Future<PackagePreviewResult?> previewPackage(String filePath) async {
     if (!filePath.toLowerCase().endsWith('.cs2pkg')) {
