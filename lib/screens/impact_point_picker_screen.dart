@@ -407,17 +407,6 @@ class _ImpactPointPickerScreenState
               ),
             ),
           ],
-          TextButton(
-            onPressed:
-                widget.isDrawingMode ? _confirmDrawing : _confirmSelection,
-            child: Text(
-              widget.isDrawingMode ? '保存' : '确认',
-              style: TextStyle(
-                color: colorScheme.primary,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
         ],
       ),
       body: Column(

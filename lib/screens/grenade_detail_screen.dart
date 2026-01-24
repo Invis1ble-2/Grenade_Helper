@@ -1847,7 +1847,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           // 爆点卡片（编辑模式且非穿点类型时显示）
-          if (showImpactCard) _buildImpactPointSection(),
+          if (showImpactCard) _buildImpactPointSection(isEditing),
           // 标签编辑器
           _buildTagSection(),
           // 步骤卡片
@@ -1855,10 +1855,15 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
         ],
       );
     } else {
-      return ListView.builder(
+      // 非编辑模式：使用 ListView（包含爆点卡片）
+      return ListView(
         padding: const EdgeInsets.all(16),
-        itemCount: steps.length,
-        itemBuilder: (ctx, index) => _buildStepCard(steps[index], isEditing),
+        children: [
+          // 爆点卡片（有爆点时显示）
+          if (showImpactCard) _buildImpactPointSection(isEditing),
+          // 步骤卡片
+          ...steps.map((step) => _buildStepCard(step, isEditing)),
+        ],
       );
     }
   }
