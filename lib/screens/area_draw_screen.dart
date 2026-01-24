@@ -26,7 +26,7 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
   List<Offset> _currentStroke = [];
   final _nameController = TextEditingController();
   int _selectedColor = 0xFF4CAF50;
-  bool _isPenMode = true; // 默认绘制模式
+  bool _isPenMode = false; // 默认移动模式
   double _strokeWidth = 2.5; // 笔画宽度
   
   @override
@@ -328,13 +328,7 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
                         visualDensity: VisualDensity.compact,
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        _isPenMode ? '绘制模式：画出区域边界' : '移动模式：滚轮缩放，拖拽移动',
-                        style: TextStyle(color: Theme.of(context).textTheme.bodySmall?.color, fontSize: 12),
-                      ),
-                    ),
+                    const Spacer(),
                     ElevatedButton.icon(
                       onPressed: _save,
                       icon: const Icon(Icons.check, color: Colors.white),
