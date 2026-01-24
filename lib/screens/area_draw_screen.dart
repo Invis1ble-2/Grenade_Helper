@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:grenade_helper/models/map_area.dart';
 import 'package:photo_view/photo_view.dart';
 import '../models.dart';
 import '../providers.dart';
@@ -12,8 +13,9 @@ import '../widgets/color_picker_widget.dart';
 class AreaDrawScreen extends ConsumerStatefulWidget {
   final GameMap gameMap;
   final MapLayer layer;
+  final MapArea? area;
   
-  const AreaDrawScreen({super.key, required this.gameMap, required this.layer});
+  const AreaDrawScreen({super.key, required this.gameMap, required this.layer, this.area});
   
   @override
   ConsumerState<AreaDrawScreen> createState() => _AreaDrawScreenState();
@@ -33,6 +35,23 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
   void initState() {
     super.initState();
     _photoViewController = PhotoViewController();
+    if (widget.area != null) {
+      _nameController.text = widget.area!.name;
+      _selectedColor = widget.area!.colorValue;
+      _loadStrokes(widget.area!.strokes);
+    }
+  }
+
+  void _loadStrokes(String json) {
+    try {
+      final data = jsonDecode(json) as List;
+      _strokes.addAll(data.map((stroke) {
+        final points = stroke as List;
+        return points.map((p) => Offset((p['x'] as num).toDouble(), (p['y'] as num).toDouble())).toList();
+      }));
+    } catch (e) {
+      debugPrint('Error parsing strokes: $e');
+    }
   }
   
   @override
@@ -174,18 +193,31 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
     final isar = ref.read(isarProvider);
     final areaService = AreaService(isar);
     
-    await areaService.createArea(
-      name: name,
-      colorValue: _selectedColor,
-      strokes: _strokesAsJson(),
-      mapId: widget.gameMap.id,
-      layerId: widget.layer.id,
-    );
+    if (widget.area != null) {
+      await areaService.updateArea(
+        area: widget.area!,
+        name: name,
+        colorValue: _selectedColor,
+        strokes: _strokesAsJson(),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('区域 "$name" 更新成功'), backgroundColor: Colors.green)
+      );
+    } else {
+      await areaService.createArea(
+        name: name,
+        colorValue: _selectedColor,
+        strokes: _strokesAsJson(),
+        mapId: widget.gameMap.id,
+        layerId: widget.layer.id,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('区域 "$name" 创建成功'), backgroundColor: Colors.green)
+      );
+    }
     
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('区域 "$name" 创建成功'), backgroundColor: Colors.green)
-    );
     Navigator.pop(context, true);
   }
   

@@ -641,7 +641,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 ),
                 hint: const Text('选择地图'),
-                value: selectedMap,
+                initialValue: selectedMap,
                 items: maps.map((map) {
                   final count = mapGrenadeCount[map.id] ?? 0;
                   return DropdownMenuItem(

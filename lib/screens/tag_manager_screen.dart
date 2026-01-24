@@ -233,7 +233,7 @@ class _CreateTagDialogState extends State<_CreateTagDialog> {
             ),
             const SizedBox(height: 16),
              DropdownButtonFormField<int>(
-              value: _selectedDimension,
+              initialValue: _selectedDimension,
               decoration: const InputDecoration(labelText: '标签分组', border: OutlineInputBorder()),
               items: [
                 TagDimension.phase,

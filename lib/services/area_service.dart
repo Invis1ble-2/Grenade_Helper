@@ -64,6 +64,30 @@ class AreaService {
     });
   }
 
+  /// 更新区域及其标签
+  Future<void> updateArea({
+    required MapArea area,
+    required String name,
+    required int colorValue,
+    required String strokes,
+  }) async {
+    await isar.writeTxn(() async {
+      // 1. 更新对应标签
+      final tag = await isar.tags.get(area.tagId);
+      if (tag != null) {
+        tag.name = name;
+        tag.colorValue = colorValue;
+        await isar.tags.put(tag);
+      }
+
+      // 2. 更新区域
+      area.name = name;
+      area.colorValue = colorValue;
+      area.strokes = strokes;
+      await isar.mapAreas.put(area);
+    });
+  }
+
   /// 判断点是否在区域内 (基于笔画围成的区域)
   bool isPointInArea(double x, double y, MapArea area) {
     final strokes = _parseStrokes(area.strokes);

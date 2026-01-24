@@ -85,6 +85,33 @@ class _AreaManagerScreenState extends ConsumerState<AreaManagerScreen> {
     await areaService.deleteArea(area);
     _loadAreas();
   }
+
+  Future<void> _editArea(MapArea area) async {
+    if (area.layerId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('该区域未关联楼层，无法编辑'), backgroundColor: Colors.red)
+      );
+      return;
+    }
+
+    final isar = ref.read(isarProvider);
+    final layer = await isar.mapLayers.get(area.layerId!);
+    
+    if (layer == null) {
+       if (!mounted) return;
+       ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('关联楼层不存在'), backgroundColor: Colors.red)
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => AreaDrawScreen(gameMap: widget.gameMap, layer: layer, area: area)),
+    );
+    if (result == true) _loadAreas();
+  }
   
   Future<void> _autoTagAll() async {
     final isar = ref.read(isarProvider);
@@ -149,9 +176,18 @@ class _AreaManagerScreenState extends ConsumerState<AreaManagerScreen> {
                         ),
                         title: Text(area.name),
                         subtitle: Text('创建于 ${area.createdAt.toString().substring(0, 16)}', style: const TextStyle(fontSize: 12)),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                          onPressed: () => _deleteArea(area),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit_outlined, color: Colors.blueAccent),
+                              onPressed: () => _editArea(area),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                              onPressed: () => _deleteArea(area),
+                            ),
+                          ],
                         ),
                       ),
                     );
