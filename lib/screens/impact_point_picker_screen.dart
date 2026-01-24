@@ -412,7 +412,8 @@ class _ImpactPointPickerScreenState
       body: Column(
         children: [
           Expanded(
-            child: LayoutBuilder(
+            child: ClipRect(
+              child: LayoutBuilder(
               builder: (context, constraints) {
                 final imageBounds = _getImageBounds(
                     constraints.maxWidth, constraints.maxHeight);
@@ -459,6 +460,7 @@ class _ImpactPointPickerScreenState
                   ),
                 );
               },
+            ),
             ),
           ),
           if (!widget.readOnly)

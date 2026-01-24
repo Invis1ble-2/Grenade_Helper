@@ -2444,17 +2444,17 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     );
   }
 
-  Widget _buildFavoritesBar(AsyncValue<List<Grenade>> asyncData) {
+  Widget _buildFavoritesBar(AsyncValue<List<Grenade>> asyncData, BuildContext context) {
     return Container(
       height: 60,
-      color: const Color(0xFF141619),
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: asyncData.when(
         data: (grenades) {
           final favs = grenades.where((g) => g.isFavorite).toList();
           if (favs.isEmpty) {
-            return const Center(
+            return Center(
                 child: Text("暂无本层常用道具",
-                    style: TextStyle(color: Colors.grey, fontSize: 12)));
+                    style: TextStyle(color: Theme.of(context).textTheme.bodySmall?.color, fontSize: 12)));
           }
           return ListView.separated(
             scrollDirection: Axis.horizontal,
@@ -2465,9 +2465,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               final g = favs[index];
               Color color = g.team == TeamType.ct
                   ? Colors.blueAccent
-                  : (g.team == TeamType.t ? Colors.amber : Colors.white);
+                  : (g.team == TeamType.t ? Colors.amber : Theme.of(context).colorScheme.onSurface);
               return ActionChip(
-                  backgroundColor: const Color(0xFF2A2D33),
+                  backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
                   padding: EdgeInsets.zero,
                   label: Text(g.title,
                       style: TextStyle(color: color, fontSize: 12)),
@@ -3142,8 +3142,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 // 爆点模式切换按钮
                 Positioned(
                   left: 16,
-                  bottom: 80, // 下方导航栏高度约 60-80
-                  child: FloatingActionButton(
+                  bottom: !isEditMode ? 80 : 30, // 与右边按钮组保持一致
+                  child: FloatingActionButton.small(
                     heroTag: 'impact_mode_toggle',
                     backgroundColor:
                         _isImpactMode ? Colors.redAccent : Colors.blueGrey,
@@ -3159,13 +3159,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                         behavior: SnackBarBehavior.floating,
                       ));
                     },
-                    mini: true,
                     child: Icon(
                       _isImpactMode
                           ? FontAwesomeIcons.crosshairs
                           : FontAwesomeIcons.locationDot,
                       color: Colors.white,
-                      size: 20,
+                      size: 18,
                     ),
                   ),
                 ),
@@ -3239,7 +3238,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                       left: 0,
                       right: 0,
                       bottom: 0,
-                      child: _buildFavoritesBar(grenadesAsync)),
+                      child: _buildFavoritesBar(grenadesAsync, context)),
               ]);
             }),
           ),
