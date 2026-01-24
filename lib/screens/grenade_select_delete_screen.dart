@@ -193,7 +193,7 @@ class _GrenadeSelectDeleteScreenState extends ConsumerState<GrenadeSelectDeleteS
                 border: OutlineInputBorder(),
                 contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               ),
-              value: _selectedMap,
+              initialValue: _selectedMap,
               items: _maps.map((map) {
                 return DropdownMenuItem(value: map, child: Text(map.name));
               }).toList(),

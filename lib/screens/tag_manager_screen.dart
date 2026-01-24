@@ -106,7 +106,7 @@ class _TagManagerScreenState extends ConsumerState<TagManagerScreen> {
 
   Widget _buildTagList() {
     final grouped = <int, List<Tag>>{};
-    for (final tag in _tags) grouped.putIfAbsent(tag.dimension, () => []).add(tag);
+    for (final tag in _tags) {grouped.putIfAbsent(tag.dimension, () => []).add(tag);}
     return ListView(
       padding: const EdgeInsets.all(16),
       children: grouped.entries.where((e) => e.key != TagDimension.role).map((e) => _buildGroup(e.key, e.value)).toList(),

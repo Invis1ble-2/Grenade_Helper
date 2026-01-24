@@ -2498,7 +2498,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       isScrollControlled: true,
       builder: (ctx) => StatefulBuilder(builder: (ctx, setSheetState) {
         final grouped = <int, List<Tag>>{};
-        for (final tag in tags) grouped.putIfAbsent(tag.dimension, () => []).add(tag);
+        for (final tag in tags){ grouped.putIfAbsent(tag.dimension, () => []).add(tag);}
         return Container(
           constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.6),
           padding: const EdgeInsets.all(16),
@@ -2551,7 +2551,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         return GestureDetector(
           onTap: () {
             final newSelection = Set<int>.from(selectedIds);
-            if (isSelected) newSelection.remove(tag.id); else newSelection.add(tag.id);
+            if (isSelected) {newSelection.remove(tag.id); } else {newSelection.add(tag.id); }
             ref.read(selectedTagIdsProvider.notifier).state = newSelection;
             setSheetState(() {});
           },

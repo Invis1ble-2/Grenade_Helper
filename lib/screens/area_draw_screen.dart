@@ -387,7 +387,7 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
                       ),
                       SizedBox(
                         width: 32,
-                        child: Text('${_strokeWidth.toStringAsFixed(1)}', 
+                        child: Text(_strokeWidth.toStringAsFixed(1), 
                           style: TextStyle(color: Theme.of(context).textTheme.bodySmall?.color, fontSize: 12)),
                       ),
                     ],
