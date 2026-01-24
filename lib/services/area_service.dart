@@ -148,11 +148,6 @@ class AreaService {
       final p1 = polygon[i];
       final p2 = polygon[(i + 1) % n];
       
-      if (point.dy > p1.dy.clamp(p1.dy, p2.dy).toDouble() && 
-          point.dy <= p2.dy.clamp(p1.dy, p2.dy).toDouble()) {
-        continue;
-      }
-      
       if ((p1.dy <= point.dy && p2.dy > point.dy) || (p2.dy <= point.dy && p1.dy > point.dy)) {
         final xIntersect = p1.dx + (point.dy - p1.dy) / (p2.dy - p1.dy) * (p2.dx - p1.dx);
         if (point.dx < xIntersect) {
