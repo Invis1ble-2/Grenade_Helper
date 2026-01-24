@@ -1556,7 +1556,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
   }
 
   /// 构建爆点设置区域
-  Widget _buildImpactPointSection() {
+  Widget _buildImpactPointSection(bool isEditing) {
     final hasImpactPoint =
         grenade!.impactXRatio != null && grenade!.impactYRatio != null;
 
@@ -1633,112 +1633,45 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                 ],
               ),
             ),
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _pickImpactPoint,
-                  icon: Icon(
-                    hasImpactPoint ? Icons.edit_location : Icons.add_location,
-                    size: 18,
-                  ),
-                  label: Text(hasImpactPoint ? '修改爆点' : '设置爆点'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.purpleAccent,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                ),
-              ),
-              if (hasImpactPoint ||
-                  (grenade!.impactAreaStrokes != null &&
-                      grenade!.impactAreaStrokes!.isNotEmpty)) ...[
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  onPressed: _clearImpactPoint,
-                  icon: const Icon(Icons.clear, size: 18),
-                  label: const Text('清除'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.red,
-                    side: const BorderSide(color: Colors.red),
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 10, horizontal: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
-          if (grenade!.type == GrenadeType.smoke ||
-              grenade!.type == GrenadeType.molotov) ...[
-            const SizedBox(height: 12),
+          // 非编辑模式：只显示查看按钮
+          if (!isEditing && hasImpactPoint)
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: hasImpactPoint
-                    ? () async {
-                        // 获取道具所在楼层
-                        await grenade!.layer.load();
-                        final layer = grenade!.layer.value;
-                        if (layer == null) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('无法获取楼层信息')),
-                          );
-                          return;
-                        }
-
-                        // 导航到绘制模式
-                        final result = await Navigator.push<Map<String, dynamic>>(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => ImpactPointPickerScreen(
-                              grenadeId: grenade!.id,
-                              initialX: grenade!.impactXRatio,
-                              initialY: grenade!.impactYRatio,
-                              throwX: grenade!.xRatio,
-                              throwY: grenade!.yRatio,
-                              layerId: layer.id,
-                              isDrawingMode: true,
-                              existingStrokes: grenade!.impactAreaStrokes,
-                              grenadeType: grenade!.type,
-                            ),
-                          ),
-                        );
-
-                        // 保存返回的笔画数据
-                        if (result != null && result['strokes'] != null) {
-                          final isar = ref.read(isarProvider);
-                          await isar.writeTxn(() async {
-                            final g = await isar.grenades.get(grenade!.id);
-                            if (g != null) {
-                              g.impactAreaStrokes = result['strokes'] as String;
-                              g.updatedAt = DateTime.now();
-                              await isar.grenades.put(g);
-                            }
-                          });
-                          await _markAsLocallyEdited();
-                          _loadData(resetTitle: false);
-                          sendOverlayCommand('reload_data');
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('✓ 爆点区域已保存'),
-                              backgroundColor: Colors.green,
-                              duration: Duration(seconds: 1),
-                            ),
-                          );
-                        }
-                      }
-                    : null,
-                icon: const Icon(Icons.brush, size: 18),
-                label: Text(hasImpactPoint ? '绘制爆点范围' : '请先设置爆点位置'),
+                onPressed: () async {
+                  await grenade!.layer.load();
+                  final layer = grenade!.layer.value;
+                  if (layer == null) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('无法获取楼层信息')),
+                      );
+                    }
+                    return;
+                  }
+                  if (context.mounted) {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ImpactPointPickerScreen(
+                          grenadeId: grenade!.id,
+                          initialX: grenade!.impactXRatio,
+                          initialY: grenade!.impactYRatio,
+                          throwX: grenade!.xRatio,
+                          throwY: grenade!.yRatio,
+                          layerId: layer.id,
+                          readOnly: true,
+                          existingStrokes: grenade!.impactAreaStrokes,
+                          grenadeType: grenade!.type,
+                        ),
+                      ),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.visibility, size: 18),
+                label: const Text('查看爆点位置'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor:
-                      hasImpactPoint ? Colors.pinkAccent : Colors.grey,
+                  backgroundColor: Colors.green,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   shape: RoundedRectangleBorder(
@@ -1747,6 +1680,120 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                 ),
               ),
             ),
+          // 编辑模式：显示修改/清除/绘制按钮
+          if (isEditing) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _pickImpactPoint,
+                    icon: Icon(
+                      hasImpactPoint ? Icons.edit_location : Icons.add_location,
+                      size: 18,
+                    ),
+                    label: Text(hasImpactPoint ? '修改爆点' : '设置爆点'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.purpleAccent,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+                if (hasImpactPoint ||
+                    (grenade!.impactAreaStrokes != null &&
+                        grenade!.impactAreaStrokes!.isNotEmpty)) ...[
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: _clearImpactPoint,
+                    icon: const Icon(Icons.clear, size: 18),
+                    label: const Text('清除'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red,
+                      side: const BorderSide(color: Colors.red),
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 10, horizontal: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            if (grenade!.type == GrenadeType.smoke ||
+                grenade!.type == GrenadeType.molotov) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: hasImpactPoint
+                      ? () async {
+                          await grenade!.layer.load();
+                          final layer = grenade!.layer.value;
+                          if (layer == null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('无法获取楼层信息')),
+                            );
+                            return;
+                          }
+
+                          final result = await Navigator.push<Map<String, dynamic>>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => ImpactPointPickerScreen(
+                                grenadeId: grenade!.id,
+                                initialX: grenade!.impactXRatio,
+                                initialY: grenade!.impactYRatio,
+                                throwX: grenade!.xRatio,
+                                throwY: grenade!.yRatio,
+                                layerId: layer.id,
+                                isDrawingMode: true,
+                                existingStrokes: grenade!.impactAreaStrokes,
+                                grenadeType: grenade!.type,
+                              ),
+                            ),
+                          );
+
+                          if (result != null && result['strokes'] != null) {
+                            final isar = ref.read(isarProvider);
+                            await isar.writeTxn(() async {
+                              final g = await isar.grenades.get(grenade!.id);
+                              if (g != null) {
+                                g.impactAreaStrokes = result['strokes'] as String;
+                                g.updatedAt = DateTime.now();
+                                await isar.grenades.put(g);
+                              }
+                            });
+                            await _markAsLocallyEdited();
+                            _loadData(resetTitle: false);
+                            sendOverlayCommand('reload_data');
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('✓ 爆点区域已保存'),
+                                backgroundColor: Colors.green,
+                                duration: Duration(seconds: 1),
+                              ),
+                            );
+                          }
+                        }
+                      : null,
+                  icon: const Icon(Icons.brush, size: 18),
+                  label: Text(hasImpactPoint ? '绘制爆点范围' : '请先设置爆点位置'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor:
+                        hasImpactPoint ? Colors.pinkAccent : Colors.grey,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ],
         ],
       ),
@@ -1785,8 +1832,9 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     final steps = grenade!.steps.toList();
     steps.sort((a, b) => a.stepIndex.compareTo(b.stepIndex));
 
-    // 是否显示爆点卡片（编辑模式且非穿点类型）
-    final showImpactCard = isEditing && grenade!.type != GrenadeType.wallbang;
+    final hasImpactPoint = grenade!.impactXRatio != null && grenade!.impactYRatio != null;
+    // 编辑模式：非穿点类型显示；非编辑模式：有爆点时显示
+    final showImpactCard = (isEditing && grenade!.type != GrenadeType.wallbang) || (!isEditing && hasImpactPoint);
 
     if (steps.isEmpty && !showImpactCard) {
       return const Center(
