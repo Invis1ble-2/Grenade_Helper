@@ -13,6 +13,8 @@ import 'import_screen.dart';
 import 'share_screen.dart';
 import 'settings_screen.dart';
 import 'about_screen.dart';
+import '../widgets/spring_festival_fu.dart';
+import '../widgets/spring_festival_banner.dart';
 
 // 全局搜索
 class GlobalSearchDelegate extends SearchDelegate {
@@ -122,112 +124,133 @@ class HomeScreen extends ConsumerWidget {
                 preferredSize: Size.fromHeight(24),
                 child: ChristmasLights(height: 24),
               )
-            : null,
+            : (isSpringFestivalTheme
+                ? const PreferredSize(
+                    preferredSize: Size.fromHeight(40),
+                    child: SpringFestivalBanner(),
+                  )
+                : null),
       ),
       drawer: Drawer(
-        child: ListView(
+        child: Column(
           children: [
-            DrawerHeader(
-                child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // Logo
-                Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    ClipOval(
-                      child: Image.asset(
-                        'assets/icons/app_icon.png',
-                        width: 80,
-                        height: 80,
-                        fit: BoxFit.cover,
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  DrawerHeader(
+                      child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Logo
+                      Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          ClipOval(
+                            child: Image.asset(
+                              'assets/icons/app_icon.png',
+                              width: 80,
+                              height: 80,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                          // 圣诞帽
+                          if (isChristmasTheme)
+                            const Positioned(
+                              top: -25,
+                              left: 5,
+                              child: ChristmasHat(width: 70),
+                            ),
+                        ],
                       ),
-                    ),
-                    // 圣诞帽
-                    if (isChristmasTheme)
-                      const Positioned(
-                        top: -25,
-                        left: 5,
-                        child: ChristmasHat(width: 70),
+                      const SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          if (seasonalTheme != null)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: Text(seasonalTheme.emoji,
+                                  style: const TextStyle(fontSize: 24)),
+                            ),
+                          const Text("Grenade Helper",
+                              style: TextStyle(
+                                  fontSize: 22, fontWeight: FontWeight.bold)),
+                          if (seasonalTheme != null)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 8),
+                              child: Text(seasonalTheme.emoji,
+                                  style: const TextStyle(fontSize: 24)),
+                            ),
+                        ],
                       ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (seasonalTheme != null)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: Text(seasonalTheme.emoji,
-                            style: const TextStyle(fontSize: 24)),
-                      ),
-                    const Text("Grenade Helper",
-                        style: TextStyle(
-                            fontSize: 22, fontWeight: FontWeight.bold)),
-                    if (seasonalTheme != null)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 8),
-                        child: Text(seasonalTheme.emoji,
-                            style: const TextStyle(fontSize: 24)),
-                      ),
-                  ],
-                ),
-              ],
-            )),
-            ListTile(
-              leading: const Icon(Icons.file_download),
-              title: const Text("导入"),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => const ImportScreen()));
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.share),
-              title: const Text("分享"),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => const ShareScreen()));
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.settings),
-              title: const Text("设置"),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => SettingsScreen(
-                      settingsService: globalSettingsService,
-                      onHotkeyChanged: (action, config) async {
-                        if (globalHotkeyService != null) {
-                          await globalHotkeyService!
-                              .updateHotkey(action, config);
-                        }
-                      },
-                      onHotkeysReset: () async {
-                        await globalHotkeyService?.reloadFromSettings();
-                      },
-                    ),
+                    ],
+                  )),
+                  ListTile(
+                    leading: const Icon(Icons.file_download),
+                    title: const Text("导入"),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const ImportScreen()));
+                    },
                   ),
-                );
-              },
+                  ListTile(
+                    leading: const Icon(Icons.share),
+                    title: const Text("分享"),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const ShareScreen()));
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.settings),
+                    title: const Text("设置"),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => SettingsScreen(
+                            settingsService: globalSettingsService,
+                            onHotkeyChanged: (action, config) async {
+                              if (globalHotkeyService != null) {
+                                await globalHotkeyService!
+                                    .updateHotkey(action, config);
+                              }
+                            },
+                            onHotkeysReset: () async {
+                              await globalHotkeyService?.reloadFromSettings();
+                            },
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.info_outline),
+                    title: const Text("关于"),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const AboutScreen()),
+                      );
+                    },
+                  ),
+                ],
+              ),
             ),
-            ListTile(
-              leading: const Icon(Icons.info_outline),
-              title: const Text("关于"),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const AboutScreen()),
-                );
-              },
-            ),
+            if (isSpringFestivalTheme)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 40),
+                child: SpringFestivalFu(size: 140),
+              ),
           ],
         ),
       ),
