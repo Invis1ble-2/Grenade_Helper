@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 /// 设计：钻石型（旋转45度）红底，金色“福”字，带质感阴影
 class SpringFestivalFu extends StatelessWidget {
   final double size;
-  const SpringFestivalFu({super.key, this.size = 160}); // 增大默认尺寸
+  const SpringFestivalFu({super.key, this.size = 160});
 
   @override
   Widget build(BuildContext context) {
@@ -14,7 +14,6 @@ class SpringFestivalFu extends StatelessWidget {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // 钻石型背景
           Transform.rotate(
             angle: 0.785398, // 45 度 (pi / 4)
             child: Container(
@@ -43,10 +42,8 @@ class SpringFestivalFu extends StatelessWidget {
               '福',
               style: TextStyle(
                 fontSize: size * 0.75,
-                fontWeight: FontWeight.w500, // 楷体不需要太粗
-                fontFamily: 'STKaiti', // 优先尝试华文楷体 (Windows/macOS 常见)
-                // 也可以添加备用字体，但 Flutter TextStyle 不直接支持多备选，
-                // 常规环境下系统会根据 'STKaiti' 进行匹配。
+                fontWeight: FontWeight.w500,
+                fontFamily: 'STKaiti', // 华文楷体
                 color: const Color(0xFFFFD700),
                 shadows: [
                   Shadow(

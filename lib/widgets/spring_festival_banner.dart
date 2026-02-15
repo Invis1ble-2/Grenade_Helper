@@ -23,7 +23,7 @@ class SpringFestivalBanner extends StatelessWidget {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // 装饰边框（可选，增加正式感）
+          // 装饰边框
           Positioned(
             left: 10,
             right: 10,
@@ -47,7 +47,7 @@ class SpringFestivalBanner extends StatelessWidget {
               color: Color(0xFFFFD700), // 金色
               fontSize: 22,
               fontWeight: FontWeight.normal,
-              fontFamily: 'STXingkai', // 优先使用华文行书
+              fontFamily: 'STXingkai',
               letterSpacing: 8,
               shadows: [
                 Shadow(
