@@ -11,10 +11,12 @@ jobs:
       
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.38.4'
           channel: 'stable'
+          cache: true
           
       - name: Get Dependencies
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Build iOS App (No Codesign)
         # 关键参数：--no-codesign，只生成 .app 文件，不尝试签名
