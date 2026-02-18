@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ffi' as ffi;
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -35,70 +34,6 @@ Isar? globalIsar;
 WindowController? overlayWindowController;
 // 主窗口控制器（用于接收子窗口消息）
 WindowController? mainWindowController;
-
-typedef _ShowWindowNative = ffi.Int32 Function(
-  ffi.IntPtr hWnd,
-  ffi.Int32 nCmdShow,
-);
-typedef _ShowWindowDart = int Function(
-  int hWnd,
-  int nCmdShow,
-);
-typedef _SetWindowPosNative = ffi.Int32 Function(
-  ffi.IntPtr hWnd,
-  ffi.IntPtr hWndInsertAfter,
-  ffi.Int32 x,
-  ffi.Int32 y,
-  ffi.Int32 cx,
-  ffi.Int32 cy,
-  ffi.Uint32 uFlags,
-);
-typedef _SetWindowPosDart = int Function(
-  int hWnd,
-  int hWndInsertAfter,
-  int x,
-  int y,
-  int cx,
-  int cy,
-  int uFlags,
-);
-
-class _Win32OverlayWindowApi {
-  _Win32OverlayWindowApi._() {
-    final user32 = ffi.DynamicLibrary.open('user32.dll');
-    _showWindow =
-        user32.lookupFunction<_ShowWindowNative, _ShowWindowDart>('ShowWindow');
-    _setWindowPos = user32
-        .lookupFunction<_SetWindowPosNative, _SetWindowPosDart>('SetWindowPos');
-  }
-
-  static const int _swShowNoActivate = 4;
-  static const int _hwndTopMost = -1;
-  static const int _swpNoSize = 0x0001;
-  static const int _swpNoMove = 0x0002;
-  static const int _swpNoActivate = 0x0010;
-  static const int _swpShowWindow = 0x0040;
-
-  late final _ShowWindowDart _showWindow;
-  late final _SetWindowPosDart _setWindowPos;
-
-  void showNoActivate(int hwnd) {
-    _showWindow(hwnd, _swShowNoActivate);
-    _setWindowPos(
-      hwnd,
-      _hwndTopMost,
-      0,
-      0,
-      0,
-      0,
-      _swpNoMove | _swpNoSize | _swpNoActivate | _swpShowWindow,
-    );
-  }
-}
-
-_Win32OverlayWindowApi? _win32OverlayWindowApi;
-_Win32OverlayWindowApi _getWin32OverlayWindowApi() =>
-    _win32OverlayWindowApi ??= _Win32OverlayWindowApi._();
 
 /// 窗口类型常量
 class WindowType {
@@ -168,15 +103,6 @@ NavigationDirection? _parseDirection(String? dirStr) {
     default:
       return null;
   }
-}
-
-Future<void> _showOverlayWindowNoActivate() async {
-  if (Platform.isWindows) {
-    final hwnd = await windowManager.getId();
-    _getWin32OverlayWindowApi().showNoActivate(hwnd);
-    return;
-  }
-  await windowManager.show(inactive: true);
 }
 
 /// 运行主窗口
@@ -439,9 +365,6 @@ Future<void> _runOverlayWindow(
         final position = await windowManager.getPosition();
         await settingsService.setOverlayPosition(position.dx, position.dy);
         await windowManager.close();
-        return 'ok';
-      case 'show_no_activate':
-        await _showOverlayWindowNoActivate();
         return 'ok';
       // === 悬浮窗操作命令（由全局热键触发）===
       case 'prev_grenade':
@@ -975,12 +898,8 @@ class _MainAppState extends ConsumerState<MainApp> {
       await _preloadOverlay();
     }
     // 优先使用无焦点显示，避免抢占游戏焦点
-    try {
-      await overlayWindowController!.invokeMethod('show_no_activate');
-    } catch (e) {
-      debugPrint('[Main] show_no_activate failed, fallback to show(): $e');
-      await overlayWindowController!.show();
-    }
+    // 显示并聚焦
+    await overlayWindowController!.show();
     // 设置状态（用于轮询检测）
     if (globalWindowService != null) {
       globalWindowService!.isOverlayVisible = true;
