@@ -349,7 +349,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
       await folderService.setFavorite(grenade!.id, favorite: false);
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('已取消收藏')));
+          .showSnackBar(const SnackBar(content: Text('已取消收藏'), duration: Duration(seconds: 1)));
       _loadData(resetTitle: false);
       return;
     }
@@ -358,7 +358,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     if (mapId == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('无法识别当前地图')));
+          .showSnackBar(const SnackBar(content: Text('无法识别当前地图'), duration: Duration(seconds: 1)));
       return;
     }
 
@@ -369,7 +369,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
         favorite: true, folderId: folderId);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('已加入收藏夹')),
+      const SnackBar(content: Text('已加入收藏夹'), duration: Duration(seconds: 1)),
     );
     _loadData(resetTitle: false);
   }
@@ -401,7 +401,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     final layer = grenade!.layer.value;
     if (layer == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('无法获取楼层信息')),
+        const SnackBar(content: Text('无法获取楼层信息'), duration: Duration(seconds: 1)),
       );
       return;
     }

@@ -2606,7 +2606,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                         ScaffoldMessenger.of(context)
                                             .showSnackBar(
                                           const SnackBar(
-                                              content: Text('已取消收藏')),
+                                              content: Text('已取消收藏'),duration: Duration(seconds: 1),),
                                         );
                                       }
                                     }
@@ -2643,7 +2643,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     if (targets.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('暂无可移动的目标收藏夹')));
+          .showSnackBar(const SnackBar(content: Text('暂无可移动的目标收藏夹'),duration: Duration(seconds: 1)));
       return;
     }
     if (!mounted) return;
@@ -2696,11 +2696,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       await folderService.moveFavorite(grenade.id, selectedFolderId!);
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('已移动收藏夹')));
+          .showSnackBar(const SnackBar(content: Text('已移动收藏夹'), duration: Duration(seconds: 1)));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('移动失败：$e')));
+          .showSnackBar(SnackBar(content: Text('移动失败：$e'), duration: Duration(seconds: 1)));
     }
   }
 
@@ -2827,11 +2827,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       await folderService.createFolder(widget.gameMap.id, controller.text);
       if (!mounted) return;
       ScaffoldMessenger.of(this.context)
-          .showSnackBar(const SnackBar(content: Text('收藏夹已创建')));
+          .showSnackBar(const SnackBar(content: Text('收藏夹已创建'), duration: Duration(seconds: 1)));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(this.context)
-          .showSnackBar(SnackBar(content: Text('创建失败：$e')));
+          .showSnackBar(SnackBar(content: Text('创建失败：$e'), duration: Duration(seconds: 1)));
     }
   }
 
@@ -2869,11 +2869,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       await folderService.renameFolder(folder.id, controller.text);
       if (!mounted) return;
       ScaffoldMessenger.of(this.context)
-          .showSnackBar(const SnackBar(content: Text('收藏夹已重命名')));
+          .showSnackBar(const SnackBar(content: Text('收藏夹已重命名'), duration: Duration(seconds: 1)));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(this.context)
-          .showSnackBar(SnackBar(content: Text('重命名失败：$e')));
+          .showSnackBar(SnackBar(content: Text('重命名失败：$e'), duration: Duration(seconds: 1)));
     }
   }
 
@@ -2935,11 +2935,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       await folderService.deleteFolder(folder.id, strategy);
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('收藏夹已删除')));
+          .showSnackBar(const SnackBar(content: Text('收藏夹已删除'), duration: Duration(seconds: 1)));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('删除失败：$e')));
+          .showSnackBar(SnackBar(content: Text('删除失败：$e'), duration: Duration(seconds: 1)));
     }
   }
 
