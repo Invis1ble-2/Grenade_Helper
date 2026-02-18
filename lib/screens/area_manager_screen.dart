@@ -5,6 +5,7 @@ import '../models.dart';
 import '../providers.dart';
 import '../services/area_service.dart';
 import 'area_draw_screen.dart';
+import 'area_auto_tag_preview_screen.dart';
 
 /// 区域管理界面
 class AreaManagerScreen extends ConsumerStatefulWidget {
@@ -31,30 +32,11 @@ class _AreaManagerScreenState extends ConsumerState<AreaManagerScreen> {
     final isar = ref.read(isarProvider);
     final areaService = AreaService(isar);
     final areas = await areaService.getAreas(widget.gameMap.id);
+    if (!mounted) return;
     setState(() {
       _areas = areas;
       _isLoading = false;
     });
-  }
-
-  Future<void> _createArea() async {
-    widget.gameMap.layers.loadSync();
-    final layers = widget.gameMap.layers.toList();
-    if (layers.isEmpty) return;
-
-    // 选择楼层
-    final layer =
-        layers.length == 1 ? layers.first : await _selectLayer(layers);
-    if (layer == null) return;
-    if (!mounted) return;
-
-    final result = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(
-          builder: (_) =>
-              AreaDrawScreen(gameMap: widget.gameMap, layer: layer)),
-    );
-    if (result == true) _loadAreas();
   }
 
   Future<MapLayer?> _selectLayer(List<MapLayer> layers) async {
@@ -73,6 +55,25 @@ class _AreaManagerScreenState extends ConsumerState<AreaManagerScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _createArea() async {
+    widget.gameMap.layers.loadSync();
+    final layers = widget.gameMap.layers.toList();
+    if (layers.isEmpty) return;
+
+    final layer =
+        layers.length == 1 ? layers.first : await _selectLayer(layers);
+    if (layer == null) return;
+    if (!mounted) return;
+
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AreaDrawScreen(gameMap: widget.gameMap, layer: layer),
+      ),
+    );
+    if (result == true) _loadAreas();
   }
 
   Future<void> _deleteArea(MapArea area) async {
@@ -127,16 +128,25 @@ class _AreaManagerScreenState extends ConsumerState<AreaManagerScreen> {
     if (result == true) _loadAreas();
   }
 
-  Future<void> _autoTagAll() async {
-    final isar = ref.read(isarProvider);
-    final areaService = AreaService(isar);
-    final count = await areaService.autoTagAllGrenades(widget.gameMap.id);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-          content: Text('已为 $count 个道具自动添加区域标签'),
-          backgroundColor: Colors.green),
+  Future<void> _openAreaAutoTag(MapArea area) async {
+    if (area.layerId == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('该区域未关联楼层，无法可视化标注'), backgroundColor: Colors.red));
+      return;
+    }
+    await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AreaAutoTagPreviewScreen(
+          gameMap: widget.gameMap,
+          area: area,
+        ),
+      ),
     );
+    if (mounted) {
+      _loadAreas();
+    }
   }
 
   @override
@@ -144,14 +154,6 @@ class _AreaManagerScreenState extends ConsumerState<AreaManagerScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text('${widget.gameMap.name} 区域管理'),
-        actions: [
-          if (_areas.isNotEmpty)
-            IconButton(
-              icon: const Icon(Icons.auto_fix_high),
-              tooltip: '自动为所有道具添加区域标签',
-              onPressed: _autoTagAll,
-            ),
-        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _createArea,
@@ -196,13 +198,23 @@ class _AreaManagerScreenState extends ConsumerState<AreaManagerScreen> {
                           ),
                           child: Icon(Icons.map, color: Color(area.colorValue)),
                         ),
-                        title: Text(area.name),
+                        title: Text(
+                          area.name,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                         subtitle: Text(
                             '创建于 ${area.createdAt.toString().substring(0, 16)}',
                             style: const TextStyle(fontSize: 12)),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            IconButton(
+                              tooltip: '可视化自动添加该区域标签',
+                              onPressed: () => _openAreaAutoTag(area),
+                              icon: const Icon(Icons.auto_awesome,
+                                  color: Colors.greenAccent),
+                              visualDensity: VisualDensity.compact,
+                            ),
                             IconButton(
                               icon: const Icon(Icons.edit_outlined,
                                   color: Colors.blueAccent),

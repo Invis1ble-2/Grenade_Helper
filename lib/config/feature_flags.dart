@@ -4,5 +4,5 @@
 /// `--dart-define=ENABLE_GRENADE_TAGS=true`
 const bool kEnableGrenadeTags = bool.fromEnvironment(
   'ENABLE_GRENADE_TAGS',
-  defaultValue: false,
+  defaultValue: true,
 );

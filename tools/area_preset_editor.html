@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>默认区域标签可视化编辑器</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg: #120c0e;
+      --panel: #1c1518;
+      --panel-soft: #231a1e;
+      --line: #3e2d34;
+      --text: #f3e8ec;
+      --muted: #b8a5ad;
+      --green: #4caf50;
+      --accent: #00d2ff;
+      --danger: #ef5350;
+      --warn: #ffb74d;
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: radial-gradient(circle at top right, #2a1319 0%, var(--bg) 55%);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 16px;
+    }
+
+    .container {
+      max-width: 1450px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      font-size: 22px;
+      margin-bottom: 14px;
+      letter-spacing: .3px;
+    }
+
+    .sub {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 16px;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(35, 26, 30, .75);
+      margin-bottom: 12px;
+    }
+
+    .toolbar label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .toolbar .group {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    select,
+    input,
+    button,
+    textarea {
+      font: inherit;
+    }
+
+    select,
+    input {
+      background: #151014;
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 7px 10px;
+      min-height: 34px;
+    }
+
+    button {
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: #2a1d22;
+      color: var(--text);
+      padding: 8px 12px;
+      cursor: pointer;
+      transition: .15s;
+      min-height: 34px;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      filter: brightness(1.06);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #00d2ff, #3a7bd5);
+      color: #00131f;
+      font-weight: 700;
+    }
+
+    .btn-danger {
+      background: rgba(239, 83, 80, .18);
+      border-color: rgba(239, 83, 80, .35);
+      color: #ff8d8b;
+    }
+
+    .btn-green {
+      background: rgba(76, 175, 80, .18);
+      border-color: rgba(76, 175, 80, .35);
+      color: #9fe4a1;
+    }
+
+    .btn-ghost {
+      border-color: var(--line);
+      background: #1d1519;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      gap: 12px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(28, 21, 24, .84);
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      font-size: 13px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .map-shell {
+      padding: 12px;
+    }
+
+    .map-wrapper {
+      width: 100%;
+      height: min(78vh, 940px);
+      border-radius: 10px;
+      background: #090708;
+      border: 1px solid #2d2126;
+      overflow: hidden;
+      position: relative;
+      cursor: crosshair;
+      user-select: none;
+    }
+
+    .map-wrapper.dragging {
+      cursor: grabbing;
+    }
+
+    .map-inner {
+      position: absolute;
+      width: 800px;
+      height: 800px;
+      left: 50%;
+      top: 50%;
+      margin-left: -400px;
+      margin-top: -400px;
+      transform-origin: center center;
+    }
+
+    #mapImage {
+      width: 800px;
+      height: 800px;
+      display: block;
+      pointer-events: none;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+
+    #overlaySvg {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 800px;
+      height: 800px;
+      overflow: visible;
+      pointer-events: none;
+    }
+
+    .crosshair {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .crosshair::before,
+    .crosshair::after {
+      content: '';
+      position: absolute;
+      background: rgba(255, 255, 255, .15);
+    }
+
+    .crosshair::before {
+      width: 1px;
+      height: 100%;
+      left: 50%;
+      top: 0;
+    }
+
+    .crosshair::after {
+      width: 100%;
+      height: 1px;
+      left: 0;
+      top: 50%;
+    }
+
+    .zoom-box {
+      position: absolute;
+      right: 10px;
+      bottom: 10px;
+      background: rgba(7, 7, 9, .7);
+      border: 1px solid #41313a;
+      border-radius: 10px;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      z-index: 3;
+    }
+
+    .zoom-line {
+      font-size: 12px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .side {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 10px;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel-soft);
+      padding: 10px;
+    }
+
+    .panel h3 {
+      font-size: 13px;
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .tag-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .tag-list {
+      max-height: 230px;
+      overflow: auto;
+      border: 1px solid #45343d;
+      border-radius: 8px;
+      background: #161015;
+    }
+
+    .tag-item {
+      width: 100%;
+      border: 0;
+      border-bottom: 1px solid #2f2329;
+      border-radius: 0;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      font-size: 12px;
+      text-align: left;
+    }
+
+    .tag-item:last-child {
+      border-bottom: 0;
+    }
+
+    .tag-item.active {
+      background: rgba(76, 175, 80, .15);
+      color: #b8f0bb;
+    }
+
+    .tag-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 8px;
+      display: inline-block;
+      border: 1px solid rgba(255, 255, 255, .4);
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--muted);
+      margin: 4px 0;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: #a88f97;
+      line-height: 1.6;
+    }
+
+    #output {
+      width: 100%;
+      min-height: 220px;
+      resize: vertical;
+      border: 1px solid #3d2b34;
+      border-radius: 8px;
+      background: #0f0b0d;
+      color: #7fe0ff;
+      padding: 10px;
+      font-family: Consolas, 'Courier New', monospace;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 22px;
+      transform: translateX(-50%);
+      background: rgba(20, 130, 80, .95);
+      color: white;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      opacity: 0;
+      pointer-events: none;
+      transition: .2s;
+      z-index: 99;
+    }
+
+    .toast.show {
+      opacity: 1;
+    }
+
+    @media (max-width: 1180px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .map-wrapper {
+        height: 66vh;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>默认标签区域快捷编辑工具</h1>
+    <p class="sub">左键拖拽绘制区域，右键拖拽平移，滚轮缩放。数据自动保存到浏览器，可导出 Dart 内置常量代码。</p>
+
+    <div class="toolbar">
+      <div class="group">
+        <label>地图</label>
+        <select id="mapSelect"></select>
+      </div>
+      <div class="group">
+        <label>楼层</label>
+        <select id="floorSelect"></select>
+      </div>
+      <div class="group">
+        <label>模式</label>
+        <button id="modeDraw" class="btn-green">绘制模式</button>
+        <button id="modePan" class="btn-ghost">平移模式</button>
+      </div>
+      <div class="group">
+        <button id="undoBtn" class="btn-ghost">撤销最后一笔</button>
+        <button id="clearTagBtn" class="btn-danger">清空当前标签</button>
+      </div>
+      <div class="group">
+        <button id="copyCurrentBtn" class="btn-primary">复制当前地图 Dart</button>
+        <button id="copyAllBtn" class="btn-primary">复制全部 Dart</button>
+      </div>
+    </div>
+
+    <div class="layout">
+      <div class="card">
+        <div class="card-header">
+          <span id="mapMeta">-</span>
+          <span id="pointerMeta">坐标: -, -</span>
+        </div>
+        <div class="map-shell">
+          <div class="map-wrapper" id="mapWrapper">
+            <div class="map-inner" id="mapInner">
+              <img id="mapImage" src="" alt="map" />
+              <svg id="overlaySvg" viewBox="0 0 800 800"></svg>
+            </div>
+            <div class="crosshair"></div>
+            <div class="zoom-box">
+              <button id="zoomInBtn">+</button>
+              <div id="zoomLevel" class="zoom-line">100%</div>
+              <button id="zoomOutBtn">-</button>
+              <button id="zoomResetBtn">重置</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="side">
+          <div class="panel">
+            <h3>区域标签</h3>
+            <div class="tag-row" style="margin-bottom:8px;">
+              <input id="newTagInput" placeholder="新增标签名" />
+              <button id="addTagBtn" class="btn-ghost">添加</button>
+            </div>
+            <div class="tag-list" id="tagList"></div>
+          </div>
+
+          <div class="panel">
+            <h3>当前标签信息</h3>
+            <div class="row"><span>标签名</span><strong id="currentTagName">-</strong></div>
+            <div class="row"><span>颜色</span><input id="colorInput" type="color" value="#4caf50" /></div>
+            <div class="row"><span>笔画数量</span><strong id="strokeCount">0</strong></div>
+            <div class="row"><span>点位数量</span><strong id="pointCount">0</strong></div>
+          </div>
+
+          <div class="panel">
+            <h3>导出代码</h3>
+            <textarea id="output" spellcheck="false"></textarea>
+          </div>
+
+          <div class="panel">
+            <div class="hint">
+              1. 先选地图与楼层，再选标签进行绘制。<br />
+              2. 每次左键拖拽会生成一笔闭合区域。<br />
+              3. 导出代码后可粘贴到 `lib/data`，做内置区域数据分发。<br />
+              4. 浏览器会自动保存草稿（localStorage）。
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    const MAP_CONFIGS = [
+      { mapKey: 'mirage', mapName: 'Mirage', floors: [{ key: 'mirage.png', name: 'Default', asset: '../assets/maps/mirage.png' }] },
+      { mapKey: 'inferno', mapName: 'Inferno', floors: [{ key: 'inferno.png', name: 'Default', asset: '../assets/maps/inferno.png' }] },
+      { mapKey: 'dust2', mapName: 'Dust 2', floors: [{ key: 'dust2.png', name: 'Default', asset: '../assets/maps/dust2.png' }] },
+      { mapKey: 'overpass', mapName: 'Overpass', floors: [{ key: 'overpass.png', name: 'Default', asset: '../assets/maps/overpass.png' }] },
+      { mapKey: 'ancient', mapName: 'Ancient', floors: [{ key: 'ancient.png', name: 'Default', asset: '../assets/maps/ancient.png' }] },
+      { mapKey: 'anubis', mapName: 'Anubis', floors: [{ key: 'anubis.png', name: 'Default', asset: '../assets/maps/anubis.png' }] },
+      { mapKey: 'train', mapName: 'Train', floors: [{ key: 'train.png', name: 'Default', asset: '../assets/maps/train.png' }] },
+      {
+        mapKey: 'nuke', mapName: 'Nuke', floors: [
+          { key: 'nuke_lower.png', name: 'B Site (Lower)', asset: '../assets/maps/nuke_lower.png' },
+          { key: 'nuke_upper.png', name: 'A Site (Upper)', asset: '../assets/maps/nuke_upper.png' },
+        ]
+      },
+      {
+        mapKey: 'vertigo', mapName: 'Vertigo', floors: [
+          { key: 'vertigo_lower.png', name: 'Level 50 (Lower)', asset: '../assets/maps/vertigo_lower.png' },
+          { key: 'vertigo_upper.png', name: 'Level 51 (Upper)', asset: '../assets/maps/vertigo_upper.png' },
+        ]
+      },
+    ];
+
+    const DEFAULT_AREA_TAGS = {
+      dust2: ['A大', 'A1', 'A2', 'A3', 'A包点', 'A坑', '中门', '中路', 'B通', 'B洞', 'B包点', 'B门', '匪家', '警家', '大坑', '小坑'],
+      mirage: ['A大', 'A1', 'A2', 'A3', 'A包点', 'CT房', '中路', 'B通', 'B包点', 'B洞', '短点', '窗台', '天台', '匪家', '警家'],
+      inferno: ['A大', 'A1', 'A2', 'A3', 'A包点', 'A平台', '中路', 'B通', 'B包点', 'B车', '香蕉', '二楼', '匪家', '警家'],
+      nuke: ['A包点', 'A大厅', '天台', '外围', 'B包点', 'B秘', '单向', '双向', '地下', '匪家', '警家'],
+      overpass: ['A包点', 'A厕所', 'A电话', 'B包点', 'B通', 'B怪兽', '下水道', '连接', '匪家', '警家'],
+      vertigo: ['A包点', 'A斜坡', 'B包点', 'B斜坡', '中路', '电梯', '匪家', '警家'],
+      ancient: ['A包点', 'A大', 'B包点', 'B通', '中路', '匪家', '警家'],
+      anubis: ['A包点', 'A运河', 'B包点', 'B通', '中路', '连接', '匪家', '警家'],
+      train: [],
+    };
+
+    const STORAGE_KEY = 'gh_area_preset_editor_v1';
+    const DEFAULT_COLOR = '#4caf50';
+
+    const state = {
+      currentMapKey: 'mirage',
+      currentFloorKey: 'mirage.png',
+      currentTagName: 'A大',
+      drawMode: true,
+      zoom: 1,
+      panX: 0,
+      panY: 0,
+      isDragging: false,
+      dragStartX: 0,
+      dragStartY: 0,
+      dragStartPanX: 0,
+      dragStartPanY: 0,
+      isDrawing: false,
+      currentStroke: [],
+      data: loadData(),
+    };
+
+    const mapSelect = document.getElementById('mapSelect');
+    const floorSelect = document.getElementById('floorSelect');
+    const mapImage = document.getElementById('mapImage');
+    const overlaySvg = document.getElementById('overlaySvg');
+    const mapWrapper = document.getElementById('mapWrapper');
+    const mapInner = document.getElementById('mapInner');
+    const mapMeta = document.getElementById('mapMeta');
+    const pointerMeta = document.getElementById('pointerMeta');
+    const modeDrawBtn = document.getElementById('modeDraw');
+    const modePanBtn = document.getElementById('modePan');
+    const undoBtn = document.getElementById('undoBtn');
+    const clearTagBtn = document.getElementById('clearTagBtn');
+    const tagListEl = document.getElementById('tagList');
+    const newTagInput = document.getElementById('newTagInput');
+    const addTagBtn = document.getElementById('addTagBtn');
+    const currentTagNameEl = document.getElementById('currentTagName');
+    const strokeCountEl = document.getElementById('strokeCount');
+    const pointCountEl = document.getElementById('pointCount');
+    const colorInput = document.getElementById('colorInput');
+    const outputEl = document.getElementById('output');
+    const copyCurrentBtn = document.getElementById('copyCurrentBtn');
+    const copyAllBtn = document.getElementById('copyAllBtn');
+    const zoomInBtn = document.getElementById('zoomInBtn');
+    const zoomOutBtn = document.getElementById('zoomOutBtn');
+    const zoomResetBtn = document.getElementById('zoomResetBtn');
+    const zoomLevelEl = document.getElementById('zoomLevel');
+
+    function loadData() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch (e) {
+        return {};
+      }
+    }
+
+    function saveData() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state.data));
+    }
+
+    function showToast(text, ok = true) {
+      const el = document.getElementById('toast');
+      el.textContent = text;
+      el.style.background = ok ? 'rgba(20,130,80,.95)' : 'rgba(180,80,30,.95)';
+      el.classList.add('show');
+      setTimeout(() => el.classList.remove('show'), 1600);
+    }
+
+    function getMapConfig(mapKey) {
+      return MAP_CONFIGS.find(m => m.mapKey === mapKey);
+    }
+
+    function ensureMapData(mapKey) {
+      if (!state.data[mapKey]) {
+        state.data[mapKey] = { floors: {} };
+      }
+      const cfg = getMapConfig(mapKey);
+      const defaults = DEFAULT_AREA_TAGS[mapKey] || [];
+      for (const floor of cfg.floors) {
+        if (!state.data[mapKey].floors[floor.key]) {
+          const tags = {};
+          for (const name of defaults) {
+            tags[name] = { color: DEFAULT_COLOR, strokes: [] };
+          }
+          state.data[mapKey].floors[floor.key] = { tags };
+        } else {
+          const tags = state.data[mapKey].floors[floor.key].tags || {};
+          for (const name of defaults) {
+            if (!tags[name]) tags[name] = { color: DEFAULT_COLOR, strokes: [] };
+          }
+          state.data[mapKey].floors[floor.key].tags = tags;
+        }
+      }
+    }
+
+    function getCurrentFloorData() {
+      ensureMapData(state.currentMapKey);
+      return state.data[state.currentMapKey].floors[state.currentFloorKey];
+    }
+
+    function getCurrentTagData() {
+      const floor = getCurrentFloorData();
+      if (!floor.tags[state.currentTagName]) {
+        floor.tags[state.currentTagName] = { color: DEFAULT_COLOR, strokes: [] };
+      }
+      return floor.tags[state.currentTagName];
+    }
+
+    function getTagNames() {
+      const floor = getCurrentFloorData();
+      return Object.keys(floor.tags).sort((a, b) => a.localeCompare(b, 'zh-CN'));
+    }
+
+    function initSelectors() {
+      mapSelect.innerHTML = MAP_CONFIGS
+        .map(m => `<option value="${m.mapKey}">${m.mapName}</option>`)
+        .join('');
+      mapSelect.value = state.currentMapKey;
+
+      mapSelect.addEventListener('change', () => {
+        state.currentMapKey = mapSelect.value;
+        const cfg = getMapConfig(state.currentMapKey);
+        state.currentFloorKey = cfg.floors[0].key;
+        ensureMapData(state.currentMapKey);
+        ensureCurrentTagValid();
+        resetView();
+        renderAll();
+      });
+
+      floorSelect.addEventListener('change', () => {
+        state.currentFloorKey = floorSelect.value;
+        ensureCurrentTagValid();
+        resetView();
+        renderAll();
+      });
+    }
+
+    function ensureCurrentTagValid() {
+      const tags = getTagNames();
+      if (tags.length === 0) {
+        const floor = getCurrentFloorData();
+        floor.tags['未命名区域'] = { color: DEFAULT_COLOR, strokes: [] };
+      }
+      const updated = getTagNames();
+      if (!updated.includes(state.currentTagName)) {
+        state.currentTagName = updated[0];
+      }
+    }
+
+    function updateFloorOptions() {
+      const cfg = getMapConfig(state.currentMapKey);
+      floorSelect.innerHTML = cfg.floors
+        .map(f => `<option value="${f.key}">${f.name}</option>`)
+        .join('');
+      floorSelect.value = state.currentFloorKey;
+      if (!cfg.floors.some(f => f.key === state.currentFloorKey)) {
+        state.currentFloorKey = cfg.floors[0].key;
+        floorSelect.value = state.currentFloorKey;
+      }
+    }
+
+    function getCurrentFloorConfig() {
+      const cfg = getMapConfig(state.currentMapKey);
+      return cfg.floors.find(f => f.key === state.currentFloorKey) || cfg.floors[0];
+    }
+
+    function updateModeButtons() {
+      if (state.drawMode) {
+        modeDrawBtn.className = 'btn-green';
+        modePanBtn.className = 'btn-ghost';
+      } else {
+        modeDrawBtn.className = 'btn-ghost';
+        modePanBtn.className = 'btn-green';
+      }
+      mapWrapper.style.cursor = state.drawMode ? 'crosshair' : 'grab';
+    }
+
+    function updateTransform() {
+      mapInner.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
+      zoomLevelEl.textContent = `${Math.round(state.zoom * 100)}%`;
+    }
+
+    function resetView() {
+      state.zoom = 1;
+      state.panX = 0;
+      state.panY = 0;
+      updateTransform();
+    }
+
+    function zoomBy(delta) {
+      const next = Math.max(0.5, Math.min(5, state.zoom + delta));
+      state.zoom = parseFloat(next.toFixed(2));
+      updateTransform();
+    }
+
+    function normalizePoint(evt) {
+      const rect = mapWrapper.getBoundingClientRect();
+      const base = 800;
+      const centerX = rect.left + rect.width / 2 + state.panX;
+      const centerY = rect.top + rect.height / 2 + state.panY;
+      const scaled = base * state.zoom;
+      const left = centerX - scaled / 2;
+      const top = centerY - scaled / 2;
+
+      const x = (evt.clientX - left) / scaled;
+      const y = (evt.clientY - top) / scaled;
+      return {
+        x: Math.max(0, Math.min(1, x)),
+        y: Math.max(0, Math.min(1, y)),
+      };
+    }
+
+    function updatePointerMeta(evt) {
+      const p = normalizePoint(evt);
+      pointerMeta.textContent = `坐标: ${p.x.toFixed(4)}, ${p.y.toFixed(4)}`;
+    }
+
+    function pathFromStroke(stroke) {
+      if (!stroke || stroke.length < 2) return '';
+      const pts = stroke.map(p => ({ x: p.x * 800, y: p.y * 800 }));
+      let d = `M ${pts[0].x} ${pts[0].y}`;
+      if (pts.length < 3) {
+        for (let i = 1; i < pts.length; i++) {
+          d += ` L ${pts[i].x} ${pts[i].y}`;
+        }
+      } else {
+        for (let i = 1; i < pts.length - 1; i++) {
+          const p1 = pts[i];
+          const p2 = pts[i + 1];
+          const midX = (p1.x + p2.x) / 2;
+          const midY = (p1.y + p2.y) / 2;
+          d += ` Q ${p1.x} ${p1.y} ${midX} ${midY}`;
+        }
+        const last = pts[pts.length - 1];
+        d += ` L ${last.x} ${last.y}`;
+      }
+      d += ' Z';
+      return d;
+    }
+
+    function colorToRgba(hex, alpha) {
+      const c = hex.replace('#', '');
+      const num = parseInt(c, 16);
+      const r = (num >> 16) & 255;
+      const g = (num >> 8) & 255;
+      const b = num & 255;
+      return `rgba(${r},${g},${b},${alpha})`;
+    }
+
+    function renderOverlay() {
+      overlaySvg.innerHTML = '';
+      const floor = getCurrentFloorData();
+
+      for (const [name, tag] of Object.entries(floor.tags)) {
+        const isCurrent = name === state.currentTagName;
+        const strokeColor = tag.color || DEFAULT_COLOR;
+        for (const stroke of tag.strokes || []) {
+          if (!stroke || stroke.length < 2) continue;
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.setAttribute('d', pathFromStroke(stroke));
+          path.setAttribute('fill', colorToRgba(strokeColor, isCurrent ? 0.35 : 0.2));
+          path.setAttribute('stroke', strokeColor);
+          path.setAttribute('stroke-width', isCurrent ? '2.8' : '1.6');
+          path.setAttribute('stroke-linejoin', 'round');
+          path.setAttribute('stroke-linecap', 'round');
+          overlaySvg.appendChild(path);
+        }
+      }
+
+      if (state.currentStroke.length >= 2) {
+        const curTag = getCurrentTagData();
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', pathFromStroke(state.currentStroke));
+        path.setAttribute('fill', colorToRgba(curTag.color || DEFAULT_COLOR, 0.22));
+        path.setAttribute('stroke', curTag.color || DEFAULT_COLOR);
+        path.setAttribute('stroke-width', '2.4');
+        path.setAttribute('stroke-linejoin', 'round');
+        path.setAttribute('stroke-linecap', 'round');
+        overlaySvg.appendChild(path);
+      }
+    }
+
+    function renderTagList() {
+      const names = getTagNames();
+      const floor = getCurrentFloorData();
+      tagListEl.innerHTML = names.map(name => {
+        const tag = floor.tags[name];
+        const active = name === state.currentTagName ? 'active' : '';
+        const count = (tag.strokes || []).length;
+        return `
+          <button class="tag-item ${active}" data-tag="${name}">
+            <span><span class="tag-dot" style="background:${tag.color || DEFAULT_COLOR}"></span>${name}</span>
+            <span>${count}笔</span>
+          </button>`;
+      }).join('');
+
+      tagListEl.querySelectorAll('.tag-item').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.currentTagName = btn.dataset.tag;
+          renderAll();
+        });
+      });
+    }
+
+    function renderCurrentTagMeta() {
+      const tag = getCurrentTagData();
+      const strokes = tag.strokes || [];
+      const points = strokes.reduce((sum, s) => sum + (s ? s.length : 0), 0);
+      currentTagNameEl.textContent = state.currentTagName;
+      strokeCountEl.textContent = strokes.length;
+      pointCountEl.textContent = points;
+      colorInput.value = tag.color || DEFAULT_COLOR;
+    }
+
+    function intColorFromHex(hex) {
+      const c = hex.replace('#', '').toUpperCase();
+      return `0xFF${c}`;
+    }
+
+    function escapeDartString(str) {
+      return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    }
+
+    function areaToDart(areaName, tag) {
+      const json = JSON.stringify(tag.strokes || []);
+      return `        BuiltinAreaPreset(\n          name: '${escapeDartString(areaName)}',\n          colorValue: ${intColorFromHex(tag.color || DEFAULT_COLOR)},\n          strokesJson: r'''${json}''',\n        )`;
+    }
+
+    function generateDartForMap(mapKey) {
+      const map = state.data[mapKey];
+      if (!map) return '';
+      const floorEntries = Object.entries(map.floors || {});
+      const floorCode = floorEntries
+        .map(([floorKey, floor]) => {
+          const tagEntries = Object.entries(floor.tags || {}).filter(([, tag]) => (tag.strokes || []).length > 0);
+          if (tagEntries.length === 0) return '';
+          const areaListCode = tagEntries.map(([name, tag]) => areaToDart(name, tag)).join(',\n');
+          return `    '${floorKey}': [\n${areaListCode}\n    ]`;
+        })
+        .filter(Boolean)
+        .join(',\n');
+
+      if (!floorCode) return '';
+      return `  '${mapKey}': {\n${floorCode}\n  }`;
+    }
+
+    function generateAllDartCode() {
+      const mapBlocks = MAP_CONFIGS
+        .map(cfg => generateDartForMap(cfg.mapKey))
+        .filter(Boolean)
+        .join(',\n');
+
+      return `class BuiltinAreaPreset {\n  final String name;\n  final int colorValue;\n  final String strokesJson;\n\n  const BuiltinAreaPreset({\n    required this.name,\n    required this.colorValue,\n    required this.strokesJson,\n  });\n}\n\nconst Map<String, Map<String, List<BuiltinAreaPreset>>> builtinAreaRegionPresets = {\n${mapBlocks}\n};`;
+    }
+
+    function generateCurrentMapDartCode() {
+      const block = generateDartForMap(state.currentMapKey);
+      if (!block) {
+        return `// 当前地图还没有任何区域笔画数据\n// mapKey: ${state.currentMapKey}`;
+      }
+      return `// 当前地图导出\nconst Map<String, Map<String, List<BuiltinAreaPreset>>> currentMapAreaPresets = {\n${block}\n};`;
+    }
+
+    function renderOutput() {
+      outputEl.value = generateCurrentMapDartCode();
+    }
+
+    function renderHeaderMeta() {
+      const cfg = getMapConfig(state.currentMapKey);
+      const floor = getCurrentFloorConfig();
+      mapMeta.textContent = `${cfg.mapName} / ${floor.name}`;
+    }
+
+    function renderMapImage() {
+      const floor = getCurrentFloorConfig();
+      mapImage.src = floor.asset;
+    }
+
+    function renderAll() {
+      ensureMapData(state.currentMapKey);
+      updateFloorOptions();
+      ensureCurrentTagValid();
+      renderMapImage();
+      renderHeaderMeta();
+      updateModeButtons();
+      updateTransform();
+      renderTagList();
+      renderCurrentTagMeta();
+      renderOverlay();
+      renderOutput();
+      saveData();
+    }
+
+    function setupEvents() {
+      modeDrawBtn.addEventListener('click', () => {
+        state.drawMode = true;
+        renderAll();
+      });
+
+      modePanBtn.addEventListener('click', () => {
+        state.drawMode = false;
+        renderAll();
+      });
+
+      zoomInBtn.addEventListener('click', () => zoomBy(0.2));
+      zoomOutBtn.addEventListener('click', () => zoomBy(-0.2));
+      zoomResetBtn.addEventListener('click', resetView);
+
+      mapWrapper.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        if (e.deltaY < 0) zoomBy(0.12);
+        else zoomBy(-0.12);
+      }, { passive: false });
+
+      mapWrapper.addEventListener('contextmenu', (e) => e.preventDefault());
+
+      mapWrapper.addEventListener('mousedown', (e) => {
+        if (e.button === 2 || !state.drawMode) {
+          state.isDragging = true;
+          state.dragStartX = e.clientX;
+          state.dragStartY = e.clientY;
+          state.dragStartPanX = state.panX;
+          state.dragStartPanY = state.panY;
+          mapWrapper.classList.add('dragging');
+          return;
+        }
+
+        if (e.button !== 0) return;
+        const p = normalizePoint(e);
+        state.isDrawing = true;
+        state.currentStroke = [p];
+        renderOverlay();
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        updatePointerMeta(e);
+
+        if (state.isDragging) {
+          state.panX = state.dragStartPanX + (e.clientX - state.dragStartX);
+          state.panY = state.dragStartPanY + (e.clientY - state.dragStartY);
+          updateTransform();
+          return;
+        }
+
+        if (state.isDrawing) {
+          const p = normalizePoint(e);
+          state.currentStroke.push({ x: +p.x.toFixed(4), y: +p.y.toFixed(4) });
+          renderOverlay();
+        }
+      });
+
+      document.addEventListener('mouseup', (e) => {
+        if (state.isDragging) {
+          state.isDragging = false;
+          mapWrapper.classList.remove('dragging');
+        }
+
+        if (state.isDrawing && e.button === 0) {
+          state.isDrawing = false;
+          if (state.currentStroke.length >= 3) {
+            const tag = getCurrentTagData();
+            if (!Array.isArray(tag.strokes)) tag.strokes = [];
+            tag.strokes.push(state.currentStroke);
+            showToast('已添加一笔区域');
+          } else {
+            showToast('笔画点数不足，已忽略', false);
+          }
+          state.currentStroke = [];
+          renderAll();
+        }
+      });
+
+      undoBtn.addEventListener('click', () => {
+        const tag = getCurrentTagData();
+        if (!tag.strokes || tag.strokes.length === 0) {
+          showToast('当前标签没有可撤销笔画', false);
+          return;
+        }
+        tag.strokes.pop();
+        renderAll();
+      });
+
+      clearTagBtn.addEventListener('click', () => {
+        const tag = getCurrentTagData();
+        if (!tag.strokes || tag.strokes.length === 0) return;
+        if (!confirm(`确认清空标签「${state.currentTagName}」的所有区域笔画？`)) return;
+        tag.strokes = [];
+        renderAll();
+      });
+
+      addTagBtn.addEventListener('click', () => {
+        const name = (newTagInput.value || '').trim();
+        if (!name) return;
+        const floor = getCurrentFloorData();
+        if (floor.tags[name]) {
+          showToast('标签已存在', false);
+          state.currentTagName = name;
+          renderAll();
+          return;
+        }
+        floor.tags[name] = { color: DEFAULT_COLOR, strokes: [] };
+        state.currentTagName = name;
+        newTagInput.value = '';
+        renderAll();
+      });
+
+      newTagInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          addTagBtn.click();
+        }
+      });
+
+      colorInput.addEventListener('change', () => {
+        const tag = getCurrentTagData();
+        tag.color = colorInput.value;
+        renderAll();
+      });
+
+      copyCurrentBtn.addEventListener('click', async () => {
+        const text = generateCurrentMapDartCode();
+        await navigator.clipboard.writeText(text);
+        outputEl.value = text;
+        showToast('已复制当前地图 Dart 代码');
+      });
+
+      copyAllBtn.addEventListener('click', async () => {
+        const text = generateAllDartCode();
+        await navigator.clipboard.writeText(text);
+        outputEl.value = text;
+        showToast('已复制全部地图 Dart 代码');
+      });
+    }
+
+    function bootstrap() {
+      for (const cfg of MAP_CONFIGS) ensureMapData(cfg.mapKey);
+      initSelectors();
+      setupEvents();
+      ensureCurrentTagValid();
+      renderAll();
+    }
+
+    bootstrap();
+  </script>
+</body>
+
+</html>

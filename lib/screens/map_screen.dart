@@ -20,6 +20,7 @@ import '../services/favorite_folder_service.dart';
 import '../services/tag_service.dart';
 import '../models/tag.dart';
 import '../models/grenade_tag.dart';
+import '../models/map_area.dart';
 import 'grenade_detail_screen.dart';
 import 'impact_point_picker_screen.dart';
 import 'tag_manager_screen.dart';
@@ -31,19 +32,32 @@ final isEditModeProvider = StateProvider.autoDispose<bool>((ref) => false);
 final selectedLayerIndexProvider = StateProvider.autoDispose<int>((ref) => 0);
 final selectedTagIdsProvider = StateProvider.autoDispose<Set<int>>((ref) => {});
 
+final _grenadeTagRevisionProvider =
+    StreamProvider.autoDispose<int>((ref) async* {
+  final isar = ref.watch(isarProvider);
+  int revision = 0;
+  yield revision;
+  await for (final _ in isar.grenadeTags.watchLazy()) {
+    revision++;
+    yield revision;
+  }
+});
+
 final _filteredGrenadesProvider =
     StreamProvider.autoDispose.family<List<Grenade>, int>((ref, layerId) {
   final isar = ref.watch(isarProvider);
   final teamFilter = ref.watch(teamFilterProvider);
   final onlyFav = ref.watch(onlyFavoritesProvider);
   final selectedTypes = ref.watch(typeFilterProvider);
+  final selectedTagIds = ref.watch(selectedTagIdsProvider);
+  ref.watch(_grenadeTagRevisionProvider);
 
   return isar.grenades
       .filter()
       .layer((q) => q.idEqualTo(layerId))
       .watch(fireImmediately: true)
-      .map((allGrenades) {
-    return allGrenades.where((g) {
+      .asyncMap((allGrenades) async {
+    var filtered = allGrenades.where((g) {
       if (!selectedTypes.contains(g.type)) return false;
       if (teamFilter == TeamType.onlyAll && g.team != TeamType.all) {
         return false;
@@ -53,6 +67,21 @@ final _filteredGrenadesProvider =
       if (onlyFav && !g.isFavorite) return false;
       return true;
     }).toList();
+
+    if (kEnableGrenadeTags && selectedTagIds.isNotEmpty) {
+      final matchedGrenadeIds = <int>{};
+      for (final tagId in selectedTagIds) {
+        final links =
+            await isar.grenadeTags.filter().tagIdEqualTo(tagId).findAll();
+        for (final link in links) {
+          matchedGrenadeIds.add(link.grenadeId);
+        }
+      }
+      filtered =
+          filtered.where((g) => matchedGrenadeIds.contains(g.id)).toList();
+    }
+
+    return filtered;
   });
 });
 
@@ -2606,7 +2635,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                         ScaffoldMessenger.of(context)
                                             .showSnackBar(
                                           const SnackBar(
-                                              content: Text('已取消收藏'),duration: Duration(seconds: 1),),
+                                            content: Text('已取消收藏'),
+                                            duration: Duration(seconds: 1),
+                                          ),
                                         );
                                       }
                                     }
@@ -2642,8 +2673,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final targets = folders.where((f) => f.id != currentFolderId).toList();
     if (targets.isEmpty) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('暂无可移动的目标收藏夹'),duration: Duration(seconds: 1)));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('暂无可移动的目标收藏夹'), duration: Duration(seconds: 1)));
       return;
     }
     if (!mounted) return;
@@ -2695,12 +2726,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     try {
       await folderService.moveFavorite(grenade.id, selectedFolderId!);
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('已移动收藏夹'), duration: Duration(seconds: 1)));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('已移动收藏夹'), duration: Duration(seconds: 1)));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('移动失败：$e'), duration: Duration(seconds: 1)));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('移动失败：$e'), duration: Duration(seconds: 1)));
     }
   }
 
@@ -2826,12 +2857,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     try {
       await folderService.createFolder(widget.gameMap.id, controller.text);
       if (!mounted) return;
-      ScaffoldMessenger.of(this.context)
-          .showSnackBar(const SnackBar(content: Text('收藏夹已创建'), duration: Duration(seconds: 1)));
+      ScaffoldMessenger.of(this.context).showSnackBar(const SnackBar(
+          content: Text('收藏夹已创建'), duration: Duration(seconds: 1)));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(this.context)
-          .showSnackBar(SnackBar(content: Text('创建失败：$e'), duration: Duration(seconds: 1)));
+      ScaffoldMessenger.of(this.context).showSnackBar(
+          SnackBar(content: Text('创建失败：$e'), duration: Duration(seconds: 1)));
     }
   }
 
@@ -2868,12 +2899,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     try {
       await folderService.renameFolder(folder.id, controller.text);
       if (!mounted) return;
-      ScaffoldMessenger.of(this.context)
-          .showSnackBar(const SnackBar(content: Text('收藏夹已重命名'), duration: Duration(seconds: 1)));
+      ScaffoldMessenger.of(this.context).showSnackBar(const SnackBar(
+          content: Text('收藏夹已重命名'), duration: Duration(seconds: 1)));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(this.context)
-          .showSnackBar(SnackBar(content: Text('重命名失败：$e'), duration: Duration(seconds: 1)));
+      ScaffoldMessenger.of(this.context).showSnackBar(
+          SnackBar(content: Text('重命名失败：$e'), duration: Duration(seconds: 1)));
     }
   }
 
@@ -2934,12 +2965,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     try {
       await folderService.deleteFolder(folder.id, strategy);
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('收藏夹已删除'), duration: Duration(seconds: 1)));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('收藏夹已删除'), duration: Duration(seconds: 1)));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('删除失败：$e'), duration: Duration(seconds: 1)));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('删除失败：$e'), duration: Duration(seconds: 1)));
     }
   }
 
@@ -2950,9 +2981,26 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final tagService = TagService(isar);
     await tagService.initializeSystemTags(
         widget.gameMap.id, widget.gameMap.name);
-    final tags = await tagService.getAllTags(widget.gameMap.id);
+    final allTags = await tagService.getAllTags(widget.gameMap.id);
+    final areaTagIds =
+        (await isar.mapAreas.filter().mapIdEqualTo(widget.gameMap.id).findAll())
+            .map((a) => a.tagId)
+            .toSet();
+    final tags = allTags
+        .where((tag) =>
+            tag.dimension != TagDimension.area || areaTagIds.contains(tag.id))
+        .toList();
+    final validTagIds = tags.map((e) => e.id).toSet();
+    final selectedBefore = ref.read(selectedTagIdsProvider);
+    final selectedSanitized =
+        selectedBefore.where((id) => validTagIds.contains(id)).toSet();
+    if (selectedBefore.length != selectedSanitized.length) {
+      ref.read(selectedTagIdsProvider.notifier).state = selectedSanitized;
+    }
     if (!mounted) return;
-    final selectedIds = ref.read(selectedTagIdsProvider);
+    Set<int> selectedIds = Set<int>.from(
+      ref.read(selectedTagIdsProvider),
+    );
 
     showModalBottomSheet(
       context: context,
@@ -2985,7 +3033,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 if (selectedIds.isNotEmpty)
                   TextButton(
                       onPressed: () {
-                        ref.read(selectedTagIdsProvider.notifier).state = {};
+                        selectedIds = {};
+                        ref.read(selectedTagIdsProvider.notifier).state =
+                            selectedIds;
                         setSheetState(() {});
                       },
                       child: const Text('清除')),
@@ -3040,7 +3090,16 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                         children: grouped.entries
                             .where((e) => e.key != TagDimension.role)
                             .map((e) => _buildTagDimensionGroup(
-                                e.key, e.value, setSheetState))
+                                    e.key, e.value, selectedIds, (tagId) {
+                                  if (selectedIds.contains(tagId)) {
+                                    selectedIds.remove(tagId);
+                                  } else {
+                                    selectedIds.add(tagId);
+                                  }
+                                  ref
+                                      .read(selectedTagIdsProvider.notifier)
+                                      .state = Set<int>.from(selectedIds);
+                                }, setSheetState))
                             .toList()),
               ),
               const SizedBox(height: 12),
@@ -3056,9 +3115,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     );
   }
 
-  Widget _buildTagDimensionGroup(int dimension, List<Tag> tags,
+  Widget _buildTagDimensionGroup(
+      int dimension,
+      List<Tag> tags,
+      Set<int> selectedIds,
+      void Function(int tagId) onToggleTag,
       void Function(void Function()) setSheetState) {
-    final selectedIds = ref.watch(selectedTagIdsProvider);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
@@ -3075,13 +3137,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             final color = Color(tag.colorValue);
             return GestureDetector(
               onTap: () {
-                final newSelection = Set<int>.from(selectedIds);
-                if (isSelected) {
-                  newSelection.remove(tag.id);
-                } else {
-                  newSelection.add(tag.id);
-                }
-                ref.read(selectedTagIdsProvider.notifier).state = newSelection;
+                onToggleTag(tag.id);
                 setSheetState(() {});
               },
               child: Container(
