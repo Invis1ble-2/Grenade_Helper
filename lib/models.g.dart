@@ -1660,88 +1660,93 @@ const GrenadeSchema = CollectionSchema(
       name: r'description',
       type: IsarType.string,
     ),
-    r'hasLocalEdits': PropertySchema(
+    r'favoriteFolderId': PropertySchema(
       id: 3,
+      name: r'favoriteFolderId',
+      type: IsarType.long,
+    ),
+    r'hasLocalEdits': PropertySchema(
+      id: 4,
       name: r'hasLocalEdits',
       type: IsarType.bool,
     ),
     r'impactAreaStrokes': PropertySchema(
-      id: 4,
+      id: 5,
       name: r'impactAreaStrokes',
       type: IsarType.string,
     ),
     r'impactGroupId': PropertySchema(
-      id: 5,
+      id: 6,
       name: r'impactGroupId',
       type: IsarType.long,
     ),
     r'impactXRatio': PropertySchema(
-      id: 6,
+      id: 7,
       name: r'impactXRatio',
       type: IsarType.double,
     ),
     r'impactYRatio': PropertySchema(
-      id: 7,
+      id: 8,
       name: r'impactYRatio',
       type: IsarType.double,
     ),
     r'isFavorite': PropertySchema(
-      id: 8,
+      id: 9,
       name: r'isFavorite',
       type: IsarType.bool,
     ),
     r'isImported': PropertySchema(
-      id: 9,
+      id: 10,
       name: r'isImported',
       type: IsarType.bool,
     ),
     r'isNewImport': PropertySchema(
-      id: 10,
+      id: 11,
       name: r'isNewImport',
       type: IsarType.bool,
     ),
     r'sourceNote': PropertySchema(
-      id: 11,
+      id: 12,
       name: r'sourceNote',
       type: IsarType.string,
     ),
     r'sourceUrl': PropertySchema(
-      id: 12,
+      id: 13,
       name: r'sourceUrl',
       type: IsarType.string,
     ),
     r'team': PropertySchema(
-      id: 13,
+      id: 14,
       name: r'team',
       type: IsarType.long,
     ),
     r'title': PropertySchema(
-      id: 14,
+      id: 15,
       name: r'title',
       type: IsarType.string,
     ),
     r'type': PropertySchema(
-      id: 15,
+      id: 16,
       name: r'type',
       type: IsarType.long,
     ),
     r'uniqueId': PropertySchema(
-      id: 16,
+      id: 17,
       name: r'uniqueId',
       type: IsarType.string,
     ),
     r'updatedAt': PropertySchema(
-      id: 17,
+      id: 18,
       name: r'updatedAt',
       type: IsarType.dateTime,
     ),
     r'xRatio': PropertySchema(
-      id: 18,
+      id: 19,
       name: r'xRatio',
       type: IsarType.double,
     ),
     r'yRatio': PropertySchema(
-      id: 19,
+      id: 20,
       name: r'yRatio',
       type: IsarType.double,
     )
@@ -1752,6 +1757,19 @@ const GrenadeSchema = CollectionSchema(
   deserializeProp: _grenadeDeserializeProp,
   idName: r'id',
   indexes: {
+    r'favoriteFolderId': IndexSchema(
+      id: -4342935948516175729,
+      name: r'favoriteFolderId',
+      unique: false,
+      replace: false,
+      properties: [
+        IndexPropertySchema(
+          name: r'favoriteFolderId',
+          type: IndexType.value,
+          caseSensitive: false,
+        )
+      ],
+    ),
     r'uniqueId': IndexSchema(
       id: -6275468996282682414,
       name: r'uniqueId',
@@ -1843,23 +1861,24 @@ void _grenadeSerialize(
   writer.writeString(offsets[0], object.author);
   writer.writeDateTime(offsets[1], object.createdAt);
   writer.writeString(offsets[2], object.description);
-  writer.writeBool(offsets[3], object.hasLocalEdits);
-  writer.writeString(offsets[4], object.impactAreaStrokes);
-  writer.writeLong(offsets[5], object.impactGroupId);
-  writer.writeDouble(offsets[6], object.impactXRatio);
-  writer.writeDouble(offsets[7], object.impactYRatio);
-  writer.writeBool(offsets[8], object.isFavorite);
-  writer.writeBool(offsets[9], object.isImported);
-  writer.writeBool(offsets[10], object.isNewImport);
-  writer.writeString(offsets[11], object.sourceNote);
-  writer.writeString(offsets[12], object.sourceUrl);
-  writer.writeLong(offsets[13], object.team);
-  writer.writeString(offsets[14], object.title);
-  writer.writeLong(offsets[15], object.type);
-  writer.writeString(offsets[16], object.uniqueId);
-  writer.writeDateTime(offsets[17], object.updatedAt);
-  writer.writeDouble(offsets[18], object.xRatio);
-  writer.writeDouble(offsets[19], object.yRatio);
+  writer.writeLong(offsets[3], object.favoriteFolderId);
+  writer.writeBool(offsets[4], object.hasLocalEdits);
+  writer.writeString(offsets[5], object.impactAreaStrokes);
+  writer.writeLong(offsets[6], object.impactGroupId);
+  writer.writeDouble(offsets[7], object.impactXRatio);
+  writer.writeDouble(offsets[8], object.impactYRatio);
+  writer.writeBool(offsets[9], object.isFavorite);
+  writer.writeBool(offsets[10], object.isImported);
+  writer.writeBool(offsets[11], object.isNewImport);
+  writer.writeString(offsets[12], object.sourceNote);
+  writer.writeString(offsets[13], object.sourceUrl);
+  writer.writeLong(offsets[14], object.team);
+  writer.writeString(offsets[15], object.title);
+  writer.writeLong(offsets[16], object.type);
+  writer.writeString(offsets[17], object.uniqueId);
+  writer.writeDateTime(offsets[18], object.updatedAt);
+  writer.writeDouble(offsets[19], object.xRatio);
+  writer.writeDouble(offsets[20], object.yRatio);
 }
 
 Grenade _grenadeDeserialize(
@@ -1869,28 +1888,29 @@ Grenade _grenadeDeserialize(
   Map<Type, List<int>> allOffsets,
 ) {
   final object = Grenade(
-    hasLocalEdits: reader.readBoolOrNull(offsets[3]) ?? false,
-    isFavorite: reader.readBoolOrNull(offsets[8]) ?? false,
-    isImported: reader.readBoolOrNull(offsets[9]) ?? false,
-    isNewImport: reader.readBoolOrNull(offsets[10]) ?? false,
-    team: reader.readLongOrNull(offsets[13]) ?? 0,
-    title: reader.readString(offsets[14]),
-    type: reader.readLong(offsets[15]),
-    uniqueId: reader.readStringOrNull(offsets[16]),
-    xRatio: reader.readDouble(offsets[18]),
-    yRatio: reader.readDouble(offsets[19]),
+    favoriteFolderId: reader.readLongOrNull(offsets[3]),
+    hasLocalEdits: reader.readBoolOrNull(offsets[4]) ?? false,
+    isFavorite: reader.readBoolOrNull(offsets[9]) ?? false,
+    isImported: reader.readBoolOrNull(offsets[10]) ?? false,
+    isNewImport: reader.readBoolOrNull(offsets[11]) ?? false,
+    team: reader.readLongOrNull(offsets[14]) ?? 0,
+    title: reader.readString(offsets[15]),
+    type: reader.readLong(offsets[16]),
+    uniqueId: reader.readStringOrNull(offsets[17]),
+    xRatio: reader.readDouble(offsets[19]),
+    yRatio: reader.readDouble(offsets[20]),
   );
   object.author = reader.readStringOrNull(offsets[0]);
   object.createdAt = reader.readDateTime(offsets[1]);
   object.description = reader.readStringOrNull(offsets[2]);
   object.id = id;
-  object.impactAreaStrokes = reader.readStringOrNull(offsets[4]);
-  object.impactGroupId = reader.readLongOrNull(offsets[5]);
-  object.impactXRatio = reader.readDoubleOrNull(offsets[6]);
-  object.impactYRatio = reader.readDoubleOrNull(offsets[7]);
-  object.sourceNote = reader.readStringOrNull(offsets[11]);
-  object.sourceUrl = reader.readStringOrNull(offsets[12]);
-  object.updatedAt = reader.readDateTime(offsets[17]);
+  object.impactAreaStrokes = reader.readStringOrNull(offsets[5]);
+  object.impactGroupId = reader.readLongOrNull(offsets[6]);
+  object.impactXRatio = reader.readDoubleOrNull(offsets[7]);
+  object.impactYRatio = reader.readDoubleOrNull(offsets[8]);
+  object.sourceNote = reader.readStringOrNull(offsets[12]);
+  object.sourceUrl = reader.readStringOrNull(offsets[13]);
+  object.updatedAt = reader.readDateTime(offsets[18]);
   return object;
 }
 
@@ -1908,38 +1928,40 @@ P _grenadeDeserializeProp<P>(
     case 2:
       return (reader.readStringOrNull(offset)) as P;
     case 3:
-      return (reader.readBoolOrNull(offset) ?? false) as P;
-    case 4:
-      return (reader.readStringOrNull(offset)) as P;
-    case 5:
       return (reader.readLongOrNull(offset)) as P;
+    case 4:
+      return (reader.readBoolOrNull(offset) ?? false) as P;
+    case 5:
+      return (reader.readStringOrNull(offset)) as P;
     case 6:
-      return (reader.readDoubleOrNull(offset)) as P;
+      return (reader.readLongOrNull(offset)) as P;
     case 7:
       return (reader.readDoubleOrNull(offset)) as P;
     case 8:
-      return (reader.readBoolOrNull(offset) ?? false) as P;
+      return (reader.readDoubleOrNull(offset)) as P;
     case 9:
       return (reader.readBoolOrNull(offset) ?? false) as P;
     case 10:
       return (reader.readBoolOrNull(offset) ?? false) as P;
     case 11:
-      return (reader.readStringOrNull(offset)) as P;
+      return (reader.readBoolOrNull(offset) ?? false) as P;
     case 12:
       return (reader.readStringOrNull(offset)) as P;
     case 13:
-      return (reader.readLongOrNull(offset) ?? 0) as P;
-    case 14:
-      return (reader.readString(offset)) as P;
-    case 15:
-      return (reader.readLong(offset)) as P;
-    case 16:
       return (reader.readStringOrNull(offset)) as P;
+    case 14:
+      return (reader.readLongOrNull(offset) ?? 0) as P;
+    case 15:
+      return (reader.readString(offset)) as P;
+    case 16:
+      return (reader.readLong(offset)) as P;
     case 17:
-      return (reader.readDateTime(offset)) as P;
+      return (reader.readStringOrNull(offset)) as P;
     case 18:
-      return (reader.readDouble(offset)) as P;
+      return (reader.readDateTime(offset)) as P;
     case 19:
+      return (reader.readDouble(offset)) as P;
+    case 20:
       return (reader.readDouble(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -1964,6 +1986,14 @@ extension GrenadeQueryWhereSort on QueryBuilder<Grenade, Grenade, QWhere> {
   QueryBuilder<Grenade, Grenade, QAfterWhere> anyId() {
     return QueryBuilder.apply(this, (query) {
       return query.addWhereClause(const IdWhereClause.any());
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterWhere> anyFavoriteFolderId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        const IndexWhereClause.any(indexName: r'favoriteFolderId'),
+      );
     });
   }
 }
@@ -2029,6 +2059,117 @@ extension GrenadeQueryWhere on QueryBuilder<Grenade, Grenade, QWhereClause> {
         lower: lowerId,
         includeLower: includeLower,
         upper: upperId,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterWhereClause> favoriteFolderIdIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IndexWhereClause.equalTo(
+        indexName: r'favoriteFolderId',
+        value: [null],
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterWhereClause>
+      favoriteFolderIdIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IndexWhereClause.between(
+        indexName: r'favoriteFolderId',
+        lower: [null],
+        includeLower: false,
+        upper: [],
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterWhereClause> favoriteFolderIdEqualTo(
+      int? favoriteFolderId) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IndexWhereClause.equalTo(
+        indexName: r'favoriteFolderId',
+        value: [favoriteFolderId],
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterWhereClause> favoriteFolderIdNotEqualTo(
+      int? favoriteFolderId) {
+    return QueryBuilder.apply(this, (query) {
+      if (query.whereSort == Sort.asc) {
+        return query
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'favoriteFolderId',
+              lower: [],
+              upper: [favoriteFolderId],
+              includeUpper: false,
+            ))
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'favoriteFolderId',
+              lower: [favoriteFolderId],
+              includeLower: false,
+              upper: [],
+            ));
+      } else {
+        return query
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'favoriteFolderId',
+              lower: [favoriteFolderId],
+              includeLower: false,
+              upper: [],
+            ))
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'favoriteFolderId',
+              lower: [],
+              upper: [favoriteFolderId],
+              includeUpper: false,
+            ));
+      }
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterWhereClause> favoriteFolderIdGreaterThan(
+    int? favoriteFolderId, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IndexWhereClause.between(
+        indexName: r'favoriteFolderId',
+        lower: [favoriteFolderId],
+        includeLower: include,
+        upper: [],
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterWhereClause> favoriteFolderIdLessThan(
+    int? favoriteFolderId, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IndexWhereClause.between(
+        indexName: r'favoriteFolderId',
+        lower: [],
+        upper: [favoriteFolderId],
+        includeUpper: include,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterWhereClause> favoriteFolderIdBetween(
+    int? lowerFavoriteFolderId,
+    int? upperFavoriteFolderId, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IndexWhereClause.between(
+        indexName: r'favoriteFolderId',
+        lower: [lowerFavoriteFolderId],
+        includeLower: includeLower,
+        upper: [upperFavoriteFolderId],
         includeUpper: includeUpper,
       ));
     });
@@ -2444,6 +2585,79 @@ extension GrenadeQueryFilter
       return query.addFilterCondition(FilterCondition.greaterThan(
         property: r'description',
         value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition>
+      favoriteFolderIdIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNull(
+        property: r'favoriteFolderId',
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition>
+      favoriteFolderIdIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNotNull(
+        property: r'favoriteFolderId',
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> favoriteFolderIdEqualTo(
+      int? value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'favoriteFolderId',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition>
+      favoriteFolderIdGreaterThan(
+    int? value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'favoriteFolderId',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition>
+      favoriteFolderIdLessThan(
+    int? value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'favoriteFolderId',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterFilterCondition> favoriteFolderIdBetween(
+    int? lower,
+    int? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'favoriteFolderId',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
       ));
     });
   }
@@ -3885,6 +4099,18 @@ extension GrenadeQuerySortBy on QueryBuilder<Grenade, Grenade, QSortBy> {
     });
   }
 
+  QueryBuilder<Grenade, Grenade, QAfterSortBy> sortByFavoriteFolderId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'favoriteFolderId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterSortBy> sortByFavoriteFolderIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'favoriteFolderId', Sort.desc);
+    });
+  }
+
   QueryBuilder<Grenade, Grenade, QAfterSortBy> sortByHasLocalEdits() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'hasLocalEdits', Sort.asc);
@@ -4128,6 +4354,18 @@ extension GrenadeQuerySortThenBy
     });
   }
 
+  QueryBuilder<Grenade, Grenade, QAfterSortBy> thenByFavoriteFolderId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'favoriteFolderId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Grenade, Grenade, QAfterSortBy> thenByFavoriteFolderIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'favoriteFolderId', Sort.desc);
+    });
+  }
+
   QueryBuilder<Grenade, Grenade, QAfterSortBy> thenByHasLocalEdits() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'hasLocalEdits', Sort.asc);
@@ -4367,6 +4605,12 @@ extension GrenadeQueryWhereDistinct
     });
   }
 
+  QueryBuilder<Grenade, Grenade, QDistinct> distinctByFavoriteFolderId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'favoriteFolderId');
+    });
+  }
+
   QueryBuilder<Grenade, Grenade, QDistinct> distinctByHasLocalEdits() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'hasLocalEdits');
@@ -4499,6 +4743,12 @@ extension GrenadeQueryProperty
   QueryBuilder<Grenade, String?, QQueryOperations> descriptionProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'description');
+    });
+  }
+
+  QueryBuilder<Grenade, int?, QQueryOperations> favoriteFolderIdProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'favoriteFolderId');
     });
   }
 
@@ -8098,6 +8348,1213 @@ extension ImpactGroupQueryProperty
   QueryBuilder<ImpactGroup, int, QQueryOperations> typeProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'type');
+    });
+  }
+}
+
+// coverage:ignore-file
+// ignore_for_file: duplicate_ignore, non_constant_identifier_names, constant_identifier_names, invalid_use_of_protected_member, unnecessary_cast, prefer_const_constructors, lines_longer_than_80_chars, require_trailing_commas, inference_failure_on_function_invocation, unnecessary_parenthesis, unnecessary_raw_strings, unnecessary_null_checks, join_return_with_assignment, prefer_final_locals, avoid_js_rounded_ints, avoid_positional_boolean_parameters, always_specify_types
+
+extension GetFavoriteFolderCollection on Isar {
+  IsarCollection<FavoriteFolder> get favoriteFolders => this.collection();
+}
+
+const FavoriteFolderSchema = CollectionSchema(
+  name: r'FavoriteFolder',
+  id: -603889663355719245,
+  properties: {
+    r'createdAt': PropertySchema(
+      id: 0,
+      name: r'createdAt',
+      type: IsarType.dateTime,
+    ),
+    r'mapId': PropertySchema(
+      id: 1,
+      name: r'mapId',
+      type: IsarType.long,
+    ),
+    r'name': PropertySchema(
+      id: 2,
+      name: r'name',
+      type: IsarType.string,
+    ),
+    r'nameKey': PropertySchema(
+      id: 3,
+      name: r'nameKey',
+      type: IsarType.string,
+    ),
+    r'sortOrder': PropertySchema(
+      id: 4,
+      name: r'sortOrder',
+      type: IsarType.long,
+    ),
+    r'updatedAt': PropertySchema(
+      id: 5,
+      name: r'updatedAt',
+      type: IsarType.dateTime,
+    )
+  },
+  estimateSize: _favoriteFolderEstimateSize,
+  serialize: _favoriteFolderSerialize,
+  deserialize: _favoriteFolderDeserialize,
+  deserializeProp: _favoriteFolderDeserializeProp,
+  idName: r'id',
+  indexes: {
+    r'mapId': IndexSchema(
+      id: -6043270103971104264,
+      name: r'mapId',
+      unique: false,
+      replace: false,
+      properties: [
+        IndexPropertySchema(
+          name: r'mapId',
+          type: IndexType.value,
+          caseSensitive: false,
+        )
+      ],
+    ),
+    r'nameKey': IndexSchema(
+      id: -8897366021629006998,
+      name: r'nameKey',
+      unique: false,
+      replace: false,
+      properties: [
+        IndexPropertySchema(
+          name: r'nameKey',
+          type: IndexType.hash,
+          caseSensitive: true,
+        )
+      ],
+    )
+  },
+  links: {},
+  embeddedSchemas: {},
+  getId: _favoriteFolderGetId,
+  getLinks: _favoriteFolderGetLinks,
+  attach: _favoriteFolderAttach,
+  version: '3.3.0',
+);
+
+int _favoriteFolderEstimateSize(
+  FavoriteFolder object,
+  List<int> offsets,
+  Map<Type, List<int>> allOffsets,
+) {
+  var bytesCount = offsets.last;
+  bytesCount += 3 + object.name.length * 3;
+  bytesCount += 3 + object.nameKey.length * 3;
+  return bytesCount;
+}
+
+void _favoriteFolderSerialize(
+  FavoriteFolder object,
+  IsarWriter writer,
+  List<int> offsets,
+  Map<Type, List<int>> allOffsets,
+) {
+  writer.writeDateTime(offsets[0], object.createdAt);
+  writer.writeLong(offsets[1], object.mapId);
+  writer.writeString(offsets[2], object.name);
+  writer.writeString(offsets[3], object.nameKey);
+  writer.writeLong(offsets[4], object.sortOrder);
+  writer.writeDateTime(offsets[5], object.updatedAt);
+}
+
+FavoriteFolder _favoriteFolderDeserialize(
+  Id id,
+  IsarReader reader,
+  List<int> offsets,
+  Map<Type, List<int>> allOffsets,
+) {
+  final object = FavoriteFolder(
+    mapId: reader.readLong(offsets[1]),
+    name: reader.readString(offsets[2]),
+    nameKey: reader.readString(offsets[3]),
+    sortOrder: reader.readLongOrNull(offsets[4]) ?? 0,
+  );
+  object.createdAt = reader.readDateTime(offsets[0]);
+  object.id = id;
+  object.updatedAt = reader.readDateTime(offsets[5]);
+  return object;
+}
+
+P _favoriteFolderDeserializeProp<P>(
+  IsarReader reader,
+  int propertyId,
+  int offset,
+  Map<Type, List<int>> allOffsets,
+) {
+  switch (propertyId) {
+    case 0:
+      return (reader.readDateTime(offset)) as P;
+    case 1:
+      return (reader.readLong(offset)) as P;
+    case 2:
+      return (reader.readString(offset)) as P;
+    case 3:
+      return (reader.readString(offset)) as P;
+    case 4:
+      return (reader.readLongOrNull(offset) ?? 0) as P;
+    case 5:
+      return (reader.readDateTime(offset)) as P;
+    default:
+      throw IsarError('Unknown property with id $propertyId');
+  }
+}
+
+Id _favoriteFolderGetId(FavoriteFolder object) {
+  return object.id;
+}
+
+List<IsarLinkBase<dynamic>> _favoriteFolderGetLinks(FavoriteFolder object) {
+  return [];
+}
+
+void _favoriteFolderAttach(
+    IsarCollection<dynamic> col, Id id, FavoriteFolder object) {
+  object.id = id;
+}
+
+extension FavoriteFolderQueryWhereSort
+    on QueryBuilder<FavoriteFolder, FavoriteFolder, QWhere> {
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterWhere> anyId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(const IdWhereClause.any());
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterWhere> anyMapId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        const IndexWhereClause.any(indexName: r'mapId'),
+      );
+    });
+  }
+}
+
+extension FavoriteFolderQueryWhere
+    on QueryBuilder<FavoriteFolder, FavoriteFolder, QWhereClause> {
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterWhereClause> idEqualTo(
+      Id id) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IdWhereClause.between(
+        lower: id,
+        upper: id,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterWhereClause> idNotEqualTo(
+      Id id) {
+    return QueryBuilder.apply(this, (query) {
+      if (query.whereSort == Sort.asc) {
+        return query
+            .addWhereClause(
+              IdWhereClause.lessThan(upper: id, includeUpper: false),
+            )
+            .addWhereClause(
+              IdWhereClause.greaterThan(lower: id, includeLower: false),
+            );
+      } else {
+        return query
+            .addWhereClause(
+              IdWhereClause.greaterThan(lower: id, includeLower: false),
+            )
+            .addWhereClause(
+              IdWhereClause.lessThan(upper: id, includeUpper: false),
+            );
+      }
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterWhereClause> idGreaterThan(
+      Id id,
+      {bool include = false}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IdWhereClause.greaterThan(lower: id, includeLower: include),
+      );
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterWhereClause> idLessThan(
+      Id id,
+      {bool include = false}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IdWhereClause.lessThan(upper: id, includeUpper: include),
+      );
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterWhereClause> idBetween(
+    Id lowerId,
+    Id upperId, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IdWhereClause.between(
+        lower: lowerId,
+        includeLower: includeLower,
+        upper: upperId,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterWhereClause> mapIdEqualTo(
+      int mapId) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IndexWhereClause.equalTo(
+        indexName: r'mapId',
+        value: [mapId],
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterWhereClause>
+      mapIdNotEqualTo(int mapId) {
+    return QueryBuilder.apply(this, (query) {
+      if (query.whereSort == Sort.asc) {
+        return query
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'mapId',
+              lower: [],
+              upper: [mapId],
+              includeUpper: false,
+            ))
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'mapId',
+              lower: [mapId],
+              includeLower: false,
+              upper: [],
+            ));
+      } else {
+        return query
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'mapId',
+              lower: [mapId],
+              includeLower: false,
+              upper: [],
+            ))
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'mapId',
+              lower: [],
+              upper: [mapId],
+              includeUpper: false,
+            ));
+      }
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterWhereClause>
+      mapIdGreaterThan(
+    int mapId, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IndexWhereClause.between(
+        indexName: r'mapId',
+        lower: [mapId],
+        includeLower: include,
+        upper: [],
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterWhereClause> mapIdLessThan(
+    int mapId, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IndexWhereClause.between(
+        indexName: r'mapId',
+        lower: [],
+        upper: [mapId],
+        includeUpper: include,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterWhereClause> mapIdBetween(
+    int lowerMapId,
+    int upperMapId, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IndexWhereClause.between(
+        indexName: r'mapId',
+        lower: [lowerMapId],
+        includeLower: includeLower,
+        upper: [upperMapId],
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterWhereClause>
+      nameKeyEqualTo(String nameKey) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IndexWhereClause.equalTo(
+        indexName: r'nameKey',
+        value: [nameKey],
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterWhereClause>
+      nameKeyNotEqualTo(String nameKey) {
+    return QueryBuilder.apply(this, (query) {
+      if (query.whereSort == Sort.asc) {
+        return query
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'nameKey',
+              lower: [],
+              upper: [nameKey],
+              includeUpper: false,
+            ))
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'nameKey',
+              lower: [nameKey],
+              includeLower: false,
+              upper: [],
+            ));
+      } else {
+        return query
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'nameKey',
+              lower: [nameKey],
+              includeLower: false,
+              upper: [],
+            ))
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'nameKey',
+              lower: [],
+              upper: [nameKey],
+              includeUpper: false,
+            ));
+      }
+    });
+  }
+}
+
+extension FavoriteFolderQueryFilter
+    on QueryBuilder<FavoriteFolder, FavoriteFolder, QFilterCondition> {
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      createdAtEqualTo(DateTime value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'createdAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      createdAtGreaterThan(
+    DateTime value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'createdAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      createdAtLessThan(
+    DateTime value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'createdAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      createdAtBetween(
+    DateTime lower,
+    DateTime upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'createdAt',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition> idEqualTo(
+      Id value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'id',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      idGreaterThan(
+    Id value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'id',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      idLessThan(
+    Id value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'id',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition> idBetween(
+    Id lower,
+    Id upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'id',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      mapIdEqualTo(int value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'mapId',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      mapIdGreaterThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'mapId',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      mapIdLessThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'mapId',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      mapIdBetween(
+    int lower,
+    int upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'mapId',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      nameEqualTo(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'name',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      nameGreaterThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'name',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      nameLessThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'name',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      nameBetween(
+    String lower,
+    String upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'name',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      nameStartsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.startsWith(
+        property: r'name',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      nameEndsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.endsWith(
+        property: r'name',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      nameContains(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.contains(
+        property: r'name',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      nameMatches(String pattern, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.matches(
+        property: r'name',
+        wildcard: pattern,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      nameIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'name',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      nameIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        property: r'name',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      nameKeyEqualTo(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'nameKey',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      nameKeyGreaterThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'nameKey',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      nameKeyLessThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'nameKey',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      nameKeyBetween(
+    String lower,
+    String upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'nameKey',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      nameKeyStartsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.startsWith(
+        property: r'nameKey',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      nameKeyEndsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.endsWith(
+        property: r'nameKey',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      nameKeyContains(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.contains(
+        property: r'nameKey',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      nameKeyMatches(String pattern, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.matches(
+        property: r'nameKey',
+        wildcard: pattern,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      nameKeyIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'nameKey',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      nameKeyIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        property: r'nameKey',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      sortOrderEqualTo(int value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'sortOrder',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      sortOrderGreaterThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'sortOrder',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      sortOrderLessThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'sortOrder',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      sortOrderBetween(
+    int lower,
+    int upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'sortOrder',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      updatedAtEqualTo(DateTime value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'updatedAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      updatedAtGreaterThan(
+    DateTime value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'updatedAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      updatedAtLessThan(
+    DateTime value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'updatedAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterFilterCondition>
+      updatedAtBetween(
+    DateTime lower,
+    DateTime upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'updatedAt',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+}
+
+extension FavoriteFolderQueryObject
+    on QueryBuilder<FavoriteFolder, FavoriteFolder, QFilterCondition> {}
+
+extension FavoriteFolderQueryLinks
+    on QueryBuilder<FavoriteFolder, FavoriteFolder, QFilterCondition> {}
+
+extension FavoriteFolderQuerySortBy
+    on QueryBuilder<FavoriteFolder, FavoriteFolder, QSortBy> {
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy> sortByCreatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'createdAt', Sort.asc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy>
+      sortByCreatedAtDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'createdAt', Sort.desc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy> sortByMapId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'mapId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy> sortByMapIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'mapId', Sort.desc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy> sortByName() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'name', Sort.asc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy> sortByNameDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'name', Sort.desc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy> sortByNameKey() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'nameKey', Sort.asc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy>
+      sortByNameKeyDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'nameKey', Sort.desc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy> sortBySortOrder() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'sortOrder', Sort.asc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy>
+      sortBySortOrderDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'sortOrder', Sort.desc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy> sortByUpdatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'updatedAt', Sort.asc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy>
+      sortByUpdatedAtDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'updatedAt', Sort.desc);
+    });
+  }
+}
+
+extension FavoriteFolderQuerySortThenBy
+    on QueryBuilder<FavoriteFolder, FavoriteFolder, QSortThenBy> {
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy> thenByCreatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'createdAt', Sort.asc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy>
+      thenByCreatedAtDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'createdAt', Sort.desc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy> thenById() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'id', Sort.asc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy> thenByIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'id', Sort.desc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy> thenByMapId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'mapId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy> thenByMapIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'mapId', Sort.desc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy> thenByName() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'name', Sort.asc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy> thenByNameDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'name', Sort.desc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy> thenByNameKey() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'nameKey', Sort.asc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy>
+      thenByNameKeyDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'nameKey', Sort.desc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy> thenBySortOrder() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'sortOrder', Sort.asc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy>
+      thenBySortOrderDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'sortOrder', Sort.desc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy> thenByUpdatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'updatedAt', Sort.asc);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QAfterSortBy>
+      thenByUpdatedAtDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'updatedAt', Sort.desc);
+    });
+  }
+}
+
+extension FavoriteFolderQueryWhereDistinct
+    on QueryBuilder<FavoriteFolder, FavoriteFolder, QDistinct> {
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QDistinct>
+      distinctByCreatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'createdAt');
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QDistinct> distinctByMapId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'mapId');
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QDistinct> distinctByName(
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'name', caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QDistinct> distinctByNameKey(
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'nameKey', caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QDistinct>
+      distinctBySortOrder() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'sortOrder');
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, FavoriteFolder, QDistinct>
+      distinctByUpdatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'updatedAt');
+    });
+  }
+}
+
+extension FavoriteFolderQueryProperty
+    on QueryBuilder<FavoriteFolder, FavoriteFolder, QQueryProperty> {
+  QueryBuilder<FavoriteFolder, int, QQueryOperations> idProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'id');
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, DateTime, QQueryOperations> createdAtProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'createdAt');
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, int, QQueryOperations> mapIdProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'mapId');
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, String, QQueryOperations> nameProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'name');
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, String, QQueryOperations> nameKeyProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'nameKey');
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, int, QQueryOperations> sortOrderProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'sortOrder');
+    });
+  }
+
+  QueryBuilder<FavoriteFolder, DateTime, QQueryOperations> updatedAtProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'updatedAt');
     });
   }
 }

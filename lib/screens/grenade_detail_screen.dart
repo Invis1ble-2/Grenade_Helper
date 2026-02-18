@@ -20,6 +20,7 @@ import '../models.dart';
 import '../providers.dart';
 import '../config/feature_flags.dart';
 import '../services/data_service.dart';
+import '../services/favorite_folder_service.dart';
 import '../services/tag_service.dart';
 import '../widgets/grenade_tag_editor.dart';
 import '../main.dart' show sendOverlayCommand;
@@ -197,7 +198,6 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
       {String? title,
       int? type,
       int? team,
-      bool? isFavorite,
       String? author,
       String? sourceUrl,
       String? sourceNote}) async {
@@ -210,7 +210,6 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     }
     if (type != null) grenade!.type = type;
     if (team != null) grenade!.team = team;
-    if (isFavorite != null) grenade!.isFavorite = isFavorite;
     if (author != null) grenade!.author = author.isEmpty ? null : author;
     if (sourceUrl != null) {
       grenade!.sourceUrl = sourceUrl.isEmpty ? null : sourceUrl;
@@ -223,6 +222,155 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     await isar.writeTxn(() async {
       await isar.grenades.put(grenade!);
     });
+    _loadData(resetTitle: false);
+  }
+
+  Future<int?> _resolveMapId() async {
+    if (grenade == null) return null;
+    await grenade!.layer.load();
+    final layer = grenade!.layer.value;
+    if (layer == null) return null;
+    await layer.map.load();
+    return layer.map.value?.id;
+  }
+
+  Future<String?> _showFolderNameInputDialog() async {
+    final controller = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('新建收藏夹'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: '输入收藏夹名称'),
+          onSubmitted: (_) => Navigator.pop(ctx, true),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('创建')),
+        ],
+      ),
+    );
+    if (ok != true) return null;
+    return controller.text.trim();
+  }
+
+  Future<int?> _showFavoriteFolderPicker(
+      FavoriteFolderService folderService, int mapId) async {
+    var folders = await folderService.getFoldersByMap(mapId);
+    if (folders.isEmpty) {
+      await folderService.getOrCreateDefaultFolder(mapId);
+      folders = await folderService.getFoldersByMap(mapId);
+    }
+    if (folders.isEmpty) return null;
+
+    int? selectedFolderId = folders.first.id;
+    return showDialog<int>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('选择收藏夹'),
+          content: SizedBox(
+            width: 360,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ...folders.map((f) => ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        selectedFolderId == f.id
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_unchecked,
+                        size: 20,
+                        color: selectedFolderId == f.id
+                            ? Theme.of(ctx).colorScheme.primary
+                            : Theme.of(ctx).disabledColor,
+                      ),
+                      title: Text(f.name, overflow: TextOverflow.ellipsis),
+                      onTap: () =>
+                          setDialogState(() => selectedFolderId = f.id),
+                    )),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () async {
+                      final name = await _showFolderNameInputDialog();
+                      if (name == null || name.isEmpty) return;
+                      try {
+                        final created =
+                            await folderService.createFolder(mapId, name);
+                        folders = await folderService.getFoldersByMap(mapId);
+                        setDialogState(() {
+                          selectedFolderId = created.id;
+                        });
+                      } catch (e) {
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('创建失败：$e')),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.create_new_folder_outlined),
+                    label: const Text('新建收藏夹'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, null),
+                child: const Text('取消')),
+            ElevatedButton(
+              onPressed: selectedFolderId == null
+                  ? null
+                  : () => Navigator.pop(ctx, selectedFolderId),
+              child: const Text('确定'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _handleFavoriteAction() async {
+    if (grenade == null) return;
+    final isar = ref.read(isarProvider);
+    final folderService = FavoriteFolderService(isar);
+
+    if (grenade!.isFavorite) {
+      await folderService.setFavorite(grenade!.id, favorite: false);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('已取消收藏')));
+      _loadData(resetTitle: false);
+      return;
+    }
+
+    final mapId = await _resolveMapId();
+    if (mapId == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('无法识别当前地图')));
+      return;
+    }
+
+    final folderId = await _showFavoriteFolderPicker(folderService, mapId);
+    if (folderId == null) return;
+
+    await folderService.setFavorite(grenade!.id,
+        favorite: true, folderId: folderId);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('已加入收藏夹')),
+    );
     _loadData(resetTitle: false);
   }
 
@@ -1487,7 +1635,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
             IconButton(
               icon: Icon(grenade!.isFavorite ? Icons.star : Icons.star_border,
                   color: Colors.yellowAccent),
-              onPressed: () => _updateGrenade(isFavorite: !grenade!.isFavorite),
+              onPressed: _handleFavoriteAction,
             ),
             if (isEditing)
               IconButton(

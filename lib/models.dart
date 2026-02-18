@@ -74,6 +74,8 @@ class Grenade {
   int type; // GrenadeType
   int team; // TeamType
   bool isFavorite;
+  @Index()
+  int? favoriteFolderId;
   bool isNewImport;
   DateTime createdAt;
   DateTime updatedAt;
@@ -120,6 +122,7 @@ class Grenade {
     required this.type,
     this.team = 0,
     this.isFavorite = false,
+    this.favoriteFolderId,
     this.isNewImport = false,
     this.hasLocalEdits = false,
     this.isImported = false,
@@ -226,4 +229,37 @@ class ImpactGroup {
     required this.layerId,
     DateTime? created,
   }) : createdAt = created ?? DateTime.now();
+}
+
+/// 收藏夹
+@collection
+class FavoriteFolder {
+  Id id = Isar.autoIncrement;
+
+  /// 所属地图
+  @Index()
+  int mapId;
+
+  /// 显示名称
+  String name;
+
+  /// 规范化名称（用于 mapId 维度下唯一校验）
+  @Index()
+  String nameKey;
+
+  /// 排序权重
+  int sortOrder;
+
+  DateTime createdAt;
+  DateTime updatedAt;
+
+  FavoriteFolder({
+    required this.mapId,
+    required this.name,
+    required this.nameKey,
+    this.sortOrder = 0,
+    DateTime? created,
+    DateTime? updated,
+  })  : createdAt = created ?? DateTime.now(),
+        updatedAt = updated ?? DateTime.now();
 }

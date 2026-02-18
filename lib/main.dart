@@ -217,6 +217,7 @@ Future<void> _runMainWindow() async {
       StepMediaSchema,
       ImportHistorySchema,
       ImpactGroupSchema,
+      FavoriteFolderSchema,
       TagSchema,
       GrenadeTagSchema,
       MapAreaSchema,
@@ -233,6 +234,10 @@ Future<void> _runMainWindow() async {
   final migratedCount = await migrationService.migrateGrenadeUuids();
   if (migratedCount > 0) {
     debugPrint('已为 $migratedCount 个旧道具生成 UUID');
+  }
+  final favoriteMigratedCount = await migrationService.migrateFavoriteFolders();
+  if (favoriteMigratedCount > 0) {
+    debugPrint('已修复 $favoriteMigratedCount 个收藏夹归档数据');
   }
 
   // 2.5 初始化设置服务（所有平台）
@@ -382,6 +387,7 @@ Future<void> _runOverlayWindow(
       StepMediaSchema,
       ImportHistorySchema,
       ImpactGroupSchema,
+      FavoriteFolderSchema,
       TagSchema,
       GrenadeTagSchema,
     ],
