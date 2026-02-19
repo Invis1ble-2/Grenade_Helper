@@ -17,6 +17,7 @@ class AreaDrawScreen extends ConsumerStatefulWidget {
   final int? existingTagId;
   final String? initialName;
   final int? initialColor;
+  final bool lockName;
 
   const AreaDrawScreen(
       {super.key,
@@ -25,7 +26,8 @@ class AreaDrawScreen extends ConsumerStatefulWidget {
       this.area,
       this.existingTagId,
       this.initialName,
-      this.initialColor});
+      this.initialColor,
+      this.lockName = false});
 
   @override
   ConsumerState<AreaDrawScreen> createState() => _AreaDrawScreenState();
@@ -407,7 +409,9 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
   }
 
   Future<void> _save() async {
-    final name = _nameController.text.trim();
+    final fallbackName = widget.area?.name ?? widget.initialName ?? '';
+    final typedName = _nameController.text.trim();
+    final name = typedName.isNotEmpty ? typedName : fallbackName.trim();
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('请输入区域名称'), backgroundColor: Colors.orange));
@@ -484,17 +488,38 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
             child: Row(
               children: [
-                Expanded(
-                  child: TextField(
-                    controller: _nameController,
-                    decoration: const InputDecoration(
-                      labelText: '区域名称',
-                      hintText: '如: A大, 中路...',
-                      border: OutlineInputBorder(),
-                      isDense: true,
+                if (!widget.lockName)
+                  Expanded(
+                    child: TextField(
+                      controller: _nameController,
+                      decoration: const InputDecoration(
+                        labelText: '区域名称',
+                        hintText: '如: A大, 中路...',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                  )
+                else
+                  Expanded(
+                    child: Container(
+                      height: 40,
+                      alignment: Alignment.centerLeft,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color:
+                                Theme.of(context).colorScheme.outlineVariant),
+                      ),
+                      child: Text(
+                        '绑定标签：${_nameController.text.trim().isEmpty ? "未命名标签" : _nameController.text.trim()}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13),
+                      ),
                     ),
                   ),
-                ),
                 const SizedBox(width: 12),
                 GestureDetector(
                   onTap: () async {

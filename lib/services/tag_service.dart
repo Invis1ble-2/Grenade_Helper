@@ -441,9 +441,13 @@ class TagService {
   }
 
   /// 删除标签
-  Future<void> deleteTag(int tagId) async {
+  /// [deleteRelatedAreas] 为 true 时同时删除绑定到该标签的区域几何数据。
+  Future<void> deleteTag(int tagId, {bool deleteRelatedAreas = false}) async {
     await isar.writeTxn(() async {
       await isar.grenadeTags.filter().tagIdEqualTo(tagId).deleteAll();
+      if (deleteRelatedAreas) {
+        await isar.mapAreas.filter().tagIdEqualTo(tagId).deleteAll();
+      }
       await isar.tags.delete(tagId);
     });
   }
