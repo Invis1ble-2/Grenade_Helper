@@ -5,6 +5,7 @@ import '../data/map_area_presets.dart';
 import '../data/builtin_area_region_presets.dart';
 import '../models/map_area.dart';
 import '../models.dart';
+import 'tag_uuid_service.dart';
 
 class DefaultAreaTagReimportSummary {
   final int processedMaps;
@@ -28,6 +29,22 @@ class DefaultAreaTagReimportSummary {
   });
 }
 
+class EnsureSystemTagSummary {
+  final int processedMaps;
+  final int addedTags;
+  final int updatedTags;
+  final int removedObsoleteTags;
+  final int keptObsoleteTagsInUse;
+
+  const EnsureSystemTagSummary({
+    required this.processedMaps,
+    required this.addedTags,
+    required this.updatedTags,
+    required this.removedObsoleteTags,
+    required this.keptObsoleteTagsInUse,
+  });
+}
+
 class TagService {
   final Isar isar;
 
@@ -35,49 +52,243 @@ class TagService {
 
   /// 初始化地图的系统标签
   Future<void> initializeSystemTags(int mapId, String mapName) async {
-    final existingTags = await isar.tags.filter().mapIdEqualTo(mapId).count();
-    if (existingTags > 0) return;
-
-    await isar.writeTxn(() async {
-      int order = 0;
-      for (final entry in commonSystemTags.entries) {
-        final dimension = entry.key;
-        final color = dimensionColors[dimension] ?? 0xFF607D8B;
-        for (final name in entry.value) {
-          await isar.tags.put(Tag(
-            name: name,
-            colorValue: color,
-            dimension: dimension,
-            isSystem: true,
-            sortOrder: order++,
-            mapId: mapId,
-          ));
-        }
-      }
-      final mapKey = mapName.toLowerCase();
-      final areaNames = mapAreaPresets[mapKey];
-      if (areaNames != null) {
-        final areaColor = dimensionColors[TagDimension.area] ?? 0xFF4CAF50;
-        for (final name in areaNames) {
-          await isar.tags.put(Tag(
-            name: name,
-            colorValue: areaColor,
-            dimension: TagDimension.area,
-            isSystem: true,
-            sortOrder: order++,
-            mapId: mapId,
-          ));
-        }
-      }
-    });
-
-    // 首次初始化时尝试导入内置区域几何数据（不覆盖任何已有区域）。
     final map = await isar.gameMaps.get(mapId);
     if (map == null) return;
+
+    await _ensureSystemTagsForMap(
+      map,
+      mapNameFallback: mapName,
+    );
+
+    // 首次初始化时尝试导入内置区域几何数据（不覆盖任何已有区域）。
     await _reimportBuiltinAreaDataForMap(
       map,
       overwriteExisting: false,
     );
+  }
+
+  Future<EnsureSystemTagSummary> ensureSystemTagsForAllMaps({
+    bool cleanupObsoleteSystemTags = true,
+  }) async {
+    final maps = await isar.gameMaps.where().findAll();
+    if (maps.isEmpty) {
+      return const EnsureSystemTagSummary(
+        processedMaps: 0,
+        addedTags: 0,
+        updatedTags: 0,
+        removedObsoleteTags: 0,
+        keptObsoleteTagsInUse: 0,
+      );
+    }
+
+    int added = 0;
+    int updated = 0;
+    int removed = 0;
+    int keptInUse = 0;
+    for (final map in maps) {
+      final result = await _ensureSystemTagsForMap(
+        map,
+        cleanupObsoleteSystemTags: cleanupObsoleteSystemTags,
+      );
+      added += result.addedTags;
+      updated += result.updatedTags;
+      removed += result.removedObsoleteTags;
+      keptInUse += result.keptObsoleteTagsInUse;
+    }
+    return EnsureSystemTagSummary(
+      processedMaps: maps.length,
+      addedTags: added,
+      updatedTags: updated,
+      removedObsoleteTags: removed,
+      keptObsoleteTagsInUse: keptInUse,
+    );
+  }
+
+  Future<_EnsureSystemTagForMapResult> _ensureSystemTagsForMap(
+    GameMap map, {
+    String? mapNameFallback,
+    bool cleanupObsoleteSystemTags = false,
+  }) async {
+    final mapName = map.name.trim().isNotEmpty
+        ? map.name
+        : (mapNameFallback?.trim().isNotEmpty == true
+            ? mapNameFallback!.trim()
+            : 'unknown');
+    final required = _buildRequiredSystemTagDefs(
+      map: map,
+    );
+    if (required.isEmpty) {
+      return const _EnsureSystemTagForMapResult(
+        addedTags: 0,
+        updatedTags: 0,
+        removedObsoleteTags: 0,
+        keptObsoleteTagsInUse: 0,
+      );
+    }
+
+    final existingTags =
+        await isar.tags.filter().mapIdEqualTo(map.id).findAll();
+    final byAnyKey = <String, Tag>{};
+    final bySystemKey = <String, Tag>{};
+    int nextOrder = 0;
+    for (final tag in existingTags) {
+      final key = _systemTagKey(tag.dimension, tag.name);
+      byAnyKey.putIfAbsent(key, () => tag);
+      if (tag.isSystem) {
+        bySystemKey.putIfAbsent(key, () => tag);
+      }
+      if (tag.sortOrder >= nextOrder) {
+        nextOrder = tag.sortOrder + 1;
+      }
+    }
+
+    final toCreate = <Tag>[];
+    final toUpdate = <Tag>[];
+    final requiredKeys = required
+        .map((e) => _systemTagKey(e.dimension, e.name))
+        .toSet();
+    for (final def in required) {
+      final key = _systemTagKey(def.dimension, def.name);
+      final existing = bySystemKey[key] ?? byAnyKey[key];
+      final expectedUuid = TagUuidService.buildSystemTagUuid(
+        mapName: mapName,
+        mapIconPath: map.iconPath,
+        dimension: def.dimension,
+        tagName: def.name,
+      );
+
+      if (existing == null) {
+        final created = Tag(
+          tagUuid: expectedUuid,
+          name: def.name,
+          colorValue: def.colorValue,
+          dimension: def.dimension,
+          isSystem: true,
+          sortOrder: nextOrder++,
+          mapId: map.id,
+        );
+        toCreate.add(created);
+        byAnyKey[key] = created;
+        bySystemKey[key] = created;
+        continue;
+      }
+
+      var changed = false;
+      if (!existing.isSystem) {
+        existing.isSystem = true;
+        changed = true;
+      }
+      if (existing.colorValue != def.colorValue) {
+        existing.colorValue = def.colorValue;
+        changed = true;
+      }
+      if (existing.tagUuid.trim() != expectedUuid) {
+        existing.tagUuid = expectedUuid;
+        changed = true;
+      }
+      if (changed) {
+        toUpdate.add(existing);
+      }
+    }
+
+    final staleDeleteIds = <int>{};
+    int keptStaleInUse = 0;
+    if (cleanupObsoleteSystemTags) {
+      final staleSystemTags = existingTags.where((tag) {
+        if (!tag.isSystem) return false;
+        final key = _systemTagKey(tag.dimension, tag.name);
+        return !requiredKeys.contains(key);
+      });
+
+      for (final stale in staleSystemTags) {
+        final hasGrenadeBindings =
+            await isar.grenadeTags.filter().tagIdEqualTo(stale.id).count() > 0;
+        final hasAreaBindings =
+            await isar.mapAreas.filter().tagIdEqualTo(stale.id).count() > 0;
+        if (hasGrenadeBindings || hasAreaBindings) {
+          keptStaleInUse++;
+          continue;
+        }
+        staleDeleteIds.add(stale.id);
+      }
+    }
+
+    if (toCreate.isEmpty && toUpdate.isEmpty && staleDeleteIds.isEmpty) {
+      return _EnsureSystemTagForMapResult(
+        addedTags: 0,
+        updatedTags: 0,
+        removedObsoleteTags: 0,
+        keptObsoleteTagsInUse: keptStaleInUse,
+      );
+    }
+
+    await isar.writeTxn(() async {
+      if (toCreate.isNotEmpty) {
+        await isar.tags.putAll(toCreate);
+      }
+      if (toUpdate.isNotEmpty) {
+        await isar.tags.putAll(toUpdate);
+      }
+      for (final tagId in staleDeleteIds) {
+        await isar.tags.delete(tagId);
+      }
+    });
+
+    return _EnsureSystemTagForMapResult(
+      addedTags: toCreate.length,
+      updatedTags: toUpdate.length,
+      removedObsoleteTags: staleDeleteIds.length,
+      keptObsoleteTagsInUse: keptStaleInUse,
+    );
+  }
+
+  List<_SystemTagDef> _buildRequiredSystemTagDefs({
+    required GameMap map,
+  }) {
+    final result = <_SystemTagDef>[];
+    final seenKeys = <String>{};
+
+    void addDef({
+      required int dimension,
+      required String name,
+      required int colorValue,
+    }) {
+      final key = _systemTagKey(dimension, name);
+      if (seenKeys.contains(key)) return;
+      seenKeys.add(key);
+      result.add(_SystemTagDef(
+        dimension: dimension,
+        name: name,
+        colorValue: colorValue,
+      ));
+    }
+
+    for (final entry in commonSystemTags.entries) {
+      final color = dimensionColors[entry.key] ?? 0xFF607D8B;
+      for (final name in entry.value) {
+        addDef(
+          dimension: entry.key,
+          name: name,
+          colorValue: color,
+        );
+      }
+    }
+
+    final areaNames = _resolveAreaPresetNames(map) ?? const <String>[];
+    final areaColor = dimensionColors[TagDimension.area] ?? 0xFF4CAF50;
+    for (final name in areaNames) {
+      addDef(
+        dimension: TagDimension.area,
+        name: name,
+        colorValue: areaColor,
+      );
+    }
+
+    return result;
+  }
+
+  String _systemTagKey(int dimension, String name) {
+    return '$dimension|${name.trim().toLowerCase()}';
   }
 
   /// 为所有地图补齐默认区域标签（非破坏性，不删除现有标签）
@@ -147,6 +358,12 @@ class TagService {
         final existing = existingByName[name];
         if (existing == null) {
           toCreate.add(Tag(
+            tagUuid: TagUuidService.buildSystemTagUuid(
+              mapName: map.name,
+              mapIconPath: map.iconPath,
+              dimension: TagDimension.area,
+              tagName: name,
+            ),
             name: name,
             colorValue: areaColor,
             dimension: TagDimension.area,
@@ -157,9 +374,20 @@ class TagService {
           continue;
         }
 
-        if (existing.isSystem && existing.colorValue != areaColor) {
-          existing.colorValue = areaColor;
-          toUpdate.add(existing);
+        if (existing.isSystem) {
+          final expectedUuid = TagUuidService.buildSystemTagUuid(
+            mapName: map.name,
+            mapIconPath: map.iconPath,
+            dimension: TagDimension.area,
+            tagName: existing.name,
+          );
+          final changed = existing.colorValue != areaColor ||
+              existing.tagUuid != expectedUuid;
+          if (changed) {
+            existing.colorValue = areaColor;
+            existing.tagUuid = expectedUuid;
+            toUpdate.add(existing);
+          }
         }
       }
 
@@ -420,6 +648,7 @@ class TagService {
         .sortBySortOrderDesc()
         .findFirst();
     final tag = Tag(
+      tagUuid: TagUuidService.newRandomUuid(),
       name: name,
       colorValue: color,
       dimension: dimension,
@@ -438,6 +667,66 @@ class TagService {
     await isar.writeTxn(() async {
       await isar.tags.put(tag);
     });
+  }
+
+  /// 为历史标签补齐 UUID
+  Future<int> ensureTagUuids() async {
+    final tags = await isar.tags.where().findAll();
+    if (tags.isEmpty) return 0;
+
+    final mapIds = tags.map((e) => e.mapId).toSet();
+    final mapById = <int, GameMap>{};
+    for (final mapId in mapIds) {
+      final map = await isar.gameMaps.get(mapId);
+      if (map != null) {
+        mapById[mapId] = map;
+      }
+    }
+
+    final ordered = tags.toList()
+      ..sort((a, b) {
+        if (a.isSystem != b.isSystem) {
+          return a.isSystem ? -1 : 1;
+        }
+        return a.id.compareTo(b.id);
+      });
+
+    final occupied = <String>{};
+    final toFix = <Tag>[];
+    for (final tag in ordered) {
+      final current = tag.tagUuid.trim();
+      String candidate = current;
+
+      if (tag.isSystem) {
+        final map = mapById[tag.mapId];
+        if (map != null) {
+          candidate = TagUuidService.buildSystemTagUuid(
+            mapName: map.name,
+            mapIconPath: map.iconPath,
+            dimension: tag.dimension,
+            tagName: tag.name,
+          );
+        }
+      }
+
+      if (candidate.isEmpty || occupied.contains(candidate)) {
+        do {
+          candidate = TagUuidService.newRandomUuid();
+        } while (occupied.contains(candidate));
+      }
+
+      occupied.add(candidate);
+      if (candidate != current) {
+        tag.tagUuid = candidate;
+        toFix.add(tag);
+      }
+    }
+
+    if (toFix.isEmpty) return 0;
+    await isar.writeTxn(() async {
+      await isar.tags.putAll(toFix);
+    });
+    return toFix.length;
   }
 
   /// 删除标签
@@ -546,5 +835,31 @@ class _BuiltinAreaUpsertSummary {
     required this.addedAreas,
     required this.updatedAreas,
     required this.removedDuplicateAreas,
+  });
+}
+
+class _EnsureSystemTagForMapResult {
+  final int addedTags;
+  final int updatedTags;
+  final int removedObsoleteTags;
+  final int keptObsoleteTagsInUse;
+
+  const _EnsureSystemTagForMapResult({
+    required this.addedTags,
+    required this.updatedTags,
+    required this.removedObsoleteTags,
+    required this.keptObsoleteTagsInUse,
+  });
+}
+
+class _SystemTagDef {
+  final int dimension;
+  final String name;
+  final int colorValue;
+
+  const _SystemTagDef({
+    required this.dimension,
+    required this.name,
+    required this.colorValue,
   });
 }

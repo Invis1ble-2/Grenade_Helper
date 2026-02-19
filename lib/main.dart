@@ -20,6 +20,7 @@ import 'services/window_service.dart';
 import 'services/overlay_state_service.dart';
 import 'services/update_service.dart';
 import 'services/migration_service.dart';
+import 'services/tag_service.dart';
 import 'themes/christmas_theme.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -164,6 +165,29 @@ Future<void> _runMainWindow() async {
   final favoriteMigratedCount = await migrationService.migrateFavoriteFolders();
   if (favoriteMigratedCount > 0) {
     debugPrint('已修复 $favoriteMigratedCount 个收藏夹归档数据');
+  }
+  final tagMigratedCount = await migrationService.migrateTagUuids();
+  if (tagMigratedCount > 0) {
+    debugPrint('已为 $tagMigratedCount 个标签补齐 UUID');
+  }
+  final tagService = TagService(isar);
+  final ensuredSystemTagSummary = await tagService.ensureSystemTagsForAllMaps(
+    cleanupObsoleteSystemTags: true,
+  );
+  if (ensuredSystemTagSummary.addedTags > 0 ||
+      ensuredSystemTagSummary.updatedTags > 0 ||
+      ensuredSystemTagSummary.removedObsoleteTags > 0) {
+    debugPrint(
+      '已校正系统标签：地图${ensuredSystemTagSummary.processedMaps}张，'
+      '新增${ensuredSystemTagSummary.addedTags}个，'
+      '更新${ensuredSystemTagSummary.updatedTags}个，'
+      '清理${ensuredSystemTagSummary.removedObsoleteTags}个',
+    );
+  }
+  if (ensuredSystemTagSummary.keptObsoleteTagsInUse > 0) {
+    debugPrint(
+      '检测到${ensuredSystemTagSummary.keptObsoleteTagsInUse}个废弃系统标签仍被引用，已跳过清理',
+    );
   }
 
   // 2.5 初始化设置服务（所有平台）

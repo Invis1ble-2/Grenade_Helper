@@ -1,6 +1,7 @@
 import 'package:isar_community/isar.dart';
 import 'package:uuid/uuid.dart';
 import '../models.dart';
+import 'tag_service.dart';
 
 /// 迁移服务
 class MigrationService {
@@ -38,6 +39,11 @@ class MigrationService {
     });
 
     return grenadesNeedingUuid.length;
+  }
+
+  Future<int> migrateTagUuids() async {
+    final tagService = TagService(isar);
+    return tagService.ensureTagUuids();
   }
 
   String _normalizeName(String value) => value.trim().toLowerCase();

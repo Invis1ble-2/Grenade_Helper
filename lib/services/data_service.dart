@@ -11,6 +11,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:uuid/uuid.dart';
 import '../models.dart';
 import '../models/tag.dart';
+import '../models/map_area.dart';
 import '../models/grenade_tag.dart';
 
 /// 导入状态
@@ -46,11 +47,17 @@ class PackagePreviewResult {
   final Map<String, List<GrenadePreviewItem>> grenadesByMap;
   final String filePath;
   final Map<String, List<int>> memoryImages;
+  final int schemaVersion;
+  final Map<String, PackageTagData> tagsByUuid;
+  final List<PackageAreaData> areas;
 
   PackagePreviewResult({
     required this.grenadesByMap,
     required this.filePath,
     required this.memoryImages,
+    this.schemaVersion = 1,
+    this.tagsByUuid = const {},
+    this.areas = const [],
   });
 
   bool get isMultiMap => grenadesByMap.keys.length > 1;
@@ -59,6 +66,133 @@ class PackagePreviewResult {
       grenadesByMap.values.fold(0, (sum, list) => sum + list.length);
 
   List<String> get mapNames => grenadesByMap.keys.toList();
+}
+
+class PackageTagData {
+  final String tagUuid;
+  final String mapName;
+  final String name;
+  final int dimension;
+  final int colorValue;
+  final String? groupName;
+  final bool isSystem;
+
+  const PackageTagData({
+    required this.tagUuid,
+    required this.mapName,
+    required this.name,
+    required this.dimension,
+    required this.colorValue,
+    this.groupName,
+    required this.isSystem,
+  });
+
+  factory PackageTagData.fromJson(Map<String, dynamic> json) {
+    return PackageTagData(
+      tagUuid: (json['tagUuid'] as String? ?? '').trim(),
+      mapName: (json['mapName'] as String? ?? '').trim(),
+      name: (json['name'] as String? ?? '').trim(),
+      dimension: json['dimension'] as int? ?? TagDimension.custom,
+      colorValue: json['colorValue'] as int? ?? 0xFF607D8B,
+      groupName: json['groupName'] as String?,
+      isSystem: json['isSystem'] as bool? ?? false,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'tagUuid': tagUuid,
+        'mapName': mapName,
+        'name': name,
+        'dimension': dimension,
+        'colorValue': colorValue,
+        'groupName': groupName,
+        'isSystem': isSystem,
+      };
+}
+
+class PackageAreaData {
+  final String tagUuid;
+  final String mapName;
+  final String layerName;
+  final String name;
+  final int colorValue;
+  final String strokes;
+  final int createdAt;
+
+  const PackageAreaData({
+    required this.tagUuid,
+    required this.mapName,
+    required this.layerName,
+    required this.name,
+    required this.colorValue,
+    required this.strokes,
+    required this.createdAt,
+  });
+
+  factory PackageAreaData.fromJson(Map<String, dynamic> json) {
+    return PackageAreaData(
+      tagUuid: (json['tagUuid'] as String? ?? '').trim(),
+      mapName: (json['mapName'] as String? ?? '').trim(),
+      layerName: (json['layerName'] as String? ?? '').trim(),
+      name: (json['name'] as String? ?? '').trim(),
+      colorValue: json['colorValue'] as int? ?? 0xFF4CAF50,
+      strokes: json['strokes'] as String? ?? '[]',
+      createdAt:
+          json['createdAt'] as int? ?? DateTime.now().millisecondsSinceEpoch,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'tagUuid': tagUuid,
+        'mapName': mapName,
+        'layerName': layerName,
+        'name': name,
+        'colorValue': colorValue,
+        'strokes': strokes,
+        'createdAt': createdAt,
+      };
+}
+
+enum TagConflictType { uuidMismatch, semanticMatch }
+
+enum ImportTagConflictResolution { local, shared }
+
+enum ImportAreaConflictResolution { keepLocal, overwriteShared }
+
+class TagConflictItem {
+  final TagConflictType type;
+  final PackageTagData sharedTag;
+  final Tag localTag;
+
+  const TagConflictItem({
+    required this.type,
+    required this.sharedTag,
+    required this.localTag,
+  });
+}
+
+class AreaConflictGroup {
+  final String tagUuid;
+  final String tagName;
+  final String mapName;
+  final List<String> layers;
+
+  const AreaConflictGroup({
+    required this.tagUuid,
+    required this.tagName,
+    required this.mapName,
+    required this.layers,
+  });
+}
+
+class ImportConflictBundle {
+  final List<TagConflictItem> tagConflicts;
+  final Map<String, Tag> localTagByUuid;
+
+  const ImportConflictBundle({
+    required this.tagConflicts,
+    required this.localTagByUuid,
+  });
 }
 
 /// isolate 中执行的打包参数
@@ -74,6 +208,27 @@ class _PackageParams {
     required this.jsonData,
     required this.filesToCopy,
   });
+}
+
+class _ExportBundle {
+  final List<Map<String, dynamic>> grenades;
+  final List<Map<String, dynamic>> tags;
+  final List<Map<String, dynamic>> areas;
+  final Set<String> filesToZip;
+
+  const _ExportBundle({
+    required this.grenades,
+    required this.tags,
+    required this.areas,
+    required this.filesToZip,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'schemaVersion': 2,
+        'grenades': grenades,
+        'tags': tags,
+        'areas': areas,
+      };
 }
 
 /// 在 isolate 中执行文件复制和压缩（顶层函数）
@@ -167,13 +322,45 @@ class DataService {
     final bytes = file.readAsBytesSync();
     final archive = ZipDecoder().decodeBytes(bytes);
 
-    List<dynamic> jsonData = [];
+    List<dynamic> grenadesData = [];
+    int schemaVersion = 1;
+    final tagsByUuid = <String, PackageTagData>{};
+    final areas = <PackageAreaData>[];
     final Map<String, List<int>> memoryImages = {};
 
     for (var archiveFile in archive) {
       final fileName = p.basename(archiveFile.name);
       if (fileName == "data.json") {
-        jsonData = jsonDecode(utf8.decode(archiveFile.content as List<int>));
+        final decoded =
+            jsonDecode(utf8.decode(archiveFile.content as List<int>));
+        if (decoded is Map<String, dynamic>) {
+          schemaVersion = decoded['schemaVersion'] as int? ?? 1;
+          final grenadesRaw = decoded['grenades'];
+          if (grenadesRaw is List) {
+            grenadesData = grenadesRaw;
+          }
+          final tagsRaw = decoded['tags'];
+          if (tagsRaw is List) {
+            for (final raw in tagsRaw) {
+              if (raw is! Map<String, dynamic>) continue;
+              final tag = PackageTagData.fromJson(raw);
+              if (tag.tagUuid.isEmpty) continue;
+              tagsByUuid[tag.tagUuid] = tag;
+            }
+          }
+          final areasRaw = decoded['areas'];
+          if (areasRaw is List) {
+            for (final raw in areasRaw) {
+              if (raw is! Map<String, dynamic>) continue;
+              final area = PackageAreaData.fromJson(raw);
+              if (area.tagUuid.isEmpty) continue;
+              areas.add(area);
+            }
+          }
+        } else if (decoded is List) {
+          grenadesData = decoded;
+          schemaVersion = 1;
+        }
       } else {
         if (archiveFile.isFile && archiveFile.content != null) {
           memoryImages[fileName] = archiveFile.content as List<int>;
@@ -181,12 +368,12 @@ class DataService {
       }
     }
 
-    if (jsonData.isEmpty) return null;
+    if (grenadesData.isEmpty) return null;
 
     // 按地图分组
     final Map<String, List<GrenadePreviewItem>> grenadesByMap = {};
 
-    for (var item in jsonData) {
+    for (var item in grenadesData) {
       final mapName = item['mapName'] as String? ?? 'Unknown';
       final layerName = item['layerName'] as String? ?? 'Default';
       final title = item['title'] as String? ?? '';
@@ -270,30 +457,69 @@ class DataService {
       grenadesByMap: grenadesByMap,
       filePath: filePath,
       memoryImages: memoryImages,
+      schemaVersion: schemaVersion,
+      tagsByUuid: tagsByUuid,
+      areas: areas,
     );
   }
 
   // --- 导出 (分享) ---
 
-  /// 导出列表
-  Future<void> exportSelectedGrenades(
-      BuildContext context, List<Grenade> grenades) async {
-    if (grenades.isEmpty) return;
+  Future<int> _ensureExportTagUuids(Iterable<int> tagIds) async {
+    final toFix = <Tag>[];
+    final occupied = <String>{};
+    final tags = <Tag>[];
 
-    // 构建 JSON 数据结构
-    final List<Map<String, dynamic>> exportList = [];
-    final Set<String> filesToZip = {};
+    for (final tagId in tagIds) {
+      final tag = await isar.tags.get(tagId);
+      if (tag != null) {
+        tags.add(tag);
+      }
+    }
 
-    for (var g in grenades) {
+    for (final tag in tags) {
+      final uuid = tag.tagUuid.trim();
+      if (uuid.isNotEmpty) {
+        occupied.add(uuid);
+      }
+    }
+
+    const uuid = Uuid();
+    for (final tag in tags) {
+      if (tag.tagUuid.trim().isNotEmpty) continue;
+      String value;
+      do {
+        value = uuid.v4();
+      } while (occupied.contains(value));
+      tag.tagUuid = value;
+      occupied.add(value);
+      toFix.add(tag);
+    }
+
+    if (toFix.isEmpty) return 0;
+    await isar.writeTxn(() async {
+      await isar.tags.putAll(toFix);
+    });
+    return toFix.length;
+  }
+
+  Future<_ExportBundle> _buildExportBundle(List<Grenade> grenades) async {
+    final exportList = <Map<String, dynamic>>[];
+    final exportTagIdsByIndex = <Set<int>>[];
+    final filesToZip = <String>{};
+    final usedTagIds = <int>{};
+    final usedMapIds = <int>{};
+
+    for (final g in grenades) {
       g.layer.loadSync();
       g.layer.value?.map.loadSync();
       g.steps.loadSync();
 
       final stepsData = <Map<String, dynamic>>[];
-      for (var s in g.steps) {
+      for (final s in g.steps) {
         s.medias.loadSync();
         final mediaData = <Map<String, dynamic>>[];
-        for (var m in s.medias) {
+        for (final m in s.medias) {
           mediaData.add({'path': p.basename(m.localPath), 'type': m.type});
           filesToZip.add(m.localPath);
         }
@@ -305,10 +531,13 @@ class DataService {
         });
       }
 
-      // 获取道具关联的标签ID
       final grenadeTags =
           await isar.grenadeTags.filter().grenadeIdEqualTo(g.id).findAll();
-      final tagIds = grenadeTags.map((gt) => gt.tagId).toList();
+      final tagIds = grenadeTags.map((gt) => gt.tagId).toSet();
+      usedTagIds.addAll(tagIds);
+      if (g.layer.value?.map.value != null) {
+        usedMapIds.add(g.layer.value!.map.value!.id);
+      }
 
       exportList.add({
         'uniqueId': g.uniqueId,
@@ -324,12 +553,115 @@ class DataService {
         'impactX': g.impactXRatio,
         'impactY': g.impactYRatio,
         'impactAreaStrokes': g.impactAreaStrokes,
-        'tagIds': tagIds,
+        'tagUuids': <String>[],
         'steps': stepsData,
         'createdAt': g.createdAt.millisecondsSinceEpoch,
         'updatedAt': g.updatedAt.millisecondsSinceEpoch,
       });
+      exportTagIdsByIndex.add(tagIds);
     }
+
+    await _ensureExportTagUuids(usedTagIds);
+
+    final mapById = <int, GameMap>{};
+    for (final id in usedMapIds) {
+      final map = await isar.gameMaps.get(id);
+      if (map != null) {
+        mapById[id] = map;
+      }
+    }
+
+    final tagById = <int, Tag>{};
+    for (final id in usedTagIds) {
+      final tag = await isar.tags.get(id);
+      if (tag != null) {
+        tagById[id] = tag;
+      }
+    }
+
+    // 反填 grenade 的 tagUuids
+    for (var i = 0; i < exportList.length; i++) {
+      final item = exportList[i];
+      final tagIds = exportTagIdsByIndex[i];
+      final uuids = <String>[];
+      for (final tagId in tagIds) {
+        final tag = tagById[tagId];
+        if (tag == null || tag.tagUuid.trim().isEmpty) continue;
+        uuids.add(tag.tagUuid.trim());
+      }
+      item['tagUuids'] = uuids.toSet().toList(growable: false);
+    }
+
+    final tagsData = <Map<String, dynamic>>[];
+    final usedTagUuids = <String>{};
+    for (final tag in tagById.values) {
+      final uuid = tag.tagUuid.trim();
+      if (uuid.isEmpty || usedTagUuids.contains(uuid)) continue;
+      usedTagUuids.add(uuid);
+      final mapName = mapById[tag.mapId]?.name ?? '';
+      tagsData.add({
+        'tagUuid': uuid,
+        'mapName': mapName,
+        'name': tag.name,
+        'dimension': tag.dimension,
+        'colorValue': tag.colorValue,
+        'groupName': tag.groupName,
+        'isSystem': tag.isSystem,
+      });
+    }
+
+    final areaTagIdSet = tagById.values
+        .where((t) => t.dimension == TagDimension.area)
+        .map((t) => t.id)
+        .toSet();
+    final areasData = <Map<String, dynamic>>[];
+    if (areaTagIdSet.isNotEmpty) {
+      final mapLayerNameById = <int, String>{};
+      final maps = mapById.values.toList();
+      for (final map in maps) {
+        await map.layers.load();
+        for (final layer in map.layers) {
+          mapLayerNameById[layer.id] = layer.name;
+        }
+      }
+
+      final areas = await isar.mapAreas.where().findAll();
+      for (final area in areas) {
+        if (!areaTagIdSet.contains(area.tagId)) continue;
+        final tag = tagById[area.tagId];
+        if (tag == null) continue;
+        final tagUuid = tag.tagUuid.trim();
+        if (tagUuid.isEmpty) continue;
+        final mapName = mapById[area.mapId]?.name ?? '';
+        final layerName = area.layerId == null
+            ? 'Default'
+            : (mapLayerNameById[area.layerId!] ?? 'Default');
+        areasData.add({
+          'tagUuid': tagUuid,
+          'mapName': mapName,
+          'layerName': layerName,
+          'name': area.name,
+          'colorValue': area.colorValue,
+          'strokes': area.strokes,
+          'createdAt': area.createdAt.millisecondsSinceEpoch,
+        });
+      }
+    }
+
+    return _ExportBundle(
+      grenades: exportList,
+      tags: tagsData,
+      areas: areasData,
+      filesToZip: filesToZip,
+    );
+  }
+
+  /// 导出列表
+  Future<void> exportSelectedGrenades(
+      BuildContext context, List<Grenade> grenades) async {
+    if (grenades.isEmpty) return;
+
+    final exportBundle = await _buildExportBundle(grenades);
 
     // 获取临时目录路径
     final tempDir = await getTemporaryDirectory();
@@ -342,8 +674,8 @@ class DataService {
       _PackageParams(
         exportDirPath: exportDirPath,
         zipPath: zipPath,
-        jsonData: jsonEncode(exportList),
-        filesToCopy: filesToZip.toList(),
+        jsonData: jsonEncode(exportBundle.toJson()),
+        filesToCopy: exportBundle.filesToZip.toList(),
       ),
     );
 
@@ -423,56 +755,7 @@ class DataService {
 
     if (grenades.isEmpty) return;
 
-    // 2. 构建 JSON 数据结构
-    final List<Map<String, dynamic>> exportList = [];
-    final Set<String> filesToZip = {};
-
-    for (var g in grenades) {
-      g.layer.loadSync();
-      g.layer.value?.map.loadSync();
-      g.steps.loadSync();
-
-      final stepsData = <Map<String, dynamic>>[];
-      for (var s in g.steps) {
-        s.medias.loadSync();
-        final mediaData = <Map<String, dynamic>>[];
-        for (var m in s.medias) {
-          mediaData.add({'path': p.basename(m.localPath), 'type': m.type});
-          filesToZip.add(m.localPath);
-        }
-        stepsData.add({
-          'title': s.title,
-          'description': s.description,
-          'index': s.stepIndex,
-          'medias': mediaData,
-        });
-      }
-
-      // 获取道具关联的标签ID
-      final grenadeTags =
-          await isar.grenadeTags.filter().grenadeIdEqualTo(g.id).findAll();
-      final tagIds = grenadeTags.map((gt) => gt.tagId).toList();
-
-      exportList.add({
-        'uniqueId': g.uniqueId,
-        'mapName': g.layer.value?.map.value?.name ?? "Unknown",
-        'layerName': g.layer.value?.name ?? "Default",
-        'title': g.title,
-        'type': g.type,
-        'team': g.team,
-        'author': g.author,
-        'hasLocalEdits': g.hasLocalEdits,
-        'x': g.xRatio,
-        'y': g.yRatio,
-        'impactX': g.impactXRatio,
-        'impactY': g.impactYRatio,
-        'impactAreaStrokes': g.impactAreaStrokes,
-        'tagIds': tagIds,
-        'steps': stepsData,
-        'createdAt': g.createdAt.millisecondsSinceEpoch,
-        'updatedAt': g.updatedAt.millisecondsSinceEpoch,
-      });
-    }
+    final exportBundle = await _buildExportBundle(grenades);
 
     // 3. 获取临时目录路径
     final tempDir = await getTemporaryDirectory();
@@ -485,8 +768,8 @@ class DataService {
       _PackageParams(
         exportDirPath: exportDirPath,
         zipPath: zipPath,
-        jsonData: jsonEncode(exportList),
-        filesToCopy: filesToZip.toList(),
+        jsonData: jsonEncode(exportBundle.toJson()),
+        filesToCopy: exportBundle.filesToZip.toList(),
       ),
     );
 
@@ -545,6 +828,215 @@ class DataService {
     }
   }
 
+  Set<String> _collectSelectedTagUuids(
+      PackagePreviewResult preview, Set<String> selectedUniqueIds) {
+    final result = <String>{};
+    for (final mapItems in preview.grenadesByMap.values) {
+      for (final item in mapItems) {
+        if (!selectedUniqueIds.contains(item.uniqueId)) continue;
+        final raw = item.rawData['tagUuids'];
+        if (raw is! List) continue;
+        for (final uuid in raw) {
+          if (uuid is String && uuid.trim().isNotEmpty) {
+            result.add(uuid.trim());
+          }
+        }
+      }
+    }
+    return result;
+  }
+
+  String _semanticTagKey(int mapId, int dimension, String name) {
+    return '$mapId|$dimension|${name.trim().toLowerCase()}';
+  }
+
+  bool _isTagDifferent(Tag local, PackageTagData shared) {
+    return local.name != shared.name ||
+        local.colorValue != shared.colorValue ||
+        local.dimension != shared.dimension ||
+        (local.groupName ?? '') != (shared.groupName ?? '') ||
+        local.isSystem != shared.isSystem;
+  }
+
+  Future<_LocalTagContext> _buildLocalTagContext(Set<String> mapNames) async {
+    final mapByName = <String, GameMap>{};
+    for (final mapName in mapNames) {
+      final map = await isar.gameMaps.filter().nameEqualTo(mapName).findFirst();
+      if (map != null) {
+        mapByName[mapName] = map;
+      }
+    }
+
+    final localByUuid = <String, Tag>{};
+    final localBySemantic = <String, Tag>{};
+    for (final map in mapByName.values) {
+      final tags = await isar.tags.filter().mapIdEqualTo(map.id).findAll();
+      for (final tag in tags) {
+        final uuid = tag.tagUuid.trim();
+        if (uuid.isNotEmpty) {
+          localByUuid[uuid] = tag;
+        }
+        localBySemantic[_semanticTagKey(map.id, tag.dimension, tag.name)] = tag;
+      }
+    }
+
+    return _LocalTagContext(
+      mapByName: mapByName,
+      localByUuid: localByUuid,
+      localBySemantic: localBySemantic,
+    );
+  }
+
+  Future<ImportConflictBundle> collectTagConflicts(
+    PackagePreviewResult preview,
+    Set<String> selectedUniqueIds,
+  ) async {
+    if (preview.schemaVersion < 2 || preview.tagsByUuid.isEmpty) {
+      return const ImportConflictBundle(tagConflicts: [], localTagByUuid: {});
+    }
+
+    final usedUuids = _collectSelectedTagUuids(preview, selectedUniqueIds);
+    if (usedUuids.isEmpty) {
+      return const ImportConflictBundle(tagConflicts: [], localTagByUuid: {});
+    }
+
+    final tagMapNames = <String>{};
+    for (final uuid in usedUuids) {
+      final shared = preview.tagsByUuid[uuid];
+      if (shared != null && shared.mapName.isNotEmpty) {
+        tagMapNames.add(shared.mapName);
+      }
+    }
+
+    final context = await _buildLocalTagContext(tagMapNames);
+    final conflicts = <TagConflictItem>[];
+
+    for (final uuid in usedUuids) {
+      final shared = preview.tagsByUuid[uuid];
+      if (shared == null) continue;
+      final localByUuid = context.localByUuid[uuid];
+      if (localByUuid != null) {
+        if (_isTagDifferent(localByUuid, shared)) {
+          conflicts.add(TagConflictItem(
+            type: TagConflictType.uuidMismatch,
+            sharedTag: shared,
+            localTag: localByUuid,
+          ));
+        }
+        continue;
+      }
+
+      final map = context.mapByName[shared.mapName];
+      if (map == null) continue;
+      final semanticKey =
+          _semanticTagKey(map.id, shared.dimension, shared.name);
+      final semanticTag = context.localBySemantic[semanticKey];
+      if (semanticTag != null) {
+        conflicts.add(TagConflictItem(
+          type: TagConflictType.semanticMatch,
+          sharedTag: shared,
+          localTag: semanticTag,
+        ));
+      }
+    }
+
+    return ImportConflictBundle(
+      tagConflicts: conflicts,
+      localTagByUuid: context.localByUuid,
+    );
+  }
+
+  Future<List<AreaConflictGroup>> collectAreaConflicts(
+    PackagePreviewResult preview,
+    Set<String> selectedUniqueIds, {
+    required Map<String, ImportTagConflictResolution> tagResolutions,
+  }) async {
+    if (preview.schemaVersion < 2 ||
+        preview.areas.isEmpty ||
+        preview.tagsByUuid.isEmpty) {
+      return const [];
+    }
+
+    final usedUuids = _collectSelectedTagUuids(preview, selectedUniqueIds)
+      ..removeWhere((uuid) {
+        final shared = preview.tagsByUuid[uuid];
+        return shared == null || shared.dimension != TagDimension.area;
+      });
+    if (usedUuids.isEmpty) return const [];
+
+    final tagMapNames = <String>{};
+    for (final uuid in usedUuids) {
+      final shared = preview.tagsByUuid[uuid];
+      if (shared != null && shared.mapName.isNotEmpty) {
+        tagMapNames.add(shared.mapName);
+      }
+    }
+    final context = await _buildLocalTagContext(tagMapNames);
+
+    final groupLayers = <String, Set<String>>{};
+
+    for (final tagUuid in usedUuids) {
+      final sharedTag = preview.tagsByUuid[tagUuid];
+      if (sharedTag == null) continue;
+
+      Tag? localTag = context.localByUuid[tagUuid];
+      final map = context.mapByName[sharedTag.mapName];
+      if (map == null) continue;
+
+      if (localTag == null) {
+        final semanticKey =
+            _semanticTagKey(map.id, sharedTag.dimension, sharedTag.name);
+        final semanticTag = context.localBySemantic[semanticKey];
+        if (semanticTag != null) {
+          final resolution = tagResolutions[tagUuid];
+          if (resolution == ImportTagConflictResolution.local ||
+              resolution == ImportTagConflictResolution.shared) {
+            localTag = semanticTag;
+          }
+        }
+      }
+      if (localTag == null) continue;
+
+      await map.layers.load();
+      final layerIdByName = <String, int>{
+        for (final l in map.layers) l.name: l.id,
+      };
+
+      final existingAreas = await isar.mapAreas
+          .filter()
+          .mapIdEqualTo(map.id)
+          .tagIdEqualTo(localTag.id)
+          .findAll();
+      final existingLayerIds = existingAreas.map((a) => a.layerId).toSet();
+
+      final tagAreas = preview.areas.where((a) =>
+          a.tagUuid == tagUuid &&
+          a.mapName == sharedTag.mapName &&
+          a.layerName.isNotEmpty);
+      for (final area in tagAreas) {
+        final layerId = layerIdByName[area.layerName];
+        if (layerId == null) continue;
+        if (!existingLayerIds.contains(layerId)) continue;
+
+        final key = '$tagUuid|${sharedTag.name}|${sharedTag.mapName}';
+        groupLayers.putIfAbsent(key, () => <String>{}).add(area.layerName);
+      }
+    }
+
+    final groups = <AreaConflictGroup>[];
+    for (final entry in groupLayers.entries) {
+      final parts = entry.key.split('|');
+      groups.add(AreaConflictGroup(
+        tagUuid: parts[0],
+        tagName: parts[1],
+        mapName: parts[2],
+        layers: (entry.value.toList()..sort()),
+      ));
+    }
+    groups.sort((a, b) => a.tagName.compareTo(b.tagName));
+    return groups;
+  }
+
   // --- 导入 ---
 
   Future<String> importData() async {
@@ -563,146 +1055,33 @@ class DataService {
       return "请选择 .cs2pkg 格式的文件";
     }
 
-    final file = File(filePath);
-    final importFileName = p.basename(filePath);
+    final preview = await previewPackage(filePath);
+    if (preview == null) return "文件格式错误或无数据";
 
-    // 数据目录
-    // 避免异步问题
-    final dataPath = isar.directory ?? '';
-
-    // 2. 解压
-    final bytes = file.readAsBytesSync();
-    final archive = ZipDecoder().decodeBytes(bytes);
-
-    List<dynamic> jsonData = [];
-    final Map<String, List<int>> memoryImages = {};
-
-    for (var file in archive) {
-      final fileName = p.basename(file.name);
-      if (fileName == "data.json") {
-        jsonData = jsonDecode(utf8.decode(file.content as List<int>));
-      } else {
-        if (file.isFile && file.content != null) {
-          memoryImages[fileName] = file.content as List<int>;
+    final selected = <String>{};
+    for (final mapGrenades in preview.grenadesByMap.values) {
+      for (final item in mapGrenades) {
+        if (item.status != ImportStatus.skip) {
+          selected.add(item.uniqueId);
         }
       }
     }
 
-    if (jsonData.isEmpty) return "文件格式错误或无数据";
-
-    // 3. 写入数据库
-    int newCount = 0;
-    int updatedCount = 0;
-    int skippedCount = 0;
-    final List<Grenade> importedGrenades = []; // 收集导入的道具
-
-    await isar.writeTxn(() async {
-      for (var item in jsonData) {
-        final mapName = item['mapName'];
-        final layerName = item['layerName'];
-
-        // 查找地图
-        final map =
-            await isar.gameMaps.filter().nameEqualTo(mapName).findFirst();
-        if (map == null) continue;
-
-        await map.layers.load();
-        MapLayer? layer;
-        for (var l in map.layers) {
-          if (l.name == layerName) {
-            layer = l;
-            break;
-          }
-        }
-        layer ??= map.layers.isNotEmpty ? map.layers.first : null;
-        if (layer == null) continue;
-
-        // 解析导入数据
-        final importedUniqueId = item['uniqueId'] as String?;
-        final title = item['title'] as String;
-        final xRatio = (item['x'] as num).toDouble();
-        final yRatio = (item['y'] as num).toDouble();
-        final importedUpdatedAt = item['updatedAt'] != null
-            ? DateTime.fromMillisecondsSinceEpoch(item['updatedAt'])
-            : DateTime.now();
-
-        // 查找是否存在相同的道具
-        Grenade? existing;
-
-        // UUID查找
-        if (importedUniqueId != null && importedUniqueId.isNotEmpty) {
-          final allGrenades = await isar.grenades.where().findAll();
-          existing = allGrenades
-              .where((g) => g.uniqueId == importedUniqueId)
-              .firstOrNull;
-        }
-
-        // 回退查找
-        if (existing == null && importedUniqueId == null) {
-          await layer.grenades.load();
-          existing = layer.grenades
-              .where((g) =>
-                  g.title == title &&
-                  (g.xRatio - xRatio).abs() < 0.01 &&
-                  (g.yRatio - yRatio).abs() < 0.01)
-              .firstOrNull;
-        }
-
-        if (existing != null) {
-          // 比较时间
-          if (importedUpdatedAt.isAfter(existing.updatedAt)) {
-            // 更新
-            await _updateExistingGrenade(
-                existing, item, memoryImages, dataPath);
-            importedGrenades.add(existing); // 记录更新的道具
-            updatedCount++;
-          } else {
-            // 跳过
-            skippedCount++;
-          }
-        } else {
-          // 新建
-          final newGrenade = await _createNewGrenade(
-              item, memoryImages, dataPath, layer, importedUniqueId);
-          importedGrenades.add(newGrenade); // 记录新增的道具
-          newCount++;
-        }
-      }
-
-      // 4. 记录历史
-      if (importedGrenades.isNotEmpty) {
-        final history = ImportHistory(
-          fileName: importFileName,
-          importedAt: DateTime.now(),
-          newCount: newCount,
-          updatedCount: updatedCount,
-          skippedCount: skippedCount,
-        );
-        await isar.importHistorys.put(history);
-
-        // 关联
-        history.grenades.addAll(importedGrenades);
-        await history.grenades.save();
-      }
-    });
-
-    // 结果消息
-    final List<String> messages = [];
-    if (newCount > 0) messages.add("新增 $newCount 个");
-    if (updatedCount > 0) messages.add("更新 $updatedCount 个");
-    if (skippedCount > 0) messages.add("跳过 $skippedCount 个较旧版本");
-
-    if (messages.isEmpty) {
-      return "没有可导入的道具";
-    }
-    return "成功导入：${messages.join('，')}";
+    return importFromPreview(
+      preview,
+      selected,
+      tagResolutions: const {},
+      areaResolutions: const {},
+    );
   }
 
   /// 预览导入
   Future<String> importFromPreview(
     PackagePreviewResult preview,
-    Set<String> selectedUniqueIds,
-  ) async {
+    Set<String> selectedUniqueIds, {
+    Map<String, ImportTagConflictResolution> tagResolutions = const {},
+    Map<String, ImportAreaConflictResolution> areaResolutions = const {},
+  }) async {
     if (selectedUniqueIds.isEmpty) {
       return "未选择任何道具";
     }
@@ -711,29 +1090,41 @@ class DataService {
     final dataPath = isar.directory ?? '';
     final memoryImages = preview.memoryImages;
 
+    final selectedTagUuids =
+        _collectSelectedTagUuids(preview, selectedUniqueIds);
+    final tagIdByUuid = await _upsertTagsForImport(
+      preview,
+      selectedTagUuids,
+      tagResolutions: tagResolutions,
+    );
+    await _upsertAreasForImport(
+      preview,
+      selectedTagUuids,
+      tagIdByUuid: tagIdByUuid,
+      areaResolutions: areaResolutions,
+    );
+
     int newCount = 0;
     int updatedCount = 0;
     int skippedCount = 0;
-    final List<Grenade> importedGrenades = [];
+    final importedGrenades = <Grenade>[];
 
     await isar.writeTxn(() async {
-      for (var mapGrenades in preview.grenadesByMap.values) {
-        for (var previewItem in mapGrenades) {
-          // 过滤选中
+      for (final mapGrenades in preview.grenadesByMap.values) {
+        for (final previewItem in mapGrenades) {
           if (!selectedUniqueIds.contains(previewItem.uniqueId)) continue;
 
           final item = previewItem.rawData;
           final mapName = item['mapName'];
           final layerName = item['layerName'];
 
-          // 查找地图
           final map =
               await isar.gameMaps.filter().nameEqualTo(mapName).findFirst();
           if (map == null) continue;
 
           await map.layers.load();
           MapLayer? layer;
-          for (var l in map.layers) {
+          for (final l in map.layers) {
             if (l.name == layerName) {
               layer = l;
               break;
@@ -749,16 +1140,15 @@ class DataService {
           final importedUpdatedAt = item['updatedAt'] != null
               ? DateTime.fromMillisecondsSinceEpoch(item['updatedAt'])
               : DateTime.now();
+          final tagUuids = _readTagUuids(item);
 
           Grenade? existing;
-
           if (importedUniqueId != null && importedUniqueId.isNotEmpty) {
             final allGrenades = await isar.grenades.where().findAll();
             existing = allGrenades
                 .where((g) => g.uniqueId == importedUniqueId)
                 .firstOrNull;
           }
-
           if (existing == null && importedUniqueId == null) {
             await layer.grenades.load();
             existing = layer.grenades
@@ -773,6 +1163,7 @@ class DataService {
             if (importedUpdatedAt.isAfter(existing.updatedAt)) {
               await _updateExistingGrenade(
                   existing, item, memoryImages, dataPath);
+              await _replaceGrenadeTags(existing.id, tagUuids, tagIdByUuid);
               importedGrenades.add(existing);
               updatedCount++;
             } else {
@@ -781,6 +1172,7 @@ class DataService {
           } else {
             final newGrenade = await _createNewGrenade(
                 item, memoryImages, dataPath, layer, importedUniqueId);
+            await _replaceGrenadeTags(newGrenade.id, tagUuids, tagIdByUuid);
             importedGrenades.add(newGrenade);
             newCount++;
           }
@@ -810,6 +1202,249 @@ class DataService {
       return "没有可导入的道具";
     }
     return "成功导入：${messages.join('，')}";
+  }
+
+  List<String> _readTagUuids(Map<String, dynamic> item) {
+    final raw = item['tagUuids'];
+    if (raw is List) {
+      return raw
+          .whereType<String>()
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toSet()
+          .toList(growable: false);
+    }
+    return const [];
+  }
+
+  Future<void> _replaceGrenadeTags(
+    int grenadeId,
+    List<String> tagUuids,
+    Map<String, int> tagIdByUuid,
+  ) async {
+    final targetTagIds = <int>{};
+    for (final uuid in tagUuids) {
+      final tagId = tagIdByUuid[uuid];
+      if (tagId != null) {
+        targetTagIds.add(tagId);
+      }
+    }
+
+    await isar.grenadeTags.filter().grenadeIdEqualTo(grenadeId).deleteAll();
+    for (final tagId in targetTagIds) {
+      await isar.grenadeTags
+          .put(GrenadeTag(grenadeId: grenadeId, tagId: tagId));
+    }
+  }
+
+  Future<Map<String, int>> _upsertTagsForImport(
+    PackagePreviewResult preview,
+    Set<String> selectedTagUuids, {
+    required Map<String, ImportTagConflictResolution> tagResolutions,
+  }) async {
+    if (selectedTagUuids.isEmpty || preview.tagsByUuid.isEmpty) return const {};
+
+    final tagMapNames = <String>{};
+    for (final uuid in selectedTagUuids) {
+      final shared = preview.tagsByUuid[uuid];
+      if (shared != null && shared.mapName.isNotEmpty) {
+        tagMapNames.add(shared.mapName);
+      }
+    }
+    final context = await _buildLocalTagContext(tagMapNames);
+
+    final toPut = <Tag>[];
+    final toCreate = <Tag>[];
+    final tagIdByUuid = <String, int>{};
+
+    for (final tagUuid in selectedTagUuids) {
+      final shared = preview.tagsByUuid[tagUuid];
+      if (shared == null || shared.mapName.isEmpty) continue;
+
+      final map = context.mapByName[shared.mapName];
+      if (map == null) continue;
+
+      final localByUuid = context.localByUuid[tagUuid];
+      if (localByUuid != null) {
+        final resolution =
+            tagResolutions[tagUuid] ?? ImportTagConflictResolution.local;
+        if (resolution == ImportTagConflictResolution.shared &&
+            _isTagDifferent(localByUuid, shared)) {
+          localByUuid.name = shared.name;
+          localByUuid.dimension = shared.dimension;
+          localByUuid.colorValue = shared.colorValue;
+          localByUuid.groupName = shared.groupName;
+          localByUuid.isSystem = shared.isSystem;
+          toPut.add(localByUuid);
+        }
+        tagIdByUuid[tagUuid] = localByUuid.id;
+        continue;
+      }
+
+      final semanticKey =
+          _semanticTagKey(map.id, shared.dimension, shared.name);
+      final semanticTag = context.localBySemantic[semanticKey];
+      if (semanticTag != null) {
+        final resolution =
+            tagResolutions[tagUuid] ?? ImportTagConflictResolution.local;
+        if (resolution == ImportTagConflictResolution.shared) {
+          semanticTag.tagUuid = tagUuid;
+          semanticTag.name = shared.name;
+          semanticTag.dimension = shared.dimension;
+          semanticTag.colorValue = shared.colorValue;
+          semanticTag.groupName = shared.groupName;
+          semanticTag.isSystem = shared.isSystem;
+          toPut.add(semanticTag);
+          context.localByUuid[tagUuid] = semanticTag;
+        }
+        tagIdByUuid[tagUuid] = semanticTag.id;
+        continue;
+      }
+
+      final newTag = Tag(
+        tagUuid: tagUuid,
+        name: shared.name,
+        colorValue: shared.colorValue,
+        dimension: shared.dimension,
+        groupName: shared.groupName,
+        isSystem: shared.isSystem,
+        sortOrder: 0,
+        mapId: map.id,
+      );
+      toCreate.add(newTag);
+    }
+
+    if (toPut.isNotEmpty || toCreate.isNotEmpty) {
+      await isar.writeTxn(() async {
+        if (toPut.isNotEmpty) {
+          await isar.tags.putAll(toPut);
+        }
+        for (final tag in toCreate) {
+          await isar.tags.put(tag);
+        }
+      });
+    }
+
+    for (final tag in toCreate) {
+      if (tag.tagUuid.trim().isNotEmpty) {
+        tagIdByUuid[tag.tagUuid.trim()] = tag.id;
+      }
+    }
+
+    // 对未命中的 UUID 再兜底查询一次，确保拿到映射
+    if (tagIdByUuid.length < selectedTagUuids.length) {
+      final allTags = await isar.tags.where().findAll();
+      for (final tag in allTags) {
+        final uuid = tag.tagUuid.trim();
+        if (uuid.isEmpty || !selectedTagUuids.contains(uuid)) continue;
+        tagIdByUuid[uuid] = tag.id;
+      }
+    }
+
+    return tagIdByUuid;
+  }
+
+  Future<void> _upsertAreasForImport(
+    PackagePreviewResult preview,
+    Set<String> selectedTagUuids, {
+    required Map<String, int> tagIdByUuid,
+    required Map<String, ImportAreaConflictResolution> areaResolutions,
+  }) async {
+    if (preview.areas.isEmpty || selectedTagUuids.isEmpty) return;
+
+    final mapNames = <String>{};
+    for (final area in preview.areas) {
+      if (selectedTagUuids.contains(area.tagUuid) && area.mapName.isNotEmpty) {
+        mapNames.add(area.mapName);
+      }
+    }
+
+    final mapByName = <String, GameMap>{};
+    for (final name in mapNames) {
+      final map = await isar.gameMaps.filter().nameEqualTo(name).findFirst();
+      if (map != null) mapByName[name] = map;
+    }
+
+    final putAreas = <MapArea>[];
+    final deleteAreaIds = <int>{};
+
+    final dedupedShared = <String, PackageAreaData>{};
+    for (final area in preview.areas) {
+      if (!selectedTagUuids.contains(area.tagUuid)) continue;
+      final key = '${area.tagUuid}|${area.mapName}|${area.layerName}';
+      final previous = dedupedShared[key];
+      if (previous == null || area.createdAt >= previous.createdAt) {
+        dedupedShared[key] = area;
+      }
+    }
+
+    for (final shared in dedupedShared.values) {
+      final tagId = tagIdByUuid[shared.tagUuid];
+      if (tagId == null) continue;
+      final map = mapByName[shared.mapName];
+      if (map == null) continue;
+      await map.layers.load();
+
+      MapLayer? layer;
+      for (final l in map.layers) {
+        if (l.name == shared.layerName) {
+          layer = l;
+          break;
+        }
+      }
+      if (layer == null) continue;
+
+      final existing = await isar.mapAreas
+          .filter()
+          .mapIdEqualTo(map.id)
+          .tagIdEqualTo(tagId)
+          .findAll();
+      final layerId = layer.id;
+      final sameLayer =
+          existing.where((a) => a.layerId == layerId).toList(growable: false);
+      if (sameLayer.isEmpty) {
+        putAreas.add(MapArea(
+          name: shared.name,
+          colorValue: shared.colorValue,
+          strokes: shared.strokes,
+          mapId: map.id,
+          layerId: layerId,
+          tagId: tagId,
+          createdAt: DateTime.fromMillisecondsSinceEpoch(shared.createdAt),
+        ));
+        continue;
+      }
+
+      final resolution = areaResolutions[shared.tagUuid] ??
+          ImportAreaConflictResolution.keepLocal;
+      if (resolution == ImportAreaConflictResolution.keepLocal) {
+        continue;
+      }
+
+      sameLayer.sort((a, b) {
+        if (a.createdAt.isAfter(b.createdAt)) return -1;
+        if (a.createdAt.isBefore(b.createdAt)) return 1;
+        return b.id.compareTo(a.id);
+      });
+      final target = sameLayer.first;
+      target.name = shared.name;
+      target.colorValue = shared.colorValue;
+      target.strokes = shared.strokes;
+      putAreas.add(target);
+      for (final duplicate in sameLayer.skip(1)) {
+        deleteAreaIds.add(duplicate.id);
+      }
+    }
+
+    if (putAreas.isEmpty && deleteAreaIds.isEmpty) return;
+    await isar.writeTxn(() async {
+      if (putAreas.isNotEmpty) {
+        await isar.mapAreas.putAll(putAreas);
+      }
+      for (final id in deleteAreaIds) {
+        await isar.mapAreas.delete(id);
+      }
+    });
   }
 
   /// 更新
@@ -960,21 +1595,6 @@ class DataService {
     }
     await g.steps.save();
 
-    // 导入标签关联
-    final tagIds = item['tagIds'] as List?;
-    if (tagIds != null && tagIds.isNotEmpty) {
-      for (final tagId in tagIds) {
-        if (tagId is int) {
-          // 检查标签是否存在
-          final tag = await isar.tags.get(tagId);
-          if (tag != null) {
-            final grenadeTag = GrenadeTag(grenadeId: g.id, tagId: tagId);
-            await isar.grenadeTags.put(grenadeTag);
-          }
-        }
-      }
-    }
-
     return g; // 返回创建的道具
   }
 
@@ -1053,4 +1673,16 @@ class DataService {
       }
     }
   }
+}
+
+class _LocalTagContext {
+  final Map<String, GameMap> mapByName;
+  final Map<String, Tag> localByUuid;
+  final Map<String, Tag> localBySemantic;
+
+  const _LocalTagContext({
+    required this.mapByName,
+    required this.localByUuid,
+    required this.localBySemantic,
+  });
 }

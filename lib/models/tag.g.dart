@@ -51,6 +51,11 @@ const TagSchema = CollectionSchema(
       id: 6,
       name: r'sortOrder',
       type: IsarType.long,
+    ),
+    r'tagUuid': PropertySchema(
+      id: 7,
+      name: r'tagUuid',
+      type: IsarType.string,
     )
   },
   estimateSize: _tagEstimateSize,
@@ -59,6 +64,19 @@ const TagSchema = CollectionSchema(
   deserializeProp: _tagDeserializeProp,
   idName: r'id',
   indexes: {
+    r'tagUuid': IndexSchema(
+      id: -718433672386460200,
+      name: r'tagUuid',
+      unique: false,
+      replace: false,
+      properties: [
+        IndexPropertySchema(
+          name: r'tagUuid',
+          type: IndexType.hash,
+          caseSensitive: true,
+        )
+      ],
+    ),
     r'name': IndexSchema(
       id: 879695947855722453,
       name: r'name',
@@ -120,6 +138,7 @@ int _tagEstimateSize(
     }
   }
   bytesCount += 3 + object.name.length * 3;
+  bytesCount += 3 + object.tagUuid.length * 3;
   return bytesCount;
 }
 
@@ -136,6 +155,7 @@ void _tagSerialize(
   writer.writeLong(offsets[4], object.mapId);
   writer.writeString(offsets[5], object.name);
   writer.writeLong(offsets[6], object.sortOrder);
+  writer.writeString(offsets[7], object.tagUuid);
 }
 
 Tag _tagDeserialize(
@@ -152,6 +172,7 @@ Tag _tagDeserialize(
     mapId: reader.readLong(offsets[4]),
     name: reader.readString(offsets[5]),
     sortOrder: reader.readLongOrNull(offsets[6]) ?? 0,
+    tagUuid: reader.readStringOrNull(offsets[7]) ?? '',
   );
   object.id = id;
   return object;
@@ -178,6 +199,8 @@ P _tagDeserializeProp<P>(
       return (reader.readString(offset)) as P;
     case 6:
       return (reader.readLongOrNull(offset) ?? 0) as P;
+    case 7:
+      return (reader.readStringOrNull(offset) ?? '') as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
   }
@@ -282,6 +305,49 @@ extension TagQueryWhere on QueryBuilder<Tag, Tag, QWhereClause> {
         upper: upperId,
         includeUpper: includeUpper,
       ));
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QAfterWhereClause> tagUuidEqualTo(String tagUuid) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IndexWhereClause.equalTo(
+        indexName: r'tagUuid',
+        value: [tagUuid],
+      ));
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QAfterWhereClause> tagUuidNotEqualTo(String tagUuid) {
+    return QueryBuilder.apply(this, (query) {
+      if (query.whereSort == Sort.asc) {
+        return query
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'tagUuid',
+              lower: [],
+              upper: [tagUuid],
+              includeUpper: false,
+            ))
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'tagUuid',
+              lower: [tagUuid],
+              includeLower: false,
+              upper: [],
+            ));
+      } else {
+        return query
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'tagUuid',
+              lower: [tagUuid],
+              includeLower: false,
+              upper: [],
+            ))
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'tagUuid',
+              lower: [],
+              upper: [tagUuid],
+              includeUpper: false,
+            ));
+      }
     });
   }
 
@@ -1001,6 +1067,134 @@ extension TagQueryFilter on QueryBuilder<Tag, Tag, QFilterCondition> {
       ));
     });
   }
+
+  QueryBuilder<Tag, Tag, QAfterFilterCondition> tagUuidEqualTo(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'tagUuid',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QAfterFilterCondition> tagUuidGreaterThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'tagUuid',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QAfterFilterCondition> tagUuidLessThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'tagUuid',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QAfterFilterCondition> tagUuidBetween(
+    String lower,
+    String upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'tagUuid',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QAfterFilterCondition> tagUuidStartsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.startsWith(
+        property: r'tagUuid',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QAfterFilterCondition> tagUuidEndsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.endsWith(
+        property: r'tagUuid',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QAfterFilterCondition> tagUuidContains(String value,
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.contains(
+        property: r'tagUuid',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QAfterFilterCondition> tagUuidMatches(String pattern,
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.matches(
+        property: r'tagUuid',
+        wildcard: pattern,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QAfterFilterCondition> tagUuidIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'tagUuid',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QAfterFilterCondition> tagUuidIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        property: r'tagUuid',
+        value: '',
+      ));
+    });
+  }
 }
 
 extension TagQueryObject on QueryBuilder<Tag, Tag, QFilterCondition> {}
@@ -1089,6 +1283,18 @@ extension TagQuerySortBy on QueryBuilder<Tag, Tag, QSortBy> {
   QueryBuilder<Tag, Tag, QAfterSortBy> sortBySortOrderDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'sortOrder', Sort.desc);
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QAfterSortBy> sortByTagUuid() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'tagUuid', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QAfterSortBy> sortByTagUuidDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'tagUuid', Sort.desc);
     });
   }
 }
@@ -1189,6 +1395,18 @@ extension TagQuerySortThenBy on QueryBuilder<Tag, Tag, QSortThenBy> {
       return query.addSortBy(r'sortOrder', Sort.desc);
     });
   }
+
+  QueryBuilder<Tag, Tag, QAfterSortBy> thenByTagUuid() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'tagUuid', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QAfterSortBy> thenByTagUuidDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'tagUuid', Sort.desc);
+    });
+  }
 }
 
 extension TagQueryWhereDistinct on QueryBuilder<Tag, Tag, QDistinct> {
@@ -1233,6 +1451,13 @@ extension TagQueryWhereDistinct on QueryBuilder<Tag, Tag, QDistinct> {
   QueryBuilder<Tag, Tag, QDistinct> distinctBySortOrder() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'sortOrder');
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QDistinct> distinctByTagUuid(
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'tagUuid', caseSensitive: caseSensitive);
     });
   }
 }
@@ -1283,6 +1508,12 @@ extension TagQueryProperty on QueryBuilder<Tag, Tag, QQueryProperty> {
   QueryBuilder<Tag, int, QQueryOperations> sortOrderProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'sortOrder');
+    });
+  }
+
+  QueryBuilder<Tag, String, QQueryOperations> tagUuidProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'tagUuid');
     });
   }
 }

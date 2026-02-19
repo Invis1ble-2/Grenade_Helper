@@ -60,6 +60,9 @@ class Tag {
   Id id = Isar.autoIncrement;
 
   @Index()
+  String tagUuid;
+
+  @Index()
   String name;
 
   int colorValue;
@@ -77,6 +80,7 @@ class Tag {
   int mapId;
 
   Tag({
+    this.tagUuid = '',
     required this.name,
     required this.colorValue,
     required this.dimension,
