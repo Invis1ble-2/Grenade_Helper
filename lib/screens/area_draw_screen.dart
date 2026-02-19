@@ -14,9 +14,18 @@ class AreaDrawScreen extends ConsumerStatefulWidget {
   final GameMap gameMap;
   final MapLayer layer;
   final MapArea? area;
+  final int? existingTagId;
+  final String? initialName;
+  final int? initialColor;
 
   const AreaDrawScreen(
-      {super.key, required this.gameMap, required this.layer, this.area});
+      {super.key,
+      required this.gameMap,
+      required this.layer,
+      this.area,
+      this.existingTagId,
+      this.initialName,
+      this.initialColor});
 
   @override
   ConsumerState<AreaDrawScreen> createState() => _AreaDrawScreenState();
@@ -40,6 +49,13 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
       _nameController.text = widget.area!.name;
       _selectedColor = widget.area!.colorValue;
       _loadStrokes(widget.area!.strokes);
+    } else {
+      if (widget.initialName != null && widget.initialName!.trim().isNotEmpty) {
+        _nameController.text = widget.initialName!.trim();
+      }
+      if (widget.initialColor != null) {
+        _selectedColor = widget.initialColor!;
+      }
     }
   }
 
@@ -225,6 +241,7 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
         strokes: _strokesAsJson(),
         mapId: widget.gameMap.id,
         layerId: widget.layer.id,
+        existingTagId: widget.existingTagId,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(

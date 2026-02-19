@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/map_area.dart';
@@ -6,6 +7,7 @@ import '../providers.dart';
 import '../services/area_service.dart';
 import 'area_draw_screen.dart';
 import 'area_auto_tag_preview_screen.dart';
+import 'default_area_tag_dev_editor_screen.dart';
 
 /// 区域管理界面
 class AreaManagerScreen extends ConsumerStatefulWidget {
@@ -154,6 +156,23 @@ class _AreaManagerScreenState extends ConsumerState<AreaManagerScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text('${widget.gameMap.name} 区域管理'),
+        actions: [
+          if (kDebugMode)
+            IconButton(
+              tooltip: '默认标签开发编辑器',
+              icon: const Icon(Icons.construction_outlined),
+              onPressed: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        DefaultAreaTagDevEditorScreen(gameMap: widget.gameMap),
+                  ),
+                );
+                if (mounted) _loadAreas();
+              },
+            ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _createArea,

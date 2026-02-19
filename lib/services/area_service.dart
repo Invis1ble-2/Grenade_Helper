@@ -53,19 +53,34 @@ class AreaService {
     required String strokes,
     required int mapId,
     int? layerId,
+    int? existingTagId,
   }) async {
-    // 先创建对应的区域标签
-    final tag = Tag(
-      name: name,
-      colorValue: colorValue,
-      dimension: TagDimension.area,
-      isSystem: false,
-      sortOrder: 0,
-      mapId: mapId,
-    );
-    await isar.writeTxn(() async {
-      await isar.tags.put(tag);
-    });
+    int tagId;
+    if (existingTagId != null) {
+      tagId = existingTagId;
+      await isar.writeTxn(() async {
+        final tag = await isar.tags.get(existingTagId);
+        if (tag != null) {
+          tag.name = name;
+          tag.colorValue = colorValue;
+          await isar.tags.put(tag);
+        }
+      });
+    } else {
+      // 先创建对应的区域标签
+      final tag = Tag(
+        name: name,
+        colorValue: colorValue,
+        dimension: TagDimension.area,
+        isSystem: false,
+        sortOrder: 0,
+        mapId: mapId,
+      );
+      await isar.writeTxn(() async {
+        await isar.tags.put(tag);
+      });
+      tagId = tag.id;
+    }
 
     // 创建区域
     final area = MapArea(
@@ -74,7 +89,7 @@ class AreaService {
       strokes: strokes,
       mapId: mapId,
       layerId: layerId,
-      tagId: tag.id,
+      tagId: tagId,
       createdAt: DateTime.now(),
     );
     await isar.writeTxn(() async {
@@ -84,12 +99,16 @@ class AreaService {
     return area;
   }
 
-  /// 删除区域及其标签
-  Future<void> deleteArea(MapArea area) async {
+  /// 删除区域
+  /// [deleteTag] 为 true 时会同时删除区域标签与关联关系。
+  /// 传 false 时仅删除区域几何数据。
+  Future<void> deleteArea(MapArea area, {bool deleteTag = true}) async {
     await isar.writeTxn(() async {
-      // 删除标签关联
-      await isar.grenadeTags.filter().tagIdEqualTo(area.tagId).deleteAll();
-      await isar.tags.delete(area.tagId);
+      if (deleteTag) {
+        // 删除标签关联
+        await isar.grenadeTags.filter().tagIdEqualTo(area.tagId).deleteAll();
+        await isar.tags.delete(area.tagId);
+      }
       await isar.mapAreas.delete(area.id);
     });
   }
