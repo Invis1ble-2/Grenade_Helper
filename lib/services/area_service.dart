@@ -38,6 +38,10 @@ class AreaTagSyncSummary {
 
 /// 区域服务
 class AreaService {
+  static const double _defaultBrushRatio = 0.018;
+  static const double _minBrushRatio = 0.004;
+  static const double _maxBrushRatio = 0.08;
+
   final Isar isar;
   AreaService(this.isar);
 
@@ -119,6 +123,7 @@ class AreaService {
     required String name,
     required int colorValue,
     required String strokes,
+    int? layerId,
   }) async {
     await isar.writeTxn(() async {
       // 1. 更新对应标签
@@ -133,25 +138,26 @@ class AreaService {
       area.name = name;
       area.colorValue = colorValue;
       area.strokes = strokes;
+      area.layerId = layerId;
       await isar.mapAreas.put(area);
     });
   }
 
-  /// 判断点是否在区域内 (基于笔画围成的区域)
+  /// 判断点是否在区域内（基于涂画笔画与笔宽）
   bool isPointInArea(double x, double y, MapArea area) {
     final strokes = _parseStrokes(area.strokes);
     if (strokes.isEmpty) return false;
 
     final point = Offset(x, y);
+    var isInside = false;
 
-    // 每条笔画都是一个独立闭合区域，命中任意一条即视为命中该区域
+    // 按笔画顺序应用：普通笔画命中=加入区域，橡皮擦命中=移出区域
     for (final stroke in strokes) {
-      if (stroke.length < 3) continue;
-      if (_isPointInPolygon(point, stroke)) {
-        return true;
-      }
+      if (stroke.points.isEmpty) continue;
+      if (!_isPointOnStroke(point, stroke)) continue;
+      isInside = !stroke.isEraser;
     }
-    return false;
+    return isInside;
   }
 
   /// 获取点所在的所有区域
@@ -217,7 +223,11 @@ class AreaService {
   }
 
   /// 批量为地图所有道具自动标签
-  Future<AutoTagSummary> autoTagAllGrenades(int mapId) async {
+  /// [useImpactPoint] 为 true 时，按爆点坐标判定；否则按站位坐标判定。
+  Future<AutoTagSummary> autoTagAllGrenades(
+    int mapId, {
+    bool useImpactPoint = false,
+  }) async {
     final areas = await getAreas(mapId);
     final map = await isar.gameMaps.get(mapId);
     if (map == null) {
@@ -243,9 +253,15 @@ class AreaService {
       allGrenades.addAll(grenades);
     }
 
-    if (areas.isEmpty || allGrenades.isEmpty) {
+    final processedGrenades = useImpactPoint
+        ? allGrenades
+            .where((g) => g.impactXRatio != null && g.impactYRatio != null)
+            .length
+        : allGrenades.length;
+
+    if (areas.isEmpty || allGrenades.isEmpty || processedGrenades == 0) {
       return AutoTagSummary(
-        processedGrenades: allGrenades.length,
+        processedGrenades: processedGrenades,
         matchedGrenades: 0,
         addedLinks: 0,
         removedLinks: 0,
@@ -258,18 +274,29 @@ class AreaService {
     final areaMatches = <String, int>{};
 
     for (final area in areas) {
-      final candidates = area.layerId == null
+      final candidatesRaw = area.layerId == null
           ? allGrenades
           : (grenadesByLayer[area.layerId!] ?? const <Grenade>[]);
+      final candidates = useImpactPoint
+          ? candidatesRaw
+              .where((g) => g.impactXRatio != null && g.impactYRatio != null)
+              .toList()
+          : candidatesRaw;
+
       final matchedIds = <int>{};
       for (final grenade in candidates) {
-        if (isPointInArea(grenade.xRatio, grenade.yRatio, area)) {
+        final x = useImpactPoint ? grenade.impactXRatio! : grenade.xRatio;
+        final y = useImpactPoint ? grenade.impactYRatio! : grenade.yRatio;
+        if (isPointInArea(x, y, area)) {
           matchedIds.add(grenade.id);
           matchedGrenadeIds.add(grenade.id);
         }
       }
-      areaToGrenadeIds[area.tagId] = matchedIds;
-      areaMatches[area.name] = matchedIds.length;
+      areaToGrenadeIds
+          .putIfAbsent(area.tagId, () => <int>{})
+          .addAll(matchedIds);
+      areaMatches[area.name] =
+          (areaMatches[area.name] ?? 0) + matchedIds.length;
     }
 
     int addedLinks = 0;
@@ -304,7 +331,7 @@ class AreaService {
     });
 
     return AutoTagSummary(
-      processedGrenades: allGrenades.length,
+      processedGrenades: processedGrenades,
       matchedGrenades: matchedGrenadeIds.length,
       addedLinks: addedLinks,
       removedLinks: removedLinks,
@@ -408,63 +435,168 @@ class AreaService {
     return areas.map((a) => a.tagId).toSet();
   }
 
-  /// 解析笔画JSON
-  List<List<Offset>> _parseStrokes(String json) {
+  /// 解析笔画JSON（仅保留涂画模式数据结构）
+  List<_AreaStroke> _parseStrokes(String json) {
     try {
       final data = jsonDecode(json) as List;
       return data.map((stroke) {
-        final points = stroke as List;
-        return points
-            .map((p) =>
-                Offset((p['x'] as num).toDouble(), (p['y'] as num).toDouble()))
-            .toList();
+        if (stroke is Map) {
+          final pointsRaw = (stroke['q'] as List?) ??
+              (stroke['points'] as List?) ??
+              (stroke['p'] as List?) ??
+              const [];
+          final widthRatio = _normalizeWidthRatio(
+            ((stroke['widthRatio'] as num?) ?? (stroke['w'] as num?))
+                ?.toDouble(),
+          ).clamp(_minBrushRatio, _maxBrushRatio);
+          final isEraser = _parseIsEraser(stroke['isEraser'] ?? stroke['e']);
+          final points =
+              _parseStrokePoints(pointsRaw, isDeltaPacked: stroke['q'] != null);
+          return _AreaStroke(
+            points: points,
+            widthRatio: widthRatio,
+            isEraser: isEraser,
+          );
+        }
+
+        final points =
+            stroke is List ? _parseStrokePoints(stroke) : const <Offset>[];
+        return _AreaStroke(
+          points: points,
+          widthRatio: _defaultBrushRatio,
+          isEraser: false,
+        );
       }).toList();
     } catch (e) {
       return [];
     }
   }
 
-  /// 使用 Path.contains 判断点是否在笔画闭合区域内
-  bool _isPointInPolygon(Offset point, List<Offset> polygon) {
-    if (polygon.length < 3) return false;
-
-    double minX = polygon.first.dx;
-    double maxX = polygon.first.dx;
-    double minY = polygon.first.dy;
-    double maxY = polygon.first.dy;
-    for (final p in polygon) {
-      if (p.dx < minX) minX = p.dx;
-      if (p.dx > maxX) maxX = p.dx;
-      if (p.dy < minY) minY = p.dy;
-      if (p.dy > maxY) maxY = p.dy;
+  double _normalizeWidthRatio(double? raw) {
+    if (raw == null) return _defaultBrushRatio;
+    var value = raw;
+    if (value > 1.0) {
+      value /= 1000.0;
     }
-    if (point.dx < minX ||
-        point.dx > maxX ||
-        point.dy < minY ||
-        point.dy > maxY) {
-      return false;
-    }
-
-    final path = Path()..fillType = PathFillType.evenOdd;
-    path.moveTo(polygon.first.dx, polygon.first.dy);
-
-    if (polygon.length < 3) {
-      for (int i = 1; i < polygon.length; i++) {
-        path.lineTo(polygon[i].dx, polygon[i].dy);
-      }
-    } else {
-      // 与绘制页保持一致：使用二次贝塞尔平滑
-      for (int i = 1; i < polygon.length - 1; i++) {
-        final p1 = polygon[i];
-        final p2 = polygon[i + 1];
-        final mid = Offset((p1.dx + p2.dx) / 2, (p1.dy + p2.dy) / 2);
-        path.quadraticBezierTo(p1.dx, p1.dy, mid.dx, mid.dy);
-      }
-      final last = polygon.last;
-      path.lineTo(last.dx, last.dy);
-    }
-
-    path.close();
-    return path.contains(point);
+    return value;
   }
+
+  bool _parseIsEraser(dynamic value) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    return false;
+  }
+
+  List<Offset> _parseStrokePoints(List raw, {bool isDeltaPacked = false}) {
+    if (raw.isEmpty) return const [];
+
+    if (raw.first is num) {
+      return _parseFlatNumericPoints(raw, isDeltaPacked: isDeltaPacked);
+    }
+
+    return raw
+        .map((p) {
+          if (p is Map && p['x'] is num && p['y'] is num) {
+            return Offset(
+              (p['x'] as num).toDouble(),
+              (p['y'] as num).toDouble(),
+            );
+          }
+          if (p is List && p.length >= 2 && p[0] is num && p[1] is num) {
+            return Offset(
+              (p[0] as num).toDouble(),
+              (p[1] as num).toDouble(),
+            );
+          }
+          return null;
+        })
+        .whereType<Offset>()
+        .toList();
+  }
+
+  List<Offset> _parseFlatNumericPoints(List raw,
+      {required bool isDeltaPacked}) {
+    if (raw.length < 2) return const [];
+    final points = <Offset>[];
+    double? x;
+    double? y;
+    for (int i = 0; i + 1 < raw.length; i += 2) {
+      final xRaw = raw[i];
+      final yRaw = raw[i + 1];
+      if (xRaw is! num || yRaw is! num) continue;
+
+      if (isDeltaPacked) {
+        final dx = xRaw.toDouble() / 1000.0;
+        final dy = yRaw.toDouble() / 1000.0;
+        if (x == null || y == null) {
+          x = dx;
+          y = dy;
+        } else {
+          x += dx;
+          y += dy;
+        }
+      } else {
+        x = xRaw.toDouble();
+        y = yRaw.toDouble();
+        if (x > 1.0 || y > 1.0) {
+          x /= 1000.0;
+          y /= 1000.0;
+        }
+      }
+
+      points.add(Offset(x, y));
+    }
+    return points;
+  }
+
+  bool _isPointOnStroke(Offset point, _AreaStroke stroke) {
+    final points = stroke.points;
+    final radius =
+        (stroke.widthRatio / 2).clamp(_minBrushRatio / 2, _maxBrushRatio / 2);
+    final radiusSquared = radius * radius;
+
+    if (points.length == 1) {
+      final dx = point.dx - points.first.dx;
+      final dy = point.dy - points.first.dy;
+      return dx * dx + dy * dy <= radiusSquared;
+    }
+
+    for (int i = 0; i < points.length - 1; i++) {
+      final d2 = _distanceSquaredToSegment(point, points[i], points[i + 1]);
+      if (d2 <= radiusSquared) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  double _distanceSquaredToSegment(Offset p, Offset a, Offset b) {
+    final ab = b - a;
+    final ap = p - a;
+    final abLen2 = ab.dx * ab.dx + ab.dy * ab.dy;
+
+    if (abLen2 <= 1e-12) {
+      final dx = p.dx - a.dx;
+      final dy = p.dy - a.dy;
+      return dx * dx + dy * dy;
+    }
+
+    final t = ((ap.dx * ab.dx + ap.dy * ab.dy) / abLen2).clamp(0.0, 1.0);
+    final closest = Offset(a.dx + ab.dx * t, a.dy + ab.dy * t);
+    final dx = p.dx - closest.dx;
+    final dy = p.dy - closest.dy;
+    return dx * dx + dy * dy;
+  }
+}
+
+class _AreaStroke {
+  final List<Offset> points;
+  final double widthRatio;
+  final bool isEraser;
+
+  const _AreaStroke({
+    required this.points,
+    required this.widthRatio,
+    required this.isEraser,
+  });
 }

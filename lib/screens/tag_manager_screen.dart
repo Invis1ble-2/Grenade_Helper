@@ -92,7 +92,7 @@ class _TagManagerScreenState extends ConsumerState<TagManagerScreen> {
               child: const Text('取消')),
           ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color.fromARGB(255, 248, 121, 121)),
               child: const Text('删除')),
         ],
       ),

@@ -28,8 +28,7 @@ class _DefaultAreaTagDevEditorScreenState
   bool _loading = true;
   List<Tag> _defaultAreaTags = [];
   List<MapLayer> _layers = [];
-  int? _selectedLayerId;
-  Map<String, MapArea> _areaIndex = {};
+  Map<int, List<MapArea>> _areasByTagId = {};
 
   @override
   void initState() {
@@ -112,42 +111,99 @@ class _DefaultAreaTagDevEditorScreenState
     final layers = widget.gameMap.layers.toList()
       ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
 
-    final selectedLayerId = layers.isEmpty
-        ? null
-        : (layers.any((l) => l.id == _selectedLayerId)
-            ? _selectedLayerId
-            : layers.first.id);
-
-    final areaIndex = <String, MapArea>{};
+    final areasByTagId = <int, List<MapArea>>{};
     for (final area in areas) {
       final layerId = area.layerId;
       if (layerId == null) continue;
-      areaIndex[_indexKey(area.tagId, layerId)] = area;
+      areasByTagId.putIfAbsent(area.tagId, () => []).add(area);
     }
 
     if (!mounted) return;
     setState(() {
       _defaultAreaTags = tags;
       _layers = layers;
-      _selectedLayerId = selectedLayerId;
-      _areaIndex = areaIndex;
+      _areasByTagId = areasByTagId;
       _loading = false;
     });
   }
 
-  MapArea? _findAreaForTag(int tagId, int layerId) {
-    return _areaIndex[_indexKey(tagId, layerId)];
+  List<MapArea> _getAreasForTag(int tagId) {
+    final list = _areasByTagId[tagId];
+    if (list == null || list.isEmpty) return const [];
+    final layerOrder = {for (final l in _layers) l.id: l.sortOrder};
+    final sorted = List<MapArea>.from(list);
+    sorted.sort((a, b) {
+      final aLayer = layerOrder[a.layerId] ?? 1 << 30;
+      final bLayer = layerOrder[b.layerId] ?? 1 << 30;
+      if (aLayer != bLayer) return aLayer.compareTo(bLayer);
+      if (a.createdAt.isAfter(b.createdAt)) return -1;
+      if (a.createdAt.isBefore(b.createdAt)) return 1;
+      return b.id.compareTo(a.id);
+    });
+    return sorted;
+  }
+
+  int _configuredLayerCount(int tagId) => _getAreasForTag(tagId).length;
+
+  String _layerNameById(int? layerId) {
+    if (layerId == null) return '未知楼层';
+    for (final l in _layers) {
+      if (l.id == layerId) return l.name;
+    }
+    return '未知楼层';
+  }
+
+  MapArea? _findPrimaryAreaForTag(int tagId) {
+    final areas = _getAreasForTag(tagId);
+    if (areas.isEmpty) return null;
+    return areas.first;
+  }
+
+  Future<MapArea?> _pickAreaForTagAction(Tag tag, String title) async {
+    final areas = _getAreasForTag(tag.id);
+    if (areas.isEmpty) return null;
+    if (areas.length == 1) return areas.first;
+
+    return showDialog<MapArea>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: SizedBox(
+          width: 420,
+          child: ListView.separated(
+            shrinkWrap: true,
+            itemCount: areas.length,
+            separatorBuilder: (_, __) => const Divider(height: 1),
+            itemBuilder: (_, index) {
+              final area = areas[index];
+              return ListTile(
+                title: Text(_layerNameById(area.layerId)),
+                subtitle:
+                    Text('创建于 ${area.createdAt.toString().substring(0, 16)}'),
+                onTap: () => Navigator.pop(ctx, area),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _openDrawForTag(Tag tag) async {
-    final selectedLayerId = _selectedLayerId;
-    if (selectedLayerId == null) return;
-    final layer = _layers.firstWhere(
-      (l) => l.id == selectedLayerId,
-      orElse: () => _layers.first,
-    );
+    final existingArea = _findPrimaryAreaForTag(tag.id);
+    final layer = (existingArea != null && existingArea.layerId != null)
+        ? _layers.firstWhere(
+            (l) => l.id == existingArea.layerId,
+            orElse: () => _layers.first,
+          )
+        : _layers.first;
 
-    final existingArea = _findAreaForTag(tag.id, layer.id);
     if (!mounted) return;
     final result = await Navigator.push<bool>(
       context,
@@ -168,16 +224,15 @@ class _DefaultAreaTagDevEditorScreenState
   }
 
   Future<void> _deleteAreaForTag(Tag tag) async {
-    final selectedLayerId = _selectedLayerId;
-    if (selectedLayerId == null) return;
-    final target = _findAreaForTag(tag.id, selectedLayerId);
+    final target = await _pickAreaForTagAction(tag, '选择要删除的楼层区域');
     if (target == null) return;
 
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('删除区域数据'),
-        content: Text('确认删除「${tag.name}」在当前楼层的区域几何数据？'),
+        content: Text(
+            '确认删除「${tag.name}」在「${_layerNameById(target.layerId)}」的区域几何数据？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -277,9 +332,8 @@ class _DefaultAreaTagDevEditorScreenState
       );
     }
 
-    final currentLayerId = _selectedLayerId ?? _layers.first.id;
     final completedCount = _defaultAreaTags
-        .where((tag) => _findAreaForTag(tag.id, currentLayerId) != null)
+        .where((tag) => _configuredLayerCount(tag.id) > 0)
         .length;
 
     return Scaffold(
@@ -303,25 +357,8 @@ class _DefaultAreaTagDevEditorScreenState
           Container(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            child: Row(
-              children: [
-                DropdownButton<int>(
-                  value: currentLayerId,
-                  items: _layers
-                      .map((layer) => DropdownMenuItem<int>(
-                            value: layer.id,
-                            child: Text(layer.name),
-                          ))
-                      .toList(),
-                  onChanged: (v) {
-                    if (v == null) return;
-                    setState(() => _selectedLayerId = v);
-                  },
-                ),
-                const SizedBox(width: 12),
-                Text('已配置 $completedCount / ${_defaultAreaTags.length}'),
-              ],
-            ),
+            alignment: Alignment.centerLeft,
+            child: Text('已配置 $completedCount / ${_defaultAreaTags.length}'),
           ),
           Expanded(
             child: _defaultAreaTags.isEmpty
@@ -331,8 +368,9 @@ class _DefaultAreaTagDevEditorScreenState
                     itemCount: _defaultAreaTags.length,
                     itemBuilder: (ctx, index) {
                       final tag = _defaultAreaTags[index];
-                      final area = _findAreaForTag(tag.id, currentLayerId);
-                      final done = area != null;
+                      final area = _findPrimaryAreaForTag(tag.id);
+                      final layerCount = _configuredLayerCount(tag.id);
+                      final done = layerCount > 0;
                       final color = Color(tag.colorValue);
                       return Card(
                         child: ListTile(
@@ -346,7 +384,9 @@ class _DefaultAreaTagDevEditorScreenState
                             ),
                           ),
                           title: Text(tag.name),
-                          subtitle: Text(done ? '已配置区域数据' : '未配置区域数据'),
+                          subtitle: Text(done
+                              ? '已配置 $layerCount 层（入口楼层：${_layerNameById(area?.layerId)}）'
+                              : '未配置区域数据'),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -369,7 +409,7 @@ class _DefaultAreaTagDevEditorScreenState
                               ),
                               if (done)
                                 IconButton(
-                                  tooltip: '删除当前楼层区域几何',
+                                  tooltip: '删除区域几何',
                                   onPressed: () => _deleteAreaForTag(tag),
                                   icon: const Icon(Icons.delete_outline,
                                       color: Colors.redAccent),

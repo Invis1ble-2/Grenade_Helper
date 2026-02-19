@@ -32,19 +32,43 @@ class AreaDrawScreen extends ConsumerStatefulWidget {
 }
 
 class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
+  static const List<double> _brushPresets = [0.006, 0.012, 0.018, 0.02, 0.03];
+  static const int _defaultBrushLevel = 2; // 第3档
+  static final double _defaultBrushRatio = _brushPresets[_defaultBrushLevel];
+  static const double _minBrushRatio = 0.004;
+  static const double _maxBrushRatio = 0.08;
+
   late final PhotoViewController _photoViewController;
+  late final List<MapLayer> _availableLayers;
+  late MapLayer _selectedLayer;
   final GlobalKey _stackKey = GlobalKey();
-  final List<List<Offset>> _strokes = [];
+  final List<_DrawStroke> _strokes = [];
   List<Offset> _currentStroke = [];
+  double _currentStrokeWidthRatio = _defaultBrushRatio;
   final _nameController = TextEditingController();
   int _selectedColor = 0xFF4CAF50;
   bool _isPenMode = false; // 默认移动模式
-  double _strokeWidth = 2.5; // 笔画宽度
+  bool _isEraserMode = false;
+  double _brushRatio = _defaultBrushRatio; // 画刷直径占图片宽度比例
+  int _brushLevel = _defaultBrushLevel;
 
   @override
   void initState() {
     super.initState();
     _photoViewController = PhotoViewController();
+
+    widget.gameMap.layers.loadSync();
+    _availableLayers = widget.gameMap.layers.toList()
+      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+    _selectedLayer = widget.layer;
+    if (widget.area != null && widget.area!.layerId != null) {
+      final areaLayer =
+          _availableLayers.where((l) => l.id == widget.area!.layerId);
+      if (areaLayer.isNotEmpty) {
+        _selectedLayer = areaLayer.first;
+      }
+    }
+
     if (widget.area != null) {
       _nameController.text = widget.area!.name;
       _selectedColor = widget.area!.colorValue;
@@ -63,15 +87,135 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
     try {
       final data = jsonDecode(json) as List;
       _strokes.addAll(data.map((stroke) {
-        final points = stroke as List;
-        return points
-            .map((p) =>
-                Offset((p['x'] as num).toDouble(), (p['y'] as num).toDouble()))
-            .toList();
-      }));
+        if (stroke is Map) {
+          final pointsRaw = (stroke['q'] as List?) ??
+              (stroke['points'] as List?) ??
+              (stroke['p'] as List?) ??
+              const [];
+          final points = _parseStrokePoints(
+            pointsRaw,
+            isDeltaPacked: stroke['q'] != null,
+          );
+          final widthRatio = _normalizeWidthRatio(
+            ((stroke['widthRatio'] as num?) ?? (stroke['w'] as num?))
+                ?.toDouble(),
+          ).clamp(_minBrushRatio, _maxBrushRatio);
+          final isEraser = _parseIsEraser(stroke['isEraser'] ?? stroke['e']);
+          return _DrawStroke(
+            points: points,
+            widthRatio: widthRatio,
+            isEraser: isEraser,
+          );
+        }
+
+        // 兼容旧数据：无宽度时用默认值加载
+        final points =
+            stroke is List ? _parseStrokePoints(stroke) : const <Offset>[];
+        return _DrawStroke(
+          points: points,
+          widthRatio: _defaultBrushRatio,
+          isEraser: false,
+        );
+      }).where((s) => s.points.isNotEmpty));
+      if (_strokes.isNotEmpty) {
+        _brushRatio =
+            _strokes.last.widthRatio.clamp(_minBrushRatio, _maxBrushRatio);
+        _brushLevel = _nearestBrushLevel(_brushRatio);
+        _brushRatio = _brushPresets[_brushLevel];
+      }
     } catch (e) {
       debugPrint('Error parsing strokes: $e');
     }
+  }
+
+  double _normalizeWidthRatio(double? raw) {
+    if (raw == null) return _defaultBrushRatio;
+    var value = raw;
+    if (value > 1.0) {
+      value /= 1000.0;
+    }
+    return value;
+  }
+
+  bool _parseIsEraser(dynamic value) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    return false;
+  }
+
+  List<Offset> _parseStrokePoints(List raw, {bool isDeltaPacked = false}) {
+    if (raw.isEmpty) return const [];
+
+    if (raw.first is num) {
+      return _parseFlatNumericPoints(raw, isDeltaPacked: isDeltaPacked);
+    }
+
+    return raw
+        .map((p) {
+          if (p is Map && p['x'] is num && p['y'] is num) {
+            return Offset(
+              (p['x'] as num).toDouble(),
+              (p['y'] as num).toDouble(),
+            );
+          }
+          if (p is List && p.length >= 2 && p[0] is num && p[1] is num) {
+            return Offset(
+              (p[0] as num).toDouble(),
+              (p[1] as num).toDouble(),
+            );
+          }
+          return null;
+        })
+        .whereType<Offset>()
+        .toList();
+  }
+
+  List<Offset> _parseFlatNumericPoints(List raw,
+      {required bool isDeltaPacked}) {
+    if (raw.length < 2) return const [];
+    final points = <Offset>[];
+    double? x;
+    double? y;
+    for (int i = 0; i + 1 < raw.length; i += 2) {
+      final xRaw = raw[i];
+      final yRaw = raw[i + 1];
+      if (xRaw is! num || yRaw is! num) continue;
+
+      if (isDeltaPacked) {
+        final dx = xRaw.toDouble() / 1000.0;
+        final dy = yRaw.toDouble() / 1000.0;
+        if (x == null || y == null) {
+          x = dx;
+          y = dy;
+        } else {
+          x += dx;
+          y += dy;
+        }
+      } else {
+        x = xRaw.toDouble();
+        y = yRaw.toDouble();
+        if (x > 1.0 || y > 1.0) {
+          x /= 1000.0;
+          y /= 1000.0;
+        }
+      }
+
+      points.add(Offset(x, y));
+    }
+    return points;
+  }
+
+  int _nearestBrushLevel(double value) {
+    var best = 0;
+    var bestDelta = (value - _brushPresets.first).abs();
+    for (var i = 1; i < _brushPresets.length; i++) {
+      final d = (value - _brushPresets[i]).abs();
+      if (d < bestDelta) {
+        best = i;
+        bestDelta = d;
+      }
+    }
+    return best;
   }
 
   @override
@@ -156,6 +300,7 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
     if (ratio.dx >= 0 && ratio.dx <= 1 && ratio.dy >= 0 && ratio.dy <= 1) {
       setState(() {
         _currentStroke = [ratio];
+        _currentStrokeWidthRatio = _brushRatio;
       });
     }
   }
@@ -168,21 +313,42 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
         double offsetX,
         double offsetY
       }) imageBounds) {
+    if (_currentStroke.isEmpty) return;
     final localPos = details.localPosition;
     final ratio = Offset(
       ((localPos.dx - imageBounds.offsetX) / imageBounds.width).clamp(0.0, 1.0),
       ((localPos.dy - imageBounds.offsetY) / imageBounds.height)
           .clamp(0.0, 1.0),
     );
+
+    final last = _currentStroke.last;
+    final delta = ratio - last;
+    final distance = delta.distance;
+    final step = (_currentStrokeWidthRatio * 0.35).clamp(0.001, 0.04);
+
     setState(() {
+      if (distance <= step) {
+        _currentStroke.add(ratio);
+        return;
+      }
+      final unit = delta / distance;
+      var travelled = step;
+      while (travelled < distance) {
+        _currentStroke.add(last + unit * travelled);
+        travelled += step;
+      }
       _currentStroke.add(ratio);
     });
   }
 
   void _onPanEnd(DragEndDetails details) {
-    if (_currentStroke.length > 2) {
+    if (_currentStroke.isNotEmpty) {
       setState(() {
-        _strokes.add(List.from(_currentStroke));
+        _strokes.add(_DrawStroke(
+          points: List.from(_currentStroke),
+          widthRatio: _currentStrokeWidthRatio,
+          isEraser: _isEraserMode,
+        ));
         _currentStroke = [];
       });
     }
@@ -203,9 +369,41 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
 
   String _strokesAsJson() {
     final data = _strokes
-        .map((stroke) => stroke.map((p) => {'x': p.dx, 'y': p.dy}).toList())
+        .map((stroke) => {
+              'widthRatio': stroke.widthRatio,
+              'isEraser': stroke.isEraser,
+              'points': stroke.points
+                  .map((p) => {'x': p.dx, 'y': p.dy})
+                  .toList(growable: false),
+            })
         .toList();
     return jsonEncode(data);
+  }
+
+  Future<void> _selectLayer() async {
+    if (_availableLayers.length <= 1) return;
+    final selected = await showDialog<MapLayer>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('选择区域所属楼层'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: _availableLayers
+              .map(
+                (l) => ListTile(
+                  title: Text(l.name),
+                  trailing: l.id == _selectedLayer.id
+                      ? const Icon(Icons.check)
+                      : null,
+                  onTap: () => Navigator.pop(ctx, l),
+                ),
+              )
+              .toList(),
+        ),
+      ),
+    );
+    if (selected == null || selected.id == _selectedLayer.id) return;
+    setState(() => _selectedLayer = selected);
   }
 
   Future<void> _save() async {
@@ -230,6 +428,7 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
         name: name,
         colorValue: _selectedColor,
         strokes: _strokesAsJson(),
+        layerId: _selectedLayer.id,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -240,12 +439,15 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
         colorValue: _selectedColor,
         strokes: _strokesAsJson(),
         mapId: widget.gameMap.id,
-        layerId: widget.layer.id,
+        layerId: _selectedLayer.id,
         existingTagId: widget.existingTagId,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('区域 "$name" 创建成功'), backgroundColor: Colors.green));
+        content: Text('区域 "$name" 创建成功'),
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 1),
+      ));
     }
 
     Navigator.pop(context, true);
@@ -256,8 +458,14 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: Text('绘制区域 - ${widget.layer.name}'),
+        title: Text('绘制区域 - ${_selectedLayer.name}'),
         actions: [
+          if (_availableLayers.length > 1)
+            IconButton(
+              icon: const Icon(Icons.layers_outlined),
+              tooltip: '切换所属楼层',
+              onPressed: _selectLayer,
+            ),
           IconButton(
               icon: const Icon(Icons.undo),
               onPressed: _strokes.isEmpty ? null : _undo,
@@ -298,12 +506,14 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
                     width: 40,
                     height: 40,
                     decoration: BoxDecoration(
-                      color: Color(_selectedColor),
+                      color: Theme.of(context).colorScheme.primaryContainer,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.white24),
+                      border: Border.all(
+                          color: Theme.of(context).colorScheme.outlineVariant),
                     ),
-                    child: const Icon(Icons.palette,
-                        color: Colors.white, size: 20),
+                    child: Icon(Icons.palette,
+                        color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        size: 20),
                   ),
                 ),
               ],
@@ -336,7 +546,7 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
                           children: [
                             // 地图底图
                             Image.asset(
-                              widget.layer.assetPath,
+                              _selectedLayer.assetPath,
                               width: constraints.maxWidth,
                               height: constraints.maxHeight,
                               fit: BoxFit.contain,
@@ -357,9 +567,11 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
                                     painter: _StrokePainter(
                                       strokes: _strokes,
                                       currentStroke: _currentStroke,
+                                      currentStrokeWidthRatio:
+                                          _currentStrokeWidthRatio,
+                                      currentIsEraser: _isEraserMode,
                                       color: Color(_selectedColor),
                                       imageBounds: imageBounds,
-                                      strokeWidth: _strokeWidth,
                                     ),
                                   ),
                                 ),
@@ -415,35 +627,60 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
                     ),
                   ],
                 ),
-                // 笔画宽度滑块（仅绘制模式显示）
+                // 圆形画刷大小（仅绘制模式显示）
                 if (_isPenMode) ...[
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      Text('笔画宽度',
+                      SegmentedButton<bool>(
+                        segments: const [
+                          ButtonSegment<bool>(
+                            value: false,
+                            icon: Icon(Icons.brush, size: 16),
+                            label: Text('画笔'),
+                          ),
+                          ButtonSegment<bool>(
+                            value: true,
+                            icon: Icon(Icons.auto_fix_off, size: 16),
+                            label: Text('橡皮擦'),
+                          ),
+                        ],
+                        selected: {_isEraserMode},
+                        onSelectionChanged: (values) {
+                          setState(() => _isEraserMode = values.first);
+                        },
+                        style: const ButtonStyle(
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text('画刷档位',
                           style: TextStyle(
                               color:
                                   Theme.of(context).textTheme.bodySmall?.color,
                               fontSize: 12)),
+                      const SizedBox(width: 8),
                       Expanded(
-                        child: Slider(
-                          value: _strokeWidth,
-                          min: 1.0,
-                          max: 8.0,
-                          divisions: 14,
-                          label: _strokeWidth.toStringAsFixed(1),
-                          onChanged: (v) => setState(() => _strokeWidth = v),
+                        child: SegmentedButton<int>(
+                          segments: const [
+                            ButtonSegment<int>(value: 0, label: Text('1')),
+                            ButtonSegment<int>(value: 1, label: Text('2')),
+                            ButtonSegment<int>(value: 2, label: Text('3')),
+                            ButtonSegment<int>(value: 3, label: Text('4')),
+                            ButtonSegment<int>(value: 4, label: Text('5')),
+                          ],
+                          selected: {_brushLevel},
+                          onSelectionChanged: (values) {
+                            final level = values.first;
+                            setState(() {
+                              _brushLevel = level;
+                              _brushRatio = _brushPresets[level];
+                            });
+                          },
+                          style: const ButtonStyle(
+                            visualDensity: VisualDensity.compact,
+                          ),
                         ),
-                      ),
-                      SizedBox(
-                        width: 32,
-                        child: Text(_strokeWidth.toStringAsFixed(1),
-                            style: TextStyle(
-                                color: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.color,
-                                fontSize: 12)),
                       ),
                     ],
                   ),
@@ -459,8 +696,12 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
 
 /// 笔画绘制器
 class _StrokePainter extends CustomPainter {
-  final List<List<Offset>> strokes;
+  static const double _overlayOpacity = 0.5;
+
+  final List<_DrawStroke> strokes;
   final List<Offset> currentStroke;
+  final double currentStrokeWidthRatio;
+  final bool currentIsEraser;
   final Color color;
   final ({
     double width,
@@ -468,14 +709,14 @@ class _StrokePainter extends CustomPainter {
     double offsetX,
     double offsetY
   }) imageBounds;
-  final double strokeWidth;
 
   _StrokePainter({
     required this.strokes,
     required this.currentStroke,
+    required this.currentStrokeWidthRatio,
+    required this.currentIsEraser,
     required this.color,
     required this.imageBounds,
-    required this.strokeWidth,
   });
 
   Offset _toScreen(Offset ratio) => Offset(
@@ -483,77 +724,76 @@ class _StrokePainter extends CustomPainter {
         imageBounds.offsetY + ratio.dy * imageBounds.height,
       );
 
-  Path _buildSmoothPath(List<Offset> points) {
-    final path = Path();
-    if (points.isEmpty) return path;
+  void _drawStroke(
+      Canvas canvas, List<Offset> points, double widthRatio, bool isEraser) {
+    if (points.isEmpty) return;
+    final diameterPx = (widthRatio * imageBounds.width).clamp(3.0, 120.0);
+    final radiusPx = diameterPx / 2;
 
-    final screenPoints = points.map(_toScreen).toList();
-    path.moveTo(screenPoints.first.dx, screenPoints.first.dy);
+    final fillPaint = isEraser
+        ? (Paint()
+          ..blendMode = BlendMode.clear
+          ..style = PaintingStyle.fill
+          ..isAntiAlias = true)
+        : (Paint()
+          ..color = color.withValues(alpha: 1.0)
+          ..style = PaintingStyle.fill
+          ..isAntiAlias = true);
 
-    if (screenPoints.length < 3) {
-      for (int i = 1; i < screenPoints.length; i++) {
-        path.lineTo(screenPoints[i].dx, screenPoints[i].dy);
+    final bridgePaint = isEraser
+        ? (Paint()
+          ..blendMode = BlendMode.clear
+          ..strokeWidth = diameterPx
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..isAntiAlias = true)
+        : (Paint()
+          ..color = color.withValues(alpha: 1.0)
+          ..strokeWidth = diameterPx
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..isAntiAlias = true);
+
+    final screenPoints = points.map(_toScreen).toList(growable: false);
+    for (int i = 0; i < screenPoints.length; i++) {
+      canvas.drawCircle(screenPoints[i], radiusPx, fillPaint);
+      if (i > 0) {
+        canvas.drawLine(screenPoints[i - 1], screenPoints[i], bridgePaint);
       }
-    } else {
-      // 使用二次贝塞尔曲线平滑路径
-      for (int i = 1; i < screenPoints.length - 1; i++) {
-        final p1 = screenPoints[i];
-        final p2 = screenPoints[i + 1];
-        final mid = Offset((p1.dx + p2.dx) / 2, (p1.dy + p2.dy) / 2);
-        path.quadraticBezierTo(p1.dx, p1.dy, mid.dx, mid.dy);
-      }
-      // 连接到最后一点
-      final last = screenPoints.last;
-      path.lineTo(last.dx, last.dy);
     }
-    return path;
   }
 
   @override
   void paint(Canvas canvas, Size size) {
-    // 先绘制所有填充区域（避免分层）
-    final fillPaint = Paint()
-      ..color = color.withValues(alpha: 0.25)
-      ..style = PaintingStyle.fill
-      ..isAntiAlias = true;
+    canvas.saveLayer(
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      Paint()..color = Colors.white.withValues(alpha: _overlayOpacity),
+    );
 
     for (final stroke in strokes) {
-      if (stroke.length < 3) continue;
-      final path = _buildSmoothPath(stroke);
-      path.close();
-      canvas.drawPath(path, fillPaint);
+      _drawStroke(canvas, stroke.points, stroke.widthRatio, stroke.isEraser);
     }
 
-    // 再绘制所有描边（在填充之上）
-    final strokePaint = Paint()
-      ..color = color.withValues(alpha: 0.8)
-      ..strokeWidth = strokeWidth
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..isAntiAlias = true;
-
-    for (final stroke in strokes) {
-      if (stroke.length < 2) continue;
-      final path = _buildSmoothPath(stroke);
-      path.close();
-      canvas.drawPath(path, strokePaint);
+    if (currentStroke.isNotEmpty) {
+      _drawStroke(
+          canvas, currentStroke, currentStrokeWidthRatio, currentIsEraser);
     }
 
-    // 绘制当前笔画（实时预览）
-    if (currentStroke.length >= 2) {
-      final path = _buildSmoothPath(currentStroke);
-      final previewPaint = Paint()
-        ..color = color
-        ..strokeWidth = strokeWidth
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..isAntiAlias = true;
-      canvas.drawPath(path, previewPaint);
-    }
+    canvas.restore();
   }
 
   @override
   bool shouldRepaint(covariant _StrokePainter oldDelegate) => true;
+}
+
+class _DrawStroke {
+  final List<Offset> points;
+  final double widthRatio;
+  final bool isEraser;
+
+  const _DrawStroke({
+    required this.points,
+    required this.widthRatio,
+    required this.isEraser,
+  });
 }

@@ -25,6 +25,10 @@ class AreaAutoTagPreviewScreen extends ConsumerStatefulWidget {
 
 class _AreaAutoTagPreviewScreenState
     extends ConsumerState<AreaAutoTagPreviewScreen> {
+  static const double _defaultBrushRatio = 0.018;
+  static const double _minBrushRatio = 0.004;
+  static const double _maxBrushRatio = 0.08;
+
   late final PhotoViewController _photoViewController;
   late final AreaService _areaService;
 
@@ -38,7 +42,7 @@ class _AreaAutoTagPreviewScreenState
   List<Grenade> _grenades = [];
   Set<int> _inAreaThrowIds = {};
   Set<int> _inAreaImpactIds = {};
-  List<List<Offset>> _strokes = [];
+  List<_AreaPreviewStroke> _strokes = [];
 
   @override
   void initState() {
@@ -154,19 +158,119 @@ class _AreaAutoTagPreviewScreenState
     }
   }
 
-  List<List<Offset>> _parseStrokes(String json) {
+  List<_AreaPreviewStroke> _parseStrokes(String json) {
     try {
       final data = jsonDecode(json) as List;
       return data.map((stroke) {
-        final points = stroke as List;
-        return points
-            .map((p) =>
-                Offset((p['x'] as num).toDouble(), (p['y'] as num).toDouble()))
-            .toList();
+        if (stroke is Map) {
+          final pointsRaw = (stroke['q'] as List?) ??
+              (stroke['points'] as List?) ??
+              (stroke['p'] as List?) ??
+              const [];
+          final points = _parseStrokePoints(
+            pointsRaw,
+            isDeltaPacked: stroke['q'] != null,
+          );
+          final widthRatio = _normalizeWidthRatio(
+            ((stroke['widthRatio'] as num?) ?? (stroke['w'] as num?))
+                ?.toDouble(),
+          ).clamp(_minBrushRatio, _maxBrushRatio);
+          final isEraser = _parseIsEraser(stroke['isEraser'] ?? stroke['e']);
+          return _AreaPreviewStroke(
+            points: points,
+            widthRatio: widthRatio,
+            isEraser: isEraser,
+          );
+        }
+
+        final points =
+            stroke is List ? _parseStrokePoints(stroke) : const <Offset>[];
+        return _AreaPreviewStroke(
+          points: points,
+          widthRatio: _defaultBrushRatio,
+          isEraser: false,
+        );
       }).toList();
     } catch (_) {
       return [];
     }
+  }
+
+  double _normalizeWidthRatio(double? raw) {
+    if (raw == null) return _defaultBrushRatio;
+    var value = raw;
+    if (value > 1.0) {
+      value /= 1000.0;
+    }
+    return value;
+  }
+
+  bool _parseIsEraser(dynamic value) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    return false;
+  }
+
+  List<Offset> _parseStrokePoints(List raw, {bool isDeltaPacked = false}) {
+    if (raw.isEmpty) return const [];
+
+    if (raw.first is num) {
+      return _parseFlatNumericPoints(raw, isDeltaPacked: isDeltaPacked);
+    }
+
+    return raw
+        .map((p) {
+          if (p is Map && p['x'] is num && p['y'] is num) {
+            return Offset(
+              (p['x'] as num).toDouble(),
+              (p['y'] as num).toDouble(),
+            );
+          }
+          if (p is List && p.length >= 2 && p[0] is num && p[1] is num) {
+            return Offset(
+              (p[0] as num).toDouble(),
+              (p[1] as num).toDouble(),
+            );
+          }
+          return null;
+        })
+        .whereType<Offset>()
+        .toList();
+  }
+
+  List<Offset> _parseFlatNumericPoints(List raw,
+      {required bool isDeltaPacked}) {
+    if (raw.length < 2) return const [];
+    final points = <Offset>[];
+    double? x;
+    double? y;
+    for (int i = 0; i + 1 < raw.length; i += 2) {
+      final xRaw = raw[i];
+      final yRaw = raw[i + 1];
+      if (xRaw is! num || yRaw is! num) continue;
+
+      if (isDeltaPacked) {
+        final dx = xRaw.toDouble() / 1000.0;
+        final dy = yRaw.toDouble() / 1000.0;
+        if (x == null || y == null) {
+          x = dx;
+          y = dy;
+        } else {
+          x += dx;
+          y += dy;
+        }
+      } else {
+        x = xRaw.toDouble();
+        y = yRaw.toDouble();
+        if (x > 1.0 || y > 1.0) {
+          x /= 1000.0;
+          y /= 1000.0;
+        }
+      }
+
+      points.add(Offset(x, y));
+    }
+    return points;
   }
 
   int get _displayTotal {
@@ -297,7 +401,7 @@ class _AreaAutoTagPreviewScreenState
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '楼层：${_layer!.name}    当前模式命中：$_displayMatched / $_displayTotal',
+            '当前模式命中：$_displayMatched / $_displayTotal',
             style: TextStyle(
               color: Theme.of(context).textTheme.bodyMedium?.color,
               fontWeight: FontWeight.w600,
@@ -516,7 +620,9 @@ class _AreaAutoTagPreviewScreenState
 }
 
 class _AreaScopePainter extends CustomPainter {
-  final List<List<Offset>> strokes;
+  static const double _overlayOpacity = 0.26;
+
+  final List<_AreaPreviewStroke> strokes;
   final Color color;
   final ({
     double width,
@@ -536,51 +642,73 @@ class _AreaScopePainter extends CustomPainter {
         imageBounds.offsetY + ratio.dy * imageBounds.height,
       );
 
-  Path _buildPath(List<Offset> points) {
-    final path = Path();
-    if (points.isEmpty) return path;
-    final screenPoints = points.map(_toScreen).toList();
-    path.moveTo(screenPoints.first.dx, screenPoints.first.dy);
-    if (screenPoints.length < 3) {
-      for (int i = 1; i < screenPoints.length; i++) {
-        path.lineTo(screenPoints[i].dx, screenPoints[i].dy);
+  void _drawStroke(
+      Canvas canvas, List<Offset> points, double widthRatio, bool isEraser) {
+    if (points.isEmpty) return;
+    final diameterPx = (widthRatio * imageBounds.width).clamp(3.0, 120.0);
+    final radiusPx = diameterPx / 2;
+
+    final fillPaint = isEraser
+        ? (Paint()
+          ..blendMode = BlendMode.clear
+          ..style = PaintingStyle.fill
+          ..isAntiAlias = true)
+        : (Paint()
+          ..color = color.withValues(alpha: 1.0)
+          ..style = PaintingStyle.fill
+          ..isAntiAlias = true);
+
+    final bridgePaint = isEraser
+        ? (Paint()
+          ..blendMode = BlendMode.clear
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeWidth = diameterPx
+          ..isAntiAlias = true)
+        : (Paint()
+          ..color = color.withValues(alpha: 1.0)
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeWidth = diameterPx
+          ..isAntiAlias = true);
+
+    final screenPoints = points.map(_toScreen).toList(growable: false);
+    for (int i = 0; i < screenPoints.length; i++) {
+      canvas.drawCircle(screenPoints[i], radiusPx, fillPaint);
+      if (i > 0) {
+        canvas.drawLine(screenPoints[i - 1], screenPoints[i], bridgePaint);
       }
-    } else {
-      for (int i = 1; i < screenPoints.length - 1; i++) {
-        final p1 = screenPoints[i];
-        final p2 = screenPoints[i + 1];
-        final mid = Offset((p1.dx + p2.dx) / 2, (p1.dy + p2.dy) / 2);
-        path.quadraticBezierTo(p1.dx, p1.dy, mid.dx, mid.dy);
-      }
-      final last = screenPoints.last;
-      path.lineTo(last.dx, last.dy);
     }
-    path.close();
-    return path;
   }
 
   @override
   void paint(Canvas canvas, Size size) {
-    final fillPaint = Paint()
-      ..color = color.withValues(alpha: 0.24)
-      ..style = PaintingStyle.fill
-      ..isAntiAlias = true;
-    final strokePaint = Paint()
-      ..color = color.withValues(alpha: 0.9)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0
-      ..isAntiAlias = true;
+    canvas.saveLayer(
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      Paint()..color = Colors.white.withValues(alpha: _overlayOpacity),
+    );
 
     for (final stroke in strokes) {
-      if (stroke.length < 3) continue;
-      final path = _buildPath(stroke);
-      canvas.drawPath(path, fillPaint);
-      canvas.drawPath(path, strokePaint);
+      _drawStroke(canvas, stroke.points, stroke.widthRatio, stroke.isEraser);
     }
+
+    canvas.restore();
   }
 
   @override
   bool shouldRepaint(covariant _AreaScopePainter oldDelegate) {
     return oldDelegate.strokes != strokes || oldDelegate.color != color;
   }
+}
+
+class _AreaPreviewStroke {
+  final List<Offset> points;
+  final double widthRatio;
+  final bool isEraser;
+
+  const _AreaPreviewStroke({
+    required this.points,
+    required this.widthRatio,
+    required this.isEraser,
+  });
 }

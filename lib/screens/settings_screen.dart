@@ -7,6 +7,7 @@ import 'package:isar_community/isar.dart';
 import '../services/settings_service.dart';
 import '../services/seasonal_theme_service.dart';
 import '../services/data_service.dart';
+import '../services/tag_service.dart';
 import '../models.dart';
 import '../providers.dart';
 import '../main.dart' show sendOverlayCommand;
@@ -287,6 +288,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _buildSection(
           title: '🗄️ 数据管理',
           children: [
+            ListTile(
+              leading: const Icon(Icons.playlist_add_check, color: Colors.teal),
+              title: const Text('重导入默认区域标签/数据'),
+              subtitle: const Text('一键补齐内置默认区域标签与区域几何数据'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _reimportDefaultAreaTagsForAllMaps(),
+            ),
             ListTile(
               leading: const Icon(Icons.delete_sweep, color: Colors.redAccent),
               title: const Text('清空地图道具'),
@@ -595,6 +603,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           title: '🗄️ 数据管理',
           children: [
             ListTile(
+              leading: const Icon(Icons.playlist_add_check, color: Colors.teal),
+              title: const Text('重导入默认区域标签/数据'),
+              subtitle: const Text('一键补齐内置默认区域标签与区域几何数据'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _reimportDefaultAreaTagsForAllMaps(),
+            ),
+            ListTile(
               leading: const Icon(Icons.delete_sweep, color: Colors.redAccent),
               title: const Text('清空地图道具'),
               subtitle: const Text('删除选定地图的所有道具数据'),
@@ -724,6 +739,72 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _reimportDefaultAreaTagsForAllMaps() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('重导入默认区域标签/数据？'),
+        content: const Text('将为所有地图补齐内置默认区域标签与区域几何数据，不会删除你已有的自定义区域与标签。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.teal,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('开始导入'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 16),
+            Text('正在导入默认区域标签与区域数据...'),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      final isar = ref.read(isarProvider);
+      final tagService = TagService(isar);
+      final result = await tagService.reimportDefaultAreaTagsForAllMaps();
+
+      if (!mounted) return;
+      Navigator.pop(context);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              '已处理${result.processedMaps}张地图；标签预设${result.mapsWithPresets}张、区域预设${result.mapsWithAreaData}张；标签新增${result.addedTags}/更新${result.updatedTags}；区域新增${result.addedAreas}/更新${result.updatedAreas}/去重删除${result.removedDuplicateAreas}'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('重导入失败: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   /// 执行删除操作

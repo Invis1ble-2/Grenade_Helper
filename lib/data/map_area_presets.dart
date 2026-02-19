@@ -65,6 +65,8 @@ const Map<String, List<String>> mapAreaPresets = {
     '一箱',
     '二箱',
     '三箱',
+    '水池',
+    '下水道',
     '香蕉道',
     '树位',
     '凹槽',
