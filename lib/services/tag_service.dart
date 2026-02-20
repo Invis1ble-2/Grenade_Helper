@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:isar_community/isar.dart';
 import '../models/tag.dart';
 import '../models/grenade_tag.dart';
@@ -144,9 +146,8 @@ class TagService {
 
     final toCreate = <Tag>[];
     final toUpdate = <Tag>[];
-    final requiredKeys = required
-        .map((e) => _systemTagKey(e.dimension, e.name))
-        .toSet();
+    final requiredKeys =
+        required.map((e) => _systemTagKey(e.dimension, e.name)).toSet();
     for (final def in required) {
       final key = _systemTagKey(def.dimension, def.name);
       final existing = bySystemKey[key] ?? byAnyKey[key];
@@ -523,60 +524,108 @@ class TagService {
     final deleteIds = <int>{};
     final toPut = <MapArea>[];
 
+    void upsertPresetToLayer(
+      BuiltinAreaPreset preset,
+      MapLayer layer, {
+      required String strokesJson,
+    }) {
+      final tag = tagByName[preset.name];
+      if (tag == null) return;
+
+      final key = '${tag.id}:${layer.id}';
+      final currentList = grouped[key] ?? const <MapArea>[];
+
+      MapArea? newest;
+      if (currentList.isNotEmpty) {
+        newest = currentList.reduce((a, b) => _isAreaNewer(a, b) ? a : b);
+        for (final area in currentList) {
+          if (area.id != newest.id) {
+            deleteIds.add(area.id);
+          }
+        }
+      }
+
+      if (newest == null) {
+        toPut.add(MapArea(
+          name: preset.name,
+          colorValue: preset.colorValue,
+          strokes: strokesJson,
+          mapId: map.id,
+          layerId: layer.id,
+          tagId: tag.id,
+          createdAt: DateTime.now(),
+        ));
+        addedAreas++;
+        return;
+      }
+
+      if (!overwriteExisting) return;
+
+      final changed = newest.name != preset.name ||
+          newest.colorValue != preset.colorValue ||
+          newest.strokes != strokesJson ||
+          newest.layerId != layer.id ||
+          newest.tagId != tag.id;
+
+      if (changed) {
+        newest.name = preset.name;
+        newest.colorValue = preset.colorValue;
+        newest.strokes = strokesJson;
+        newest.layerId = layer.id;
+        newest.tagId = tag.id;
+        toPut.add(newest);
+        updatedAreas++;
+      }
+    }
+
     for (final entry in presetByFloor.entries) {
       final floorKey = entry.key.toLowerCase();
+      if (floorKey == '_merged') {
+        for (final preset in entry.value) {
+          final floorStrokeMap =
+              _decodeFloorStrokesMap(preset.floorStrokesJson);
+          if (floorStrokeMap.isNotEmpty) {
+            for (final strokeEntry in floorStrokeMap.entries) {
+              final presetFloorKey = strokeEntry.key.toLowerCase();
+              final layer = layerByFloorKey[presetFloorKey] ??
+                  layerByFloorKey[_stripFileExtension(presetFloorKey)];
+              if (layer == null) continue;
+              upsertPresetToLayer(
+                preset,
+                layer,
+                strokesJson: strokeEntry.value,
+              );
+            }
+            continue;
+          }
+
+          final presetFloorKey = (preset.floorKey ?? '').toLowerCase();
+          final presetStrokes = preset.strokesJson;
+          if (presetFloorKey.isEmpty || presetStrokes == null) continue;
+          final layer = layerByFloorKey[presetFloorKey] ??
+              layerByFloorKey[_stripFileExtension(presetFloorKey)];
+          if (layer == null) continue;
+          upsertPresetToLayer(
+            preset,
+            layer,
+            strokesJson: presetStrokes,
+          );
+        }
+        continue;
+      }
+
       final layer = layerByFloorKey[floorKey] ??
           layerByFloorKey[_stripFileExtension(floorKey)];
       if (layer == null) continue;
 
       for (final preset in entry.value) {
-        final tag = tagByName[preset.name];
-        if (tag == null) continue;
-
-        final key = '${tag.id}:${layer.id}';
-        final currentList = grouped[key] ?? const <MapArea>[];
-
-        MapArea? newest;
-        if (currentList.isNotEmpty) {
-          newest = currentList.reduce((a, b) => _isAreaNewer(a, b) ? a : b);
-          for (final area in currentList) {
-            if (area.id != newest.id) {
-              deleteIds.add(area.id);
-            }
-          }
-        }
-
-        if (newest == null) {
-          toPut.add(MapArea(
-            name: preset.name,
-            colorValue: preset.colorValue,
-            strokes: preset.strokesJson,
-            mapId: map.id,
-            layerId: layer.id,
-            tagId: tag.id,
-            createdAt: DateTime.now(),
-          ));
-          addedAreas++;
-          continue;
-        }
-
-        if (!overwriteExisting) continue;
-
-        final changed = newest.name != preset.name ||
-            newest.colorValue != preset.colorValue ||
-            newest.strokes != preset.strokesJson ||
-            newest.layerId != layer.id ||
-            newest.tagId != tag.id;
-
-        if (changed) {
-          newest.name = preset.name;
-          newest.colorValue = preset.colorValue;
-          newest.strokes = preset.strokesJson;
-          newest.layerId = layer.id;
-          newest.tagId = tag.id;
-          toPut.add(newest);
-          updatedAreas++;
-        }
+        final presetStrokes = preset.strokesJson;
+        if (presetStrokes == null) continue;
+        upsertPresetToLayer(
+          preset,
+          layer,
+          strokesJson: presetStrokes,
+        );
       }
     }
 
@@ -614,6 +663,32 @@ class TagService {
     final dot = fileName.lastIndexOf('.');
     if (dot <= 0) return fileName;
     return fileName.substring(0, dot);
+  }
+
+  Map<String, String> _decodeFloorStrokesMap(String? floorStrokesJson) {
+    if (floorStrokesJson == null || floorStrokesJson.trim().isEmpty) {
+      return const <String, String>{};
+    }
+
+    try {
+      final decoded = jsonDecode(floorStrokesJson);
+      if (decoded is! Map) return const <String, String>{};
+
+      final result = <String, String>{};
+      for (final entry in decoded.entries) {
+        final key = entry.key;
+        if (key is! String || key.trim().isEmpty) continue;
+        final value = entry.value;
+        if (value is String) {
+          result[key] = value;
+        } else {
+          result[key] = jsonEncode(value);
+        }
+      }
+      return result;
+    } catch (_) {
+      return const <String, String>{};
+    }
   }
 
   /// 获取地图的所有标签 (按维度分组)

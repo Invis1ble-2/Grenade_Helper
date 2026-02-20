@@ -158,15 +158,18 @@ class _TagManagerScreenState extends ConsumerState<TagManagerScreen> {
     await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => AreaDrawScreen(
-          gameMap: gameMap,
-          layer: selectedLayer,
-          area: area,
-          existingTagId: area == null ? tag.id : null,
-          initialName: tag.name,
-          initialColor: tag.colorValue,
-          lockName: true,
-        ),
+        builder: (_) {
+          final enableMultiLayer = tag.dimension == TagDimension.area;
+          return AreaDrawScreen(
+            gameMap: gameMap,
+            layer: selectedLayer,
+            area: area,
+            existingTagId: enableMultiLayer ? tag.id : null,
+            initialName: tag.name,
+            initialColor: tag.colorValue,
+            lockName: true,
+          );
+        },
       ),
     );
   }

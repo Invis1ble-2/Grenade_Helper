@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:grenade_helper/models/map_area.dart';
+import 'package:isar_community/isar.dart';
 import 'package:photo_view/photo_view.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models.dart';
 import '../providers.dart';
 import '../services/area_service.dart';
@@ -34,6 +36,7 @@ class AreaDrawScreen extends ConsumerStatefulWidget {
 }
 
 class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
+  static const String _lastUsedColorKey = 'area_draw_last_used_color';
   static const List<double> _brushPresets = [0.006, 0.012, 0.018, 0.02, 0.03];
   static const int _defaultBrushLevel = 2; // 第3档
   static final double _defaultBrushRatio = _brushPresets[_defaultBrushLevel];
@@ -53,6 +56,11 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
   bool _isEraserMode = false;
   double _brushRatio = _defaultBrushRatio; // 画刷直径占图片宽度比例
   int _brushLevel = _defaultBrushLevel;
+  Map<int, MapArea> _tagAreasByLayerId = {};
+  final Map<int, _LayerDraft> _draftByLayerId = {};
+  int? _lastUsedColor;
+
+  bool get _isTagBoundMultiLayerMode => widget.existingTagId != null;
 
   @override
   void initState() {
@@ -83,51 +91,216 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
         _selectedColor = widget.initialColor!;
       }
     }
+
+    if (_isTagBoundMultiLayerMode) {
+      _loadTagBoundAreas(preferredLayerId: _selectedLayer.id);
+    }
+    _loadLastUsedColor();
+  }
+
+  Future<void> _loadLastUsedColor() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedColor = prefs.getInt(_lastUsedColorKey);
+      if (savedColor == null || !mounted) return;
+      _lastUsedColor = savedColor;
+
+      // 编辑已有区域时优先展示区域本色；新建时始终优先使用上次颜色（覆盖 initialColor）。
+      final shouldApply = widget.area == null;
+      if (!shouldApply) return;
+
+      setState(() {
+        _selectedColor = savedColor;
+      });
+      if (_isTagBoundMultiLayerMode) {
+        _cacheCurrentLayerDraft();
+      }
+    } catch (_) {
+      // 读取失败时静默降级为默认颜色
+    }
+  }
+
+  Future<void> _rememberLastUsedColor(int colorValue) async {
+    _lastUsedColor = colorValue;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_lastUsedColorKey, colorValue);
+    } catch (_) {
+      // 写入失败不影响主流程
+    }
+  }
+
+  bool _isAreaNewer(MapArea a, MapArea b) {
+    if (a.createdAt.isAfter(b.createdAt)) return true;
+    if (a.createdAt.isBefore(b.createdAt)) return false;
+    return a.id > b.id;
+  }
+
+  Future<void> _loadTagBoundAreas({int? preferredLayerId}) async {
+    if (!_isTagBoundMultiLayerMode) return;
+    final isar = ref.read(isarProvider);
+    final tagId = widget.existingTagId!;
+    final all = await isar.mapAreas
+        .filter()
+        .mapIdEqualTo(widget.gameMap.id)
+        .tagIdEqualTo(tagId)
+        .findAll();
+
+    final latestByLayer = <int, MapArea>{};
+    for (final area in all) {
+      final layerId = area.layerId;
+      if (layerId == null) continue;
+      final previous = latestByLayer[layerId];
+      if (previous == null || _isAreaNewer(area, previous)) {
+        latestByLayer[layerId] = area;
+      }
+    }
+
+    _tagAreasByLayerId = latestByLayer;
+    for (final entry in latestByLayer.entries) {
+      final layerId = entry.key;
+      final area = entry.value;
+      _draftByLayerId.putIfAbsent(
+        layerId,
+        () => _LayerDraft(
+          name: area.name,
+          colorValue: area.colorValue,
+          strokes: _decodeStrokes(area.strokes),
+        ),
+      );
+    }
+    await _loadLayerAreaState(preferredLayerId ?? _selectedLayer.id);
+  }
+
+  Future<void> _loadLayerAreaState(int layerId) async {
+    if (!_isTagBoundMultiLayerMode || !mounted) return;
+    final area = _tagAreasByLayerId[layerId];
+    final draft = _draftByLayerId[layerId];
+    final selected = _availableLayers.firstWhere(
+      (l) => l.id == layerId,
+      orElse: () => _selectedLayer,
+    );
+
+    setState(() {
+      _selectedLayer = selected;
+      _strokes.clear();
+      _currentStroke = [];
+
+      if (draft != null) {
+        if (!widget.lockName) {
+          _nameController.text = draft.name;
+        }
+        _selectedColor = draft.colorValue;
+        _strokes.addAll(_cloneStrokes(draft.strokes));
+      } else if (area != null) {
+        if (!widget.lockName) {
+          _nameController.text = area.name;
+        }
+        _selectedColor = area.colorValue;
+        _loadStrokes(area.strokes);
+      } else {
+        if (!widget.lockName) {
+          final fallbackName =
+              (widget.initialName ?? widget.area?.name ?? '').trim();
+          if (fallbackName.isNotEmpty) {
+            _nameController.text = fallbackName;
+          }
+        }
+        if (_lastUsedColor != null) {
+          _selectedColor = _lastUsedColor!;
+        } else if (widget.initialColor != null) {
+          _selectedColor = widget.initialColor!;
+        }
+      }
+    });
   }
 
   void _loadStrokes(String json) {
+    final parsed = _decodeStrokes(json);
+    _strokes.addAll(parsed);
+    if (_strokes.isNotEmpty) {
+      _brushRatio =
+          _strokes.last.widthRatio.clamp(_minBrushRatio, _maxBrushRatio);
+      _brushLevel = _nearestBrushLevel(_brushRatio);
+      _brushRatio = _brushPresets[_brushLevel];
+    }
+  }
+
+  List<_DrawStroke> _decodeStrokes(String json) {
     try {
       final data = jsonDecode(json) as List;
-      _strokes.addAll(data.map((stroke) {
-        if (stroke is Map) {
-          final pointsRaw = (stroke['q'] as List?) ??
-              (stroke['points'] as List?) ??
-              (stroke['p'] as List?) ??
-              const [];
-          final points = _parseStrokePoints(
-            pointsRaw,
-            isDeltaPacked: stroke['q'] != null,
-          );
-          final widthRatio = _normalizeWidthRatio(
-            ((stroke['widthRatio'] as num?) ?? (stroke['w'] as num?))
-                ?.toDouble(),
-          ).clamp(_minBrushRatio, _maxBrushRatio);
-          final isEraser = _parseIsEraser(stroke['isEraser'] ?? stroke['e']);
-          return _DrawStroke(
-            points: points,
-            widthRatio: widthRatio,
-            isEraser: isEraser,
-          );
-        }
+      return data
+          .map((stroke) {
+            if (stroke is Map) {
+              final pointsRaw = (stroke['q'] as List?) ??
+                  (stroke['points'] as List?) ??
+                  (stroke['p'] as List?) ??
+                  const [];
+              final points = _parseStrokePoints(
+                pointsRaw,
+                isDeltaPacked: stroke['q'] != null,
+              );
+              final widthRatio = _normalizeWidthRatio(
+                ((stroke['widthRatio'] as num?) ?? (stroke['w'] as num?))
+                    ?.toDouble(),
+              ).clamp(_minBrushRatio, _maxBrushRatio);
+              final isEraser =
+                  _parseIsEraser(stroke['isEraser'] ?? stroke['e']);
+              return _DrawStroke(
+                points: points,
+                widthRatio: widthRatio,
+                isEraser: isEraser,
+              );
+            }
 
-        // 兼容旧数据：无宽度时用默认值加载
-        final points =
-            stroke is List ? _parseStrokePoints(stroke) : const <Offset>[];
-        return _DrawStroke(
-          points: points,
-          widthRatio: _defaultBrushRatio,
-          isEraser: false,
-        );
-      }).where((s) => s.points.isNotEmpty));
-      if (_strokes.isNotEmpty) {
-        _brushRatio =
-            _strokes.last.widthRatio.clamp(_minBrushRatio, _maxBrushRatio);
-        _brushLevel = _nearestBrushLevel(_brushRatio);
-        _brushRatio = _brushPresets[_brushLevel];
-      }
+            // 兼容旧数据：无宽度时用默认值加载
+            final points =
+                stroke is List ? _parseStrokePoints(stroke) : const <Offset>[];
+            return _DrawStroke(
+              points: points,
+              widthRatio: _defaultBrushRatio,
+              isEraser: false,
+            );
+          })
+          .where((s) => s.points.isNotEmpty)
+          .toList(growable: false);
     } catch (e) {
       debugPrint('Error parsing strokes: $e');
+      return const <_DrawStroke>[];
     }
+  }
+
+  List<_DrawStroke> _cloneStrokes(List<_DrawStroke> source) {
+    return source
+        .map(
+          (stroke) => _DrawStroke(
+            points: List<Offset>.from(stroke.points),
+            widthRatio: stroke.widthRatio,
+            isEraser: stroke.isEraser,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  void _cacheCurrentLayerDraft() {
+    if (!_isTagBoundMultiLayerMode) return;
+    final fallbackName = widget.area?.name ?? widget.initialName ?? '';
+    final draftName = _nameController.text.trim().isEmpty
+        ? fallbackName.trim()
+        : _nameController.text.trim();
+    final mergedStrokes = _cloneStrokes(_strokes);
+    if (_currentStroke.isNotEmpty) {
+      mergedStrokes.add(_DrawStroke(
+        points: List<Offset>.from(_currentStroke),
+        widthRatio: _currentStrokeWidthRatio,
+        isEraser: _isEraserMode,
+      ));
+    }
+    _draftByLayerId[_selectedLayer.id] = _LayerDraft(
+      name: draftName,
+      colorValue: _selectedColor,
+      strokes: mergedStrokes,
+    );
   }
 
   double _normalizeWidthRatio(double? raw) {
@@ -353,12 +526,14 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
         ));
         _currentStroke = [];
       });
+      _cacheCurrentLayerDraft();
     }
   }
 
   void _undo() {
     if (_strokes.isNotEmpty) {
       setState(() => _strokes.removeLast());
+      _cacheCurrentLayerDraft();
     }
   }
 
@@ -367,10 +542,12 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
       _strokes.clear();
       _currentStroke = [];
     });
+    _cacheCurrentLayerDraft();
   }
 
-  String _strokesAsJson() {
-    final data = _strokes
+  String _strokesAsJson([List<_DrawStroke>? source]) {
+    final strokes = source ?? _strokes;
+    final data = strokes
         .map((stroke) => {
               'widthRatio': stroke.widthRatio,
               'isEraser': stroke.isEraser,
@@ -405,6 +582,11 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
       ),
     );
     if (selected == null || selected.id == _selectedLayer.id) return;
+    if (_isTagBoundMultiLayerMode) {
+      _cacheCurrentLayerDraft();
+      await _loadLayerAreaState(selected.id);
+      return;
+    }
     setState(() => _selectedLayer = selected);
   }
 
@@ -417,16 +599,79 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
           content: Text('请输入区域名称'), backgroundColor: Colors.orange));
       return;
     }
-    if (_strokes.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('请绘制区域范围'), backgroundColor: Colors.orange));
-      return;
-    }
-
     final isar = ref.read(isarProvider);
     final areaService = AreaService(isar);
 
-    if (widget.area != null) {
+    if (_isTagBoundMultiLayerMode) {
+      _cacheCurrentLayerDraft();
+      final hasAnyStroke =
+          _draftByLayerId.values.any((e) => e.strokes.isNotEmpty);
+      if (!hasAnyStroke) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('请至少绘制一个楼层的区域范围'), backgroundColor: Colors.orange));
+        return;
+      }
+
+      final tagId = widget.existingTagId!;
+      int savedCount = 0;
+      int deletedCount = 0;
+
+      for (final entry in _draftByLayerId.entries) {
+        final layerId = entry.key;
+        final draft = entry.value;
+        final existing = _tagAreasByLayerId[layerId];
+        if (draft.strokes.isEmpty) {
+          if (existing != null) {
+            await areaService.deleteArea(existing, deleteTag: false);
+            _tagAreasByLayerId.remove(layerId);
+            deletedCount++;
+          }
+          continue;
+        }
+
+        final strokesJson = _strokesAsJson(draft.strokes);
+        if (existing == null) {
+          final created = await areaService.createArea(
+            name: name,
+            colorValue: draft.colorValue,
+            strokes: strokesJson,
+            mapId: widget.gameMap.id,
+            layerId: layerId,
+            existingTagId: tagId,
+          );
+          _tagAreasByLayerId[layerId] = created;
+          savedCount++;
+          continue;
+        }
+
+        final changed = existing.name != name ||
+            existing.colorValue != draft.colorValue ||
+            existing.strokes != strokesJson ||
+            existing.layerId != layerId;
+        if (!changed) continue;
+
+        await areaService.updateArea(
+          area: existing,
+          name: name,
+          colorValue: draft.colorValue,
+          strokes: strokesJson,
+          layerId: layerId,
+        );
+        savedCount++;
+      }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('区域 "$name" 已保存：更新/新建$savedCount层，清除$deletedCount层'),
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 1),
+      ));
+    } else if (widget.area != null) {
+      if (_strokes.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('请绘制区域范围'), backgroundColor: Colors.orange));
+        return;
+      }
       await areaService.updateArea(
         area: widget.area!,
         name: name,
@@ -438,6 +683,11 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('区域 "$name" 更新成功'), backgroundColor: Colors.green));
     } else {
+      if (_strokes.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('请绘制区域范围'), backgroundColor: Colors.orange));
+        return;
+      }
       await areaService.createArea(
         name: name,
         colorValue: _selectedColor,
@@ -525,7 +775,11 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
                   onTap: () async {
                     final color = await showTagColorPickerDialog(context,
                         initialColor: _selectedColor);
-                    if (color != null) setState(() => _selectedColor = color);
+                    if (color != null) {
+                      setState(() => _selectedColor = color);
+                      _cacheCurrentLayerDraft();
+                      _rememberLastUsedColor(color);
+                    }
                   },
                   child: Container(
                     width: 40,
@@ -820,5 +1074,17 @@ class _DrawStroke {
     required this.points,
     required this.widthRatio,
     required this.isEraser,
+  });
+}
+
+class _LayerDraft {
+  final String name;
+  final int colorValue;
+  final List<_DrawStroke> strokes;
+
+  const _LayerDraft({
+    required this.name,
+    required this.colorValue,
+    required this.strokes,
   });
 }

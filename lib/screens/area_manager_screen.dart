@@ -381,7 +381,9 @@ class _AreaManagerScreenState extends ConsumerState<AreaManagerScreen> {
           overflow: TextOverflow.ellipsis,
         ),
         subtitle: Text(
-          '${isDefault ? "默认标签" : "自定义"} · 创建于 ${area.createdAt.toString().substring(0, 16)}',
+          isDefault
+              ? '默认标签'
+              : '自定义 · 创建于 ${area.createdAt.toString().substring(0, 16)}',
           style: const TextStyle(fontSize: 12),
         ),
         trailing: Row(

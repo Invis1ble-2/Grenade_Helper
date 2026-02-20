@@ -153,7 +153,7 @@ const Map<String, List<String>> mapAreaPresets = {
     '底线',
     '一道',
     '二道',
-    'A柱子',
+    'B柱子',
     '匪口',
     'B包',
     'B斜坡',
@@ -172,7 +172,9 @@ const Map<String, List<String>> mapAreaPresets = {
     'A小/连接',
     'B连接',
     '中路',
-    '连接',
+    '水下',
+    '死点',
+    'B门外',
     '匪家',
     '警家'
   ],
@@ -211,8 +213,6 @@ const Map<String, List<String>> mapAreaPresets = {
     '警中',
     '警连接',
     '连接台下',
-    '连接',
-    '中路',
     '红楼梯',
   ],
 };

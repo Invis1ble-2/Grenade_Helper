@@ -212,7 +212,7 @@ class _DefaultAreaTagDevEditorScreenState
           gameMap: widget.gameMap,
           layer: layer,
           area: existingArea,
-          existingTagId: existingArea == null ? tag.id : null,
+          existingTagId: tag.id,
           initialName: existingArea == null ? tag.name : null,
           initialColor: existingArea == null ? tag.colorValue : null,
         ),
@@ -385,7 +385,7 @@ class _DefaultAreaTagDevEditorScreenState
                           ),
                           title: Text(tag.name),
                           subtitle: Text(done
-                              ? '已配置 $layerCount 层（入口楼层：${_layerNameById(area?.layerId)}）'
+                              ? '已配置楼层：${_layerNameById(area?.layerId)}'
                               : '未配置区域数据'),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,

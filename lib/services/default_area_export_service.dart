@@ -76,12 +76,16 @@ class DefaultAreaExportService {
     sb.writeln('class BuiltinAreaPreset {');
     sb.writeln('  final String name;');
     sb.writeln('  final int colorValue;');
-    sb.writeln('  final String strokesJson;');
+    sb.writeln('  final String? floorKey;');
+    sb.writeln('  final String? strokesJson;');
+    sb.writeln('  final String? floorStrokesJson;');
     sb.writeln();
     sb.writeln('  const BuiltinAreaPreset({');
     sb.writeln('    required this.name,');
     sb.writeln('    required this.colorValue,');
-    sb.writeln('    required this.strokesJson,');
+    sb.writeln('    this.floorKey,');
+    sb.writeln('    this.strokesJson,');
+    sb.writeln('    this.floorStrokesJson,');
     sb.writeln('  });');
     sb.writeln('}');
     sb.writeln();
@@ -89,30 +93,65 @@ class DefaultAreaExportService {
         'const Map<String, Map<String, List<BuiltinAreaPreset>>> builtinAreaRegionPresets = {');
     sb.writeln("  '$mapKey': {");
 
-    var hasAnyFloor = false;
+    final mergedByTagKey = <String, _MergedTagExport>{};
     for (final layer in layers) {
       final layerAreas = areasByLayer[layer.id];
       if (layerAreas == null || layerAreas.isEmpty) continue;
-      hasAnyFloor = true;
-
       final floorKey = _extractFileName(layer.assetPath);
-      sb.writeln("    '$floorKey': [");
       for (final area in layerAreas) {
         final tag = tagById[area.tagId];
         if (tag == null) continue;
+        final tagKey = tag.name.trim().toLowerCase();
+        final merged = mergedByTagKey.putIfAbsent(
+          tagKey,
+          () => _MergedTagExport(
+            name: tag.name,
+            colorValue: tag.colorValue,
+          ),
+        );
+        merged.bundles.add(_LayerAreaBundle(floorKey: floorKey, area: area));
+      }
+    }
 
+    if (mergedByTagKey.isEmpty) {
+      sb.writeln('    // 当前地图暂无可导出的默认区域数据');
+    } else {
+      sb.writeln("    '_merged': [");
+      final emittedKeys = <String>{};
+      for (final tag in areaTags) {
+        final tagKey = tag.name.trim().toLowerCase();
+        if (!emittedKeys.add(tagKey)) continue;
+        final merged = mergedByTagKey[tagKey];
+        if (merged == null || merged.bundles.isEmpty) continue;
+
+        final bundles = merged.bundles;
         sb.writeln('      BuiltinAreaPreset(');
-        sb.writeln("        name: '${_escapeDartString(tag.name)}',");
-        sb.writeln('        colorValue: ${_toHexColor(tag.colorValue)},');
-        final compactStrokes = _compactStrokesJson(area.strokes);
-        sb.writeln("        strokesJson: r'''$compactStrokes''',");
+
+        sb.writeln("        name: '${_escapeDartString(merged.name)}',");
+        sb.writeln('        colorValue: ${_toHexColor(merged.colorValue)},');
+
+        if (bundles.length == 1) {
+          final bundle = bundles.first;
+          final compactStrokes = _compactStrokesJson(bundle.area.strokes);
+          sb.writeln(
+              "        floorKey: '${_escapeDartString(bundle.floorKey)}',");
+          sb.writeln("        strokesJson: r'''$compactStrokes''',");
+        } else {
+          final floorStrokesMap = <String, dynamic>{};
+          for (final bundle in bundles) {
+            final compactStrokes = _compactStrokesJson(bundle.area.strokes);
+            try {
+              floorStrokesMap[bundle.floorKey] = jsonDecode(compactStrokes);
+            } catch (_) {
+              floorStrokesMap[bundle.floorKey] = compactStrokes;
+            }
+          }
+          sb.writeln(
+              "        floorStrokesJson: r'''${jsonEncode(floorStrokesMap)}''',");
+        }
         sb.writeln('      ),');
       }
       sb.writeln('    ],');
-    }
-
-    if (!hasAnyFloor) {
-      sb.writeln('    // 当前地图暂无可导出的默认区域数据');
     }
 
     sb.writeln('  },');
@@ -125,12 +164,16 @@ class DefaultAreaExportService {
 class BuiltinAreaPreset {
   final String name;
   final int colorValue;
-  final String strokesJson;
+  final String? floorKey;
+  final String? strokesJson;
+  final String? floorStrokesJson;
 
   const BuiltinAreaPreset({
     required this.name,
     required this.colorValue,
-    required this.strokesJson,
+    this.floorKey,
+    this.strokesJson,
+    this.floorStrokesJson,
   });
 }
 
@@ -449,4 +492,25 @@ class _Pt {
   final double y;
 
   const _Pt(this.x, this.y);
+}
+
+class _LayerAreaBundle {
+  final String floorKey;
+  final MapArea area;
+
+  const _LayerAreaBundle({
+    required this.floorKey,
+    required this.area,
+  });
+}
+
+class _MergedTagExport {
+  final String name;
+  final int colorValue;
+  final List<_LayerAreaBundle> bundles;
+
+  _MergedTagExport({
+    required this.name,
+    required this.colorValue,
+  }) : bundles = <_LayerAreaBundle>[];
 }
