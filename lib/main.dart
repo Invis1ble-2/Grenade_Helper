@@ -702,8 +702,12 @@ class _MainAppState extends ConsumerState<MainApp> {
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted) _checkDonationReminder();
     });
-    // 加载全局设置
-    _loadGlobalSettings();
+    // 加载全局设置（延后到首帧后，避免在 build 生命周期内修改 provider）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _loadGlobalSettings();
+      }
+    });
   }
 
   /// 检查是否需要显示赞助提醒

@@ -707,8 +707,54 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
     Navigator.pop(context, true);
   }
 
+  ButtonStyle _buildSegmentedStyle(
+    BuildContext context, {
+    required bool compact,
+  }) {
+    final theme = Theme.of(context);
+    return ButtonStyle(
+      visualDensity: compact ? VisualDensity.compact : VisualDensity.standard,
+      tapTargetSize: compact
+          ? MaterialTapTargetSize.shrinkWrap
+          : MaterialTapTargetSize.padded,
+      minimumSize: WidgetStatePropertyAll(Size(0, compact ? 30 : 38)),
+      padding: WidgetStatePropertyAll(
+        EdgeInsets.symmetric(
+          horizontal: compact ? 8 : 12,
+          vertical: compact ? 6 : 8,
+        ),
+      ),
+      textStyle: WidgetStatePropertyAll(
+        TextStyle(
+          fontSize: compact ? 12 : 13,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      backgroundColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.selected)) {
+          return theme.colorScheme.primary;
+        }
+        return Colors.transparent;
+      }),
+      foregroundColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.selected)) {
+          return theme.colorScheme.onPrimary;
+        }
+        return theme.colorScheme.onSurface;
+      }),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isCompactToolbar = MediaQuery.of(context).size.width < 700;
+    final segmentedStyle =
+        _buildSegmentedStyle(context, compact: isCompactToolbar);
+    final compactTextStyle = TextStyle(
+      fontSize: isCompactToolbar ? 12 : 13,
+      color: Theme.of(context).textTheme.bodySmall?.color,
+    );
+
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
@@ -867,7 +913,7 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
           ),
           // 工具栏和保存按钮
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: EdgeInsets.all(isCompactToolbar ? 8 : 12),
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -876,71 +922,89 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
                   children: [
                     // 移动/绘制模式切换
                     SegmentedButton<bool>(
-                      segments: const [
+                      segments: [
                         ButtonSegment<bool>(
                           value: false,
-                          icon: Icon(Icons.pan_tool, size: 16),
-                          label: Text('移动'),
+                          icon: Icon(Icons.pan_tool,
+                              size: isCompactToolbar ? 14 : 16),
+                          label: const Text('移动'),
                         ),
                         ButtonSegment<bool>(
                           value: true,
-                          icon: Icon(Icons.brush, size: 16),
-                          label: Text('绘制'),
+                          icon: Icon(Icons.brush,
+                              size: isCompactToolbar ? 14 : 16),
+                          label: const Text('绘制'),
                         ),
                       ],
                       selected: {_isPenMode},
                       onSelectionChanged: (value) =>
                           setState(() => _isPenMode = value.first),
-                      style: const ButtonStyle(
-                        visualDensity: VisualDensity.compact,
-                      ),
+                      style: segmentedStyle,
                     ),
                     const Spacer(),
                     ElevatedButton.icon(
                       onPressed: _save,
-                      icon: const Icon(Icons.check, color: Colors.white),
-                      label: const Text('保存区域',
-                          style: TextStyle(color: Colors.white)),
+                      icon: Icon(
+                        Icons.check,
+                        color: Colors.white,
+                        size: isCompactToolbar ? 16 : 18,
+                      ),
+                      label: Text(
+                        '保存区域',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: isCompactToolbar ? 13 : 14,
+                        ),
+                      ),
                       style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green),
+                        backgroundColor: Colors.green,
+                        visualDensity: isCompactToolbar
+                            ? VisualDensity.compact
+                            : VisualDensity.standard,
+                        tapTargetSize: isCompactToolbar
+                            ? MaterialTapTargetSize.shrinkWrap
+                            : MaterialTapTargetSize.padded,
+                        padding: EdgeInsets.symmetric(
+                          horizontal: isCompactToolbar ? 12 : 16,
+                          vertical: isCompactToolbar ? 8 : 10,
+                        ),
+                      ),
                     ),
                   ],
                 ),
                 // 圆形画刷大小（仅绘制模式显示）
                 if (_isPenMode) ...[
-                  const SizedBox(height: 8),
+                  SizedBox(height: isCompactToolbar ? 6 : 8),
                   Row(
                     children: [
                       SegmentedButton<bool>(
                         segments: const [
                           ButtonSegment<bool>(
                             value: false,
-                            icon: Icon(Icons.brush, size: 16),
+                            icon: Icon(Icons.brush, size: 14),
                             label: Text('画笔'),
                           ),
                           ButtonSegment<bool>(
                             value: true,
-                            icon: Icon(Icons.auto_fix_off, size: 16),
-                            label: Text('橡皮擦'),
+                            icon: Icon(Icons.auto_fix_off, size: 14),
+                            label: Text('橡皮'),
                           ),
                         ],
                         selected: {_isEraserMode},
                         onSelectionChanged: (values) {
                           setState(() => _isEraserMode = values.first);
                         },
-                        style: const ButtonStyle(
-                          visualDensity: VisualDensity.compact,
-                        ),
+                        style: segmentedStyle,
                       ),
-                      const SizedBox(width: 8),
-                      Text('画刷档位',
-                          style: TextStyle(
-                              color:
-                                  Theme.of(context).textTheme.bodySmall?.color,
-                              fontSize: 12)),
-                      const SizedBox(width: 8),
+                      SizedBox(width: isCompactToolbar ? 6 : 8),
+                      Text(
+                        isCompactToolbar ? '档位' : '画刷档位',
+                        style: compactTextStyle,
+                      ),
+                      SizedBox(width: isCompactToolbar ? 6 : 8),
                       Expanded(
                         child: SegmentedButton<int>(
+                          showSelectedIcon: false,
                           segments: const [
                             ButtonSegment<int>(value: 0, label: Text('1')),
                             ButtonSegment<int>(value: 1, label: Text('2')),
@@ -956,9 +1020,7 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
                               _brushRatio = _brushPresets[level];
                             });
                           },
-                          style: const ButtonStyle(
-                            visualDensity: VisualDensity.compact,
-                          ),
+                          style: segmentedStyle,
                         ),
                       ),
                     ],

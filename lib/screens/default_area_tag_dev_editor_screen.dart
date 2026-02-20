@@ -226,6 +226,7 @@ class _DefaultAreaTagDevEditorScreenState
   Future<void> _deleteAreaForTag(Tag tag) async {
     final target = await _pickAreaForTagAction(tag, '选择要删除的楼层区域');
     if (target == null) return;
+    if (!mounted) return;
 
     final confirm = await showDialog<bool>(
       context: context,

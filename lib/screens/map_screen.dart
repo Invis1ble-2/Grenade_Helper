@@ -297,7 +297,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   }
 
   void _updateOverlayState(int layerIndex) {
-    debugPrint("DEBUG: _updateOverlayState called with index $layerIndex");
+    if (!_supportsOverlayWindow) return;
     widget.gameMap.layers.loadSync();
     final layers = widget.gameMap.layers.toList();
     if (layerIndex < layers.length) {
@@ -310,31 +310,25 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
   void _notifyOverlayWindowSetMap(int mapId, int layerId,
       {int retryCount = 0}) {
-    debugPrint(
-        "DEBUG: _notifyOverlayWindowSetMap called. Controller is ${overlayWindowController == null ? 'NULL' : 'NOT NULL'}");
+    if (!_supportsOverlayWindow) return;
     if (overlayWindowController != null) {
       try {
-        overlayWindowController!
-            .invokeMethod('set_map', {
-              'map_id': mapId,
-              'layer_id': layerId,
-            })
-            .then((_) => debugPrint("DEBUG: invokeMethod success"))
-            .catchError((e) {
-              debugPrint("DEBUG: invokeMethod error: $e");
-              if (retryCount < 3) {
-                Future.delayed(const Duration(milliseconds: 500), () {
-                  _notifyOverlayWindowSetMap(mapId, layerId,
-                      retryCount: retryCount + 1);
-                });
-              }
+        overlayWindowController!.invokeMethod('set_map', {
+          'map_id': mapId,
+          'layer_id': layerId,
+        }).catchError((e) {
+          if (retryCount < 3) {
+            Future.delayed(const Duration(milliseconds: 500), () {
+              _notifyOverlayWindowSetMap(mapId, layerId,
+                  retryCount: retryCount + 1);
             });
+          }
+        });
       } catch (e) {
-        debugPrint("DEBUG: Exception: $e");
+        // ignore
       }
     } else {
       if (retryCount < 5) {
-        debugPrint("DEBUG: Controller null, retry $retryCount");
         Future.delayed(const Duration(milliseconds: 500), () {
           _notifyOverlayWindowSetMap(mapId, layerId,
               retryCount: retryCount + 1);
@@ -344,12 +338,16 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   }
 
   void _notifyOverlayWindowClearMap() {
+    if (!_supportsOverlayWindow) return;
     if (overlayWindowController != null) {
       try {
         overlayWindowController!.invokeMethod('clear_map').catchError((_) {});
       } catch (_) {}
     }
   }
+
+  bool get _supportsOverlayWindow =>
+      Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
   void _handleTap(
       TapUpDetails details, double width, double height, int layerId) async {

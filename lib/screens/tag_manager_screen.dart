@@ -50,6 +50,7 @@ class _TagManagerScreenState extends ConsumerState<TagManagerScreen> {
 
   Future<void> _createTag() async {
     final templateOptions = await _loadAreaTemplateOptions();
+    if (!mounted) return;
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (ctx) => _CreateTagDialog(areaTemplateOptions: templateOptions),
@@ -240,6 +241,7 @@ class _TagManagerScreenState extends ConsumerState<TagManagerScreen> {
   Future<void> _editTag(Tag tag) async {
     // 允许编辑系统标签，但提示可能会影响默认逻辑
     final templateOptions = await _loadAreaTemplateOptions();
+    if (!mounted) return;
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (ctx) => _CreateTagDialog(
@@ -269,6 +271,7 @@ class _TagManagerScreenState extends ConsumerState<TagManagerScreen> {
     final relatedAreaCount =
         await isar.mapAreas.filter().tagIdEqualTo(tag.id).count();
     bool deleteRelatedAreas = false;
+    if (!mounted) return;
 
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
