@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -222,6 +223,15 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   String _allMapListSearchQuery = '';
   late final FavoriteFolderService _favoriteFolderService;
   late final Stream<List<FolderWithGrenades>> _mapFavoritesStream;
+  StreamSubscription<void>? _grenadeWatchSubscription;
+  List<Grenade> _cachedAllMapGrenades = [];
+  List<({Grenade grenade, MapLayer layer})> _cachedAllMapGrenadeEntries = [];
+  List<Grenade>? _throwClusterCacheSource;
+  double? _throwClusterCacheThreshold;
+  List<GrenadeCluster> _throwClusterCache = const [];
+  List<Grenade>? _impactClusterCacheSource;
+  double? _impactClusterCacheThreshold;
+  List<GrenadeCluster> _impactClusterCache = const [];
 
   @override
   void initState() {
@@ -231,6 +241,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     _favoriteFolderService = FavoriteFolderService(isar);
     _mapFavoritesStream =
         _favoriteFolderService.watchMapFavorites(widget.gameMap.id);
+    _refreshAllMapGrenadeCache(notify: false);
+    _grenadeWatchSubscription = isar.grenades.watchLazy().listen((_) {
+      if (!mounted) return;
+      _refreshAllMapGrenadeCache();
+    });
     widget.gameMap.layers.loadSync();
     final defaultIndex = widget.gameMap.layers.length > 1 ? 1 : 0;
     Future.microtask(() {
@@ -242,6 +257,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
   @override
   void dispose() {
+    _grenadeWatchSubscription?.cancel();
     _allMapListPanelHeightNotifier.dispose();
     _allMapListSearchController.dispose();
     _photoViewController.dispose();
@@ -258,6 +274,98 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     if (c1 == c2) return true;
     if (c1.grenades.isEmpty || c2.grenades.isEmpty) return false;
     return c1.grenades.first.id == c2.grenades.first.id;
+  }
+
+  double _getAdaptiveClusterThreshold({
+    required double scale,
+    required int grenadeCount,
+  }) {
+    final baseThreshold = scale >= 2.0 ? 0.008 : 0.02;
+    if (grenadeCount >= 3200) return baseThreshold * 3.8;
+    if (grenadeCount >= 2000) return baseThreshold * 3.0;
+    if (grenadeCount >= 1200) return baseThreshold * 2.3;
+    if (grenadeCount >= 700) return baseThreshold * 2.0;
+    if (grenadeCount >= 350) return baseThreshold * 1.8;
+    if (grenadeCount >= 200) return baseThreshold * 1.5;
+    if (grenadeCount >= 100) return baseThreshold * 1.3;
+    return baseThreshold;
+  }
+
+  bool _shouldUseDenseMarkerStyle({
+    required int grenadeCount,
+    required int clusterCount,
+  }) {
+    return grenadeCount >= 100 || clusterCount >= 100;
+  }
+
+  void _refreshAllMapGrenadeCache({bool notify = true}) {
+    widget.gameMap.layers.loadSync();
+    final layers = widget.gameMap.layers.toList();
+    final isar = ref.read(isarProvider);
+
+    final grenades = <Grenade>[];
+    final entries = <({Grenade grenade, MapLayer layer})>[];
+
+    for (final layer in layers) {
+      final layerGrenades = isar.grenades
+          .filter()
+          .layer((q) => q.idEqualTo(layer.id))
+          .findAllSync();
+      grenades.addAll(layerGrenades);
+      for (final grenade in layerGrenades) {
+        entries.add((grenade: grenade, layer: layer));
+      }
+    }
+
+    void applyCache() {
+      _invalidateClusterCaches();
+      _cachedAllMapGrenades = grenades;
+      _cachedAllMapGrenadeEntries = entries;
+    }
+
+    if (notify && mounted) {
+      setState(applyCache);
+    } else {
+      applyCache();
+    }
+  }
+
+  void _invalidateClusterCaches() {
+    _throwClusterCacheSource = null;
+    _throwClusterCacheThreshold = null;
+    _throwClusterCache = const [];
+    _impactClusterCacheSource = null;
+    _impactClusterCacheThreshold = null;
+    _impactClusterCache = const [];
+  }
+
+  List<GrenadeCluster> _getThrowClusters(
+    List<Grenade> grenades, {
+    required double threshold,
+  }) {
+    if (!identical(_throwClusterCacheSource, grenades) ||
+        _throwClusterCacheThreshold != threshold) {
+      _throwClusterCacheSource = grenades;
+      _throwClusterCacheThreshold = threshold;
+      _throwClusterCache = clusterGrenades(grenades, threshold: threshold);
+    }
+    return _throwClusterCache;
+  }
+
+  List<GrenadeCluster> _getImpactClusters(
+    List<Grenade> grenades, {
+    required double threshold,
+  }) {
+    if (!identical(_impactClusterCacheSource, grenades) ||
+        _impactClusterCacheThreshold != threshold) {
+      _impactClusterCacheSource = grenades;
+      _impactClusterCacheThreshold = threshold;
+      _impactClusterCache = clusterGrenadesByImpact(
+        grenades,
+        threshold: threshold,
+      );
+    }
+    return _impactClusterCache;
   }
 
   /// 计算图片区域
@@ -288,6 +396,93 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         offsetY: (containerHeight - imageHeight) / 2,
       );
     }
+  }
+
+  ({
+    double left,
+    double top,
+    double right,
+    double bottom,
+  }) _getVisibleImageRatioRect({
+    required BoxConstraints constraints,
+    required double scale,
+    required Offset position,
+    required ({
+      double width,
+      double height,
+      double offsetX,
+      double offsetY
+    }) imageBounds,
+  }) {
+    final safeScale = scale <= 0 ? 1.0 : scale;
+    final viewportCenter =
+        Offset(constraints.maxWidth / 2, constraints.maxHeight / 2);
+
+    double screenToChildX(double x) =>
+        ((x - viewportCenter.dx - position.dx) / safeScale) + viewportCenter.dx;
+    double screenToChildY(double y) =>
+        ((y - viewportCenter.dy - position.dy) / safeScale) + viewportCenter.dy;
+
+    final childLeft = screenToChildX(0);
+    final childRight = screenToChildX(constraints.maxWidth);
+    final childTop = screenToChildY(0);
+    final childBottom = screenToChildY(constraints.maxHeight);
+
+    final ratioLeftA = (childLeft - imageBounds.offsetX) / imageBounds.width;
+    final ratioRightA = (childRight - imageBounds.offsetX) / imageBounds.width;
+    final ratioTopA = (childTop - imageBounds.offsetY) / imageBounds.height;
+    final ratioBottomA =
+        (childBottom - imageBounds.offsetY) / imageBounds.height;
+
+    final left = ratioLeftA < ratioRightA ? ratioLeftA : ratioRightA;
+    final right = ratioLeftA > ratioRightA ? ratioLeftA : ratioRightA;
+    final top = ratioTopA < ratioBottomA ? ratioTopA : ratioBottomA;
+    final bottom = ratioTopA > ratioBottomA ? ratioTopA : ratioBottomA;
+
+    return (left: left, top: top, right: right, bottom: bottom);
+  }
+
+  bool _isRatioPointVisible(
+    double x,
+    double y, {
+    required ({
+      double left,
+      double top,
+      double right,
+      double bottom,
+    }) visibleRect,
+    double marginX = 0,
+    double marginY = 0,
+  }) {
+    return x >= visibleRect.left - marginX &&
+        x <= visibleRect.right + marginX &&
+        y >= visibleRect.top - marginY &&
+        y <= visibleRect.bottom + marginY;
+  }
+
+  bool _isRatioSegmentVisible(
+    double x1,
+    double y1,
+    double x2,
+    double y2, {
+    required ({
+      double left,
+      double top,
+      double right,
+      double bottom,
+    }) visibleRect,
+    double marginX = 0,
+    double marginY = 0,
+  }) {
+    final minX = x1 < x2 ? x1 : x2;
+    final maxX = x1 > x2 ? x1 : x2;
+    final minY = y1 < y2 ? y1 : y2;
+    final maxY = y1 > y2 ? y1 : y2;
+
+    return !(maxX < visibleRect.left - marginX ||
+        minX > visibleRect.right + marginX ||
+        maxY < visibleRect.top - marginY ||
+        minY > visibleRect.bottom + marginY);
   }
 
   /// 坐标转比例
@@ -496,17 +691,18 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           final grenades =
               ref.read(_filteredGrenadesProvider(layerId)).asData?.value;
           if (grenades != null) {
-            final clusterThreshold = _photoViewController.scale != null &&
-                    _photoViewController.scale! >= 2.0
-                ? 0.008
-                : 0.02;
+            final clusterThreshold = _getAdaptiveClusterThreshold(
+              scale: _photoViewController.scale ?? 1.0,
+              grenadeCount: grenades.length,
+            );
 
             List<GrenadeCluster> clusters;
             if (_isImpactMode) {
-              clusters = clusterGrenadesByImpact(grenades,
-                  threshold: clusterThreshold);
+              clusters =
+                  _getImpactClusters(grenades, threshold: clusterThreshold);
             } else {
-              clusters = clusterGrenades(grenades, threshold: clusterThreshold);
+              clusters =
+                  _getThrowClusters(grenades, threshold: clusterThreshold);
             }
 
             // 找Cluster
@@ -555,17 +751,18 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           final grenades =
               ref.read(_filteredGrenadesProvider(layerId)).asData?.value;
           if (grenades != null) {
-            final clusterThreshold = _photoViewController.scale != null &&
-                    _photoViewController.scale! >= 2.0
-                ? 0.008
-                : 0.02;
+            final clusterThreshold = _getAdaptiveClusterThreshold(
+              scale: _photoViewController.scale ?? 1.0,
+              grenadeCount: grenades.length,
+            );
 
             List<GrenadeCluster> clusters;
             if (_isImpactMode) {
-              clusters = clusterGrenadesByImpact(grenades,
-                  threshold: clusterThreshold);
+              clusters =
+                  _getImpactClusters(grenades, threshold: clusterThreshold);
             } else {
-              clusters = clusterGrenades(grenades, threshold: clusterThreshold);
+              clusters =
+                  _getThrowClusters(grenades, threshold: clusterThreshold);
             }
 
             try {
@@ -1955,17 +2152,19 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   }
 
   Widget _buildImpactClusterMarker(
-      GrenadeCluster cluster,
-      BoxConstraints constraints,
-      bool isEditMode,
-      int layerId,
-      double markerScale,
-      ({
-        double width,
-        double height,
-        double offsetX,
-        double offsetY
-      }) imageBounds) {
+    GrenadeCluster cluster,
+    BoxConstraints constraints,
+    bool isEditMode,
+    int layerId,
+    double markerScale,
+    ({
+      double width,
+      double height,
+      double offsetX,
+      double offsetY
+    }) imageBounds, {
+    bool denseStyle = false,
+  }) {
     if (cluster.grenades.isEmpty) return const SizedBox.shrink();
 
     const double size = 20.0;
@@ -1996,6 +2195,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final isSelected = _selectedClusterForImpact == cluster;
     final isDragging = _isSameCluster(_draggingImpactCluster, cluster);
     final isJoystickMoving = _isSameCluster(_joystickImpactCluster, cluster);
+    final useGlowEffects =
+        !denseStyle || isDragging || isJoystickMoving || isSelected;
 
     // 获取道具类型对应的颜色，多投掷点聚合时使用紫色
     final impactColor = cluster.grenades.length > 1
@@ -2066,45 +2267,46 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             decoration: BoxDecoration(
               color: (isDragging || isJoystickMoving)
                   ? Colors.cyan.withValues(alpha: 0.6)
-                  : Colors.black.withValues(alpha: 0.4),
+                  : Colors.black.withValues(alpha: denseStyle ? 0.28 : 0.4),
               shape: BoxShape.circle,
               border: Border.all(
                   color: (isDragging || isJoystickMoving)
                       ? Colors.cyan
                       : (isSelected ? Colors.white : impactColor),
                   width: (isDragging || isJoystickMoving) ? 3 : 2),
-              boxShadow: (isDragging || isJoystickMoving)
-                  ? [
-                      BoxShadow(
-                        color: Colors.cyan.withValues(alpha: 0.5),
-                        blurRadius: 8,
-                        spreadRadius: 3,
-                      )
-                    ]
-                  : isSelected
+              boxShadow: useGlowEffects
+                  ? (isDragging || isJoystickMoving)
                       ? [
                           BoxShadow(
-                            color: Colors.white.withValues(alpha: 0.6),
-                            blurRadius: 6,
-                            spreadRadius: 2,
+                            color: Colors.cyan.withValues(alpha: 0.5),
+                            blurRadius: 8,
+                            spreadRadius: 3,
                           )
                         ]
-                      : [
-                          BoxShadow(
-                            color: impactColor.withValues(alpha: 0.3),
-                            blurRadius: 4,
-                            spreadRadius: 1,
-                          ),
-                        ],
+                      : isSelected
+                          ? [
+                              BoxShadow(
+                                color: Colors.white.withValues(alpha: 0.6),
+                                blurRadius: 6,
+                                spreadRadius: 2,
+                              )
+                            ]
+                          : [
+                              BoxShadow(
+                                color: impactColor.withValues(alpha: 0.3),
+                                blurRadius: 4,
+                                spreadRadius: 1,
+                              ),
+                            ]
+                  : null,
             ),
             child: Icon(
-                (isDragging || isJoystickMoving)
-                    ? Icons.open_with
-                    : Icons.close,
-                size: size * 0.6,
-                color: (isDragging || isJoystickMoving)
-                    ? Colors.white
-                    : (isSelected ? Colors.white : impactColor)),
+              (isDragging || isJoystickMoving) ? Icons.open_with : Icons.close,
+              size: size * 0.6,
+              color: (isDragging || isJoystickMoving)
+                  ? Colors.white
+                  : (isSelected ? Colors.white : impactColor),
+            ),
           ),
         ),
       ),
@@ -2112,20 +2314,23 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   }
 
   Widget _buildClusterMarker(
-      GrenadeCluster cluster,
-      BoxConstraints constraints,
-      bool isEditMode,
-      int layerId,
-      double markerScale,
-      ({
-        double width,
-        double height,
-        double offsetX,
-        double offsetY
-      }) imageBounds) {
+    GrenadeCluster cluster,
+    BoxConstraints constraints,
+    bool isEditMode,
+    int layerId,
+    double markerScale,
+    ({
+      double width,
+      double height,
+      double offsetX,
+      double offsetY
+    }) imageBounds, {
+    bool denseStyle = false,
+  }) {
     final color = _getTeamColor(cluster.primaryTeam);
     final icon = _getTypeIcon(cluster.primaryType);
     final count = cluster.grenades.length;
+    final showCountText = count > 1;
 
     const double baseHalfSize = 10.0;
 
@@ -2209,19 +2414,21 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                     border: Border.all(
                         color: color.withValues(alpha: 0.5), // 边框轻微透明
                         width: 2),
-                    boxShadow: [
-                      if (cluster.hasFavorite)
-                        BoxShadow(
-                            color: color.withValues(alpha: 0.4),
-                            blurRadius: 4,
-                            spreadRadius: 1)
-                    ]),
+                    boxShadow: denseStyle
+                        ? null
+                        : [
+                            if (cluster.hasFavorite)
+                              BoxShadow(
+                                  color: color.withValues(alpha: 0.4),
+                                  blurRadius: 4,
+                                  spreadRadius: 1)
+                          ]),
                 child: Icon(cluster.hasMultipleTypes ? Icons.layers : icon,
                     size: 10,
                     color: cluster.hasMultipleTypes
                         ? Colors.purpleAccent.withValues(alpha: 0.9)
                         : _getTypeColor(cluster.primaryType))), // 图标使用道具类型颜色
-            if (count > 1)
+            if (showCountText)
               Positioned(
                   right: -3,
                   top: -3,
@@ -2234,7 +2441,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                               fontSize: 8,
                               color: Colors.white,
                               fontWeight: FontWeight.bold)))),
-            if (cluster.hasNewImport)
+            if (cluster.hasNewImport && !denseStyle)
               Positioned(
                   left: -2,
                   top: -2,
@@ -3596,21 +3803,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final showMapGrenadeListPanel =
         globalSettingsService?.getShowMapGrenadeList() ?? false;
 
-    // 搜索数据：从数据库查询该地图所有楼层的道具
-    final isar = ref.read(isarProvider);
     final folderService = _favoriteFolderService;
-    final allMapGrenades = <Grenade>[];
-    final allMapGrenadeEntries = <({Grenade grenade, MapLayer layer})>[];
-    for (final layer in layers) {
-      final layerGrenades = isar.grenades
-          .filter()
-          .layer((q) => q.idEqualTo(layer.id))
-          .findAllSync();
-      allMapGrenades.addAll(layerGrenades);
-      for (final grenade in layerGrenades) {
-        allMapGrenadeEntries.add((grenade: grenade, layer: layer));
-      }
-    }
+    final allMapGrenades = _cachedAllMapGrenades;
+    final allMapGrenadeEntries = _cachedAllMapGrenadeEntries;
+    final isar = ref.read(isarProvider);
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
@@ -3836,12 +4032,28 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                           child: StreamBuilder<PhotoViewControllerValue>(
                             stream: _photoViewController.outputStateStream,
                             builder: (context, snapshot) {
-                              final double scale = snapshot.data?.scale ?? 1.0;
+                              final controllerValue = snapshot.data;
+                              final double scale =
+                                  controllerValue?.scale ?? 1.0;
+                              final Offset position =
+                                  controllerValue?.position ??
+                                      _photoViewController.position;
                               final double markerScale = 1.0 / scale;
 
                               // 计算 BoxFit.contain 模式下图片的实际显示区域
                               final imageBounds = _getImageBounds(
                                   constraints.maxWidth, constraints.maxHeight);
+                              final visibleRatioRect =
+                                  _getVisibleImageRatioRect(
+                                constraints: constraints,
+                                scale: scale,
+                                position: position,
+                                imageBounds: imageBounds,
+                              );
+                              final pointCullMarginX = 28 / imageBounds.width;
+                              final pointCullMarginY = 28 / imageBounds.height;
+                              final lineCullMarginX = 40 / imageBounds.width;
+                              final lineCullMarginY = 40 / imageBounds.height;
 
                               return GestureDetector(
                                   onTapUp: (d) => _handleTap(
@@ -3866,7 +4078,33 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                     ...grenadesAsync.when(
                                         data: (list) {
                                           final clusterThreshold =
-                                              scale >= 2.0 ? 0.008 : 0.02;
+                                              _getAdaptiveClusterThreshold(
+                                            scale: scale,
+                                            grenadeCount: list.length,
+                                          );
+                                          bool isThrowPointVisible(Grenade g) =>
+                                              _isRatioPointVisible(
+                                                g.xRatio,
+                                                g.yRatio,
+                                                visibleRect: visibleRatioRect,
+                                                marginX: pointCullMarginX,
+                                                marginY: pointCullMarginY,
+                                              );
+                                          bool isImpactPointVisible(Grenade g) {
+                                            final x = g.impactXRatio;
+                                            final y = g.impactYRatio;
+                                            if (x == null || y == null) {
+                                              return false;
+                                            }
+                                            return _isRatioPointVisible(
+                                              x,
+                                              y,
+                                              visibleRect: visibleRatioRect,
+                                              marginX: pointCullMarginX,
+                                              marginY: pointCullMarginY,
+                                            );
+                                          }
+
                                           // 根据当前筛选结果过滤选中的grenades
                                           final filteredIds =
                                               list.map((g) => g.id).toSet();
@@ -3921,44 +4159,91 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                           if (_isImpactMode) {
                                             // 爆点模式：显示爆点聚合
                                             final impactClusters =
-                                                clusterGrenadesByImpact(list,
-                                                    threshold:
-                                                        clusterThreshold);
+                                                _getImpactClusters(
+                                              list,
+                                              threshold: clusterThreshold,
+                                            );
+                                            final denseMarkerStyle =
+                                                _shouldUseDenseMarkerStyle(
+                                              grenadeCount: list.length,
+                                              clusterCount:
+                                                  impactClusters.length,
+                                            );
+                                            final visibleImpactClusters =
+                                                impactClusters
+                                                    .where((c) =>
+                                                        _isRatioPointVisible(
+                                                          c.xRatio,
+                                                          c.yRatio,
+                                                          visibleRect:
+                                                              visibleRatioRect,
+                                                          marginX:
+                                                              pointCullMarginX,
+                                                          marginY:
+                                                              pointCullMarginY,
+                                                        ))
+                                                    .toList(growable: false);
 
-                                            widgets.addAll(impactClusters.map(
-                                                (c) =>
+                                            widgets.addAll(
+                                                visibleImpactClusters.map((c) =>
                                                     _buildImpactClusterMarker(
                                                         c,
                                                         constraints,
                                                         isEditMode,
                                                         currentLayer.id,
                                                         markerScale,
-                                                        imageBounds)));
+                                                        imageBounds,
+                                                        denseStyle:
+                                                            denseMarkerStyle)));
                                           } else {
                                             // 标准模式：显示投掷点聚合
-                                            final clusters = clusterGrenades(
-                                                list,
-                                                threshold: clusterThreshold);
+                                            final cachedClusters =
+                                                _getThrowClusters(
+                                              list,
+                                              threshold: clusterThreshold,
+                                            );
 
                                             // 如果有选中的点位，只显示选中的点位
                                             final visibleClusters =
                                                 _selectedClusterForImpact ==
                                                         null
-                                                    ? clusters
-                                                    : clusters
+                                                    ? cachedClusters
+                                                    : cachedClusters
                                                         .where((c) =>
                                                             _isSameCluster(c,
                                                                 _selectedClusterForImpact))
                                                         .toList();
+                                            final visibleClustersInViewport =
+                                                visibleClusters
+                                                    .where((c) =>
+                                                        _isRatioPointVisible(
+                                                          c.xRatio,
+                                                          c.yRatio,
+                                                          visibleRect:
+                                                              visibleRatioRect,
+                                                          marginX:
+                                                              pointCullMarginX,
+                                                          marginY:
+                                                              pointCullMarginY,
+                                                        ))
+                                                    .toList(growable: false);
+                                            final denseMarkerStyle =
+                                                _shouldUseDenseMarkerStyle(
+                                              grenadeCount: list.length,
+                                              clusterCount:
+                                                  cachedClusters.length,
+                                            );
 
-                                            widgets.addAll(visibleClusters.map(
-                                                (c) => _buildClusterMarker(
+                                            widgets.addAll(visibleClustersInViewport
+                                                .map((c) => _buildClusterMarker(
                                                     c,
                                                     constraints,
                                                     isEditMode,
                                                     currentLayer.id,
                                                     markerScale,
-                                                    imageBounds)));
+                                                    imageBounds,
+                                                    denseStyle:
+                                                        denseMarkerStyle)));
                                           }
 
                                           // 爆点连线
@@ -3986,6 +4271,16 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                                 .where((g) =>
                                                     g.impactXRatio != null &&
                                                     g.impactYRatio != null &&
+                                                    _isRatioSegmentVisible(
+                                                      g.xRatio,
+                                                      g.yRatio,
+                                                      g.impactXRatio!,
+                                                      g.impactYRatio!,
+                                                      visibleRect:
+                                                          visibleRatioRect,
+                                                      marginX: lineCullMarginX,
+                                                      marginY: lineCullMarginY,
+                                                    ) &&
                                                     g.type !=
                                                         GrenadeType.wallbang)
                                                 .map((g) =>
@@ -4008,17 +4303,27 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                                         .length >
                                                     1) {
                                               // 仍然聚合：显示聚合图标（带光圈效果）
-                                              widgets.add(
-                                                  _buildSelectedClusterMarker(
-                                                      subClusters.first,
-                                                      constraints,
-                                                      markerScale,
-                                                      imageBounds));
+                                              if (_isRatioPointVisible(
+                                                subClusters.first.xRatio,
+                                                subClusters.first.yRatio,
+                                                visibleRect: visibleRatioRect,
+                                                marginX: pointCullMarginX,
+                                                marginY: pointCullMarginY,
+                                              )) {
+                                                widgets.add(
+                                                    _buildSelectedClusterMarker(
+                                                        subClusters.first,
+                                                        constraints,
+                                                        markerScale,
+                                                        imageBounds));
+                                              }
                                             } else {
                                               // 会分开：显示选中cluster内的所有投掷点标记（带光圈效果）
                                               widgets.addAll(
-                                                  filteredSelectedGrenades.map(
-                                                      (g) =>
+                                                  filteredSelectedGrenades
+                                                      .where(
+                                                          isThrowPointVisible)
+                                                      .map((g) =>
                                                           _buildSelectedThrowPointMarker(
                                                               g,
                                                               constraints,
@@ -4032,6 +4337,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                                         g.impactXRatio != null &&
                                                         g.impactYRatio !=
                                                             null &&
+                                                        isImpactPointVisible(
+                                                            g) &&
                                                         g.type !=
                                                             GrenadeType
                                                                 .wallbang)
@@ -4064,12 +4371,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                               }
                                               return true;
                                             }).toList();
-                                            widgets.addAll(displayGrenades.map(
-                                                (g) => _buildThrowPointMarker(
-                                                    g,
-                                                    constraints,
-                                                    markerScale,
-                                                    imageBounds)));
+                                            widgets.addAll(displayGrenades
+                                                .where(isThrowPointVisible)
+                                                .map((g) =>
+                                                    _buildThrowPointMarker(
+                                                        g,
+                                                        constraints,
+                                                        markerScale,
+                                                        imageBounds)));
                                           }
                                           return widgets;
                                         },
