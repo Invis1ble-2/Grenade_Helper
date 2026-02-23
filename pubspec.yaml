@@ -34,8 +34,8 @@ dependencies:
   path: ^1.9.1
   image_picker: ^1.2.1
   uuid: ^4.5.2
-  pro_image_editor: ^11.15.0
-  file_picker: ^10.3.8
+  pro_image_editor: ^12.0.0
+  file_picker: ^10.3.10
   intl: ^0.20.2            # 时间格式化
   # --- 分享 ---
   archive: ^4.0.9
