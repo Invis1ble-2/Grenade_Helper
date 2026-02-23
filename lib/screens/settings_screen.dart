@@ -65,6 +65,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late double _impactAreaOpacity;
   // 摇杆设置
   late int _markerMoveMode;
+  late int _grenadeCreateMode;
   late double _joystickOpacity;
   late int _joystickSpeed;
   // 存储路径
@@ -103,6 +104,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ref.read(impactAreaOpacityProvider.notifier).state = _impactAreaOpacity;
 
       _markerMoveMode = widget.settingsService!.getMarkerMoveMode();
+      _grenadeCreateMode = widget.settingsService!.getGrenadeCreateMode();
       _joystickOpacity = widget.settingsService!.getJoystickOpacity();
       _joystickSpeed = widget.settingsService!.getJoystickSpeed();
       // 加载路径
@@ -120,6 +122,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _mapLineOpacity = 0.6;
       _impactAreaOpacity = 0.4;
       _markerMoveMode = 0;
+      _grenadeCreateMode = 0;
       _joystickOpacity = 0.8;
       _joystickSpeed = 3;
     }
@@ -222,6 +225,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _buildSection(
           title: '📍 标点操作',
           children: [
+            ListTile(
+              title: const Text('新增方式'),
+              subtitle: Text(
+                _grenadeCreateMode == 0 ? '单点地图立即新增道具' : '长按地图新增道具',
+              ),
+              trailing: SegmentedButton<int>(
+                segments: const [
+                  ButtonSegment(value: 0, label: Text('单点新增')),
+                  ButtonSegment(value: 1, label: Text('长按新增')),
+                ],
+                selected: {_grenadeCreateMode},
+                onSelectionChanged: (value) async {
+                  setState(() => _grenadeCreateMode = value.first);
+                  if (widget.settingsService != null) {
+                    await widget.settingsService!
+                        .setGrenadeCreateMode(value.first);
+                  }
+                },
+              ),
+            ),
             ListTile(
               title: const Text('移动模式'),
               subtitle:
@@ -486,6 +509,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     }
                   },
                 ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _buildSection(
+          title: '📍 标点操作',
+          children: [
+            ListTile(
+              title: const Text('新增方式'),
+              subtitle: Text(
+                _grenadeCreateMode == 0 ? '单点地图立即新增道具' : '长按地图新增道具（鼠标左键按住）',
+              ),
+              trailing: SegmentedButton<int>(
+                segments: const [
+                  ButtonSegment(value: 0, label: Text('单点新增')),
+                  ButtonSegment(value: 1, label: Text('长按新增')),
+                ],
+                selected: {_grenadeCreateMode},
+                onSelectionChanged: (value) async {
+                  setState(() => _grenadeCreateMode = value.first);
+                  await widget.settingsService!
+                      .setGrenadeCreateMode(value.first);
+                },
               ),
             ),
           ],

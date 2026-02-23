@@ -180,6 +180,9 @@ class MapScreen extends ConsumerStatefulWidget {
 }
 
 class _MapScreenState extends ConsumerState<MapScreen> {
+  static const int _grenadeCreateModeTap = 0;
+  static const int _grenadeCreateModeLongPress = 1;
+
   Offset? _tempTapPosition;
   GrenadeCluster? _draggingCluster;
   Offset? _dragOffset;
@@ -348,6 +351,57 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
   bool get _supportsOverlayWindow =>
       Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+
+  int _getGrenadeCreateMode() {
+    return globalSettingsService?.getGrenadeCreateMode() ??
+        _grenadeCreateModeTap;
+  }
+
+  void _showGrenadeCreateModeHint() {
+    if (!mounted) return;
+    final mode = _getGrenadeCreateMode();
+    final detailText = mode == _grenadeCreateModeLongPress
+        ? '当前新增方式：长按地图新增道具'
+        : '当前新增方式：单点地图新增道具';
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('💡 $detailText'),
+        backgroundColor: Colors.blueAccent,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _tryCreateGrenadeAtGlobalPosition(Offset globalPosition, int layerId) {
+    if (_isMovingCluster ||
+        _movingSingleGrenade != null ||
+        _movingSingleImpactGrenade != null ||
+        _draggingImpactCluster != null) {
+      return;
+    }
+
+    final isEditMode = ref.read(isEditModeProvider);
+    if (!isEditMode) return;
+
+    // 面板打开禁创建
+    if (_selectedClusterForImpact != null) return;
+
+    final localRatio = _getLocalPosition(globalPosition);
+    if (localRatio == null) return;
+
+    final xRatio = localRatio.dx;
+    final yRatio = localRatio.dy;
+    if (xRatio < 0 || xRatio > 1 || yRatio < 0 || yRatio > 1) {
+      return;
+    }
+
+    setState(() {
+      _tempTapPosition = Offset(xRatio, yRatio);
+    });
+    _createGrenade(layerId);
+  }
 
   void _handleTap(
       TapUpDetails details, double width, double height, int layerId) async {
@@ -545,29 +599,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     }
     final isEditMode = ref.read(isEditModeProvider);
     if (!isEditMode) return;
-
-    // 面板打开禁创建
-    if (_selectedClusterForImpact != null) return;
-
-    // 精确比例
-    final localRatio = _getLocalPosition(details.globalPosition);
-
-    if (localRatio == null) {
-      return;
-    }
-
-    final xRatio = localRatio.dx;
-    final yRatio = localRatio.dy;
-
-    // 范围检查
-    if (xRatio < 0 || xRatio > 1 || yRatio < 0 || yRatio > 1) {
-      return; // 点击在地图外，忽略
-    }
-
-    setState(() {
-      _tempTapPosition = Offset(xRatio, yRatio);
-    });
-    _createGrenade(layerId);
+    if (_getGrenadeCreateMode() != _grenadeCreateModeTap) return;
+    _tryCreateGrenadeAtGlobalPosition(details.globalPosition, layerId);
   }
 
   void _createGrenade(int layerId) async {
@@ -3347,8 +3380,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                       activeThumbColor: Colors.redAccent,
                       inactiveThumbColor: Colors.grey,
                       inactiveTrackColor: Colors.grey.withValues(alpha: 0.3),
-                      onChanged: (val) =>
-                          ref.read(isEditModeProvider.notifier).state = val),
+                      onChanged: (val) {
+                        ref.read(isEditModeProvider.notifier).state = val;
+                        if (val) {
+                          _showGrenadeCreateModeHint();
+                        }
+                      }),
                 ),
               ])),
         ],
@@ -3433,6 +3470,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                       constraints.maxWidth,
                                       constraints.maxHeight,
                                       currentLayer.id),
+                                  onLongPressStart: (d) {
+                                    if (_getGrenadeCreateMode() !=
+                                        _grenadeCreateModeLongPress) {
+                                      return;
+                                    }
+                                    _tryCreateGrenadeAtGlobalPosition(
+                                        d.globalPosition, currentLayer.id);
+                                  },
                                   child: Stack(key: _stackKey, children: [
                                     Image.asset(currentLayer.assetPath,
                                         width: constraints.maxWidth,

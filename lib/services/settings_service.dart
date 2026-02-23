@@ -164,6 +164,7 @@ class SettingsService {
   static const String _keyOverlayY = 'overlay_y';
   static const String _keyThemeMode = 'theme_mode';
   static const String _keyMarkerMoveMode = 'marker_move_mode';
+  static const String _keyGrenadeCreateMode = 'grenade_create_mode';
   static const String _keyJoystickOpacity = 'joystick_opacity';
   static const String _keyJoystickSpeed = 'joystick_speed';
   static const String _keyOverlayNavSpeed = 'overlay_nav_speed';
@@ -664,6 +665,24 @@ class SettingsService {
       await _saveValue(_keyMarkerMoveMode, value);
     } else {
       await _prefs?.setInt(_keyMarkerMoveMode, value);
+    }
+  }
+
+  /// 新增道具触发方式
+  /// 0 = 单点新增, 1 = 长按新增
+  int getGrenadeCreateMode() {
+    if (isDesktop) {
+      return (_cache[_keyGrenadeCreateMode] as num?)?.toInt() ?? 0;
+    }
+    return _prefs?.getInt(_keyGrenadeCreateMode) ?? 0;
+  }
+
+  Future<void> setGrenadeCreateMode(int value) async {
+    if (isDesktop) {
+      _cache[_keyGrenadeCreateMode] = value;
+      await _saveValue(_keyGrenadeCreateMode, value);
+    } else {
+      await _prefs?.setInt(_keyGrenadeCreateMode, value);
     }
   }
 
