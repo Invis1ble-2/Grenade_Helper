@@ -67,6 +67,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late int _markerMoveMode;
   late int _grenadeCreateMode;
   late bool _showMapGrenadeList;
+  late bool _highDensityClusterMode;
   late double _joystickOpacity;
   late int _joystickSpeed;
   // 存储路径
@@ -107,6 +108,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _markerMoveMode = widget.settingsService!.getMarkerMoveMode();
       _grenadeCreateMode = widget.settingsService!.getGrenadeCreateMode();
       _showMapGrenadeList = widget.settingsService!.getShowMapGrenadeList();
+      _highDensityClusterMode =
+          widget.settingsService!.getHighDensityClusterMode();
       _joystickOpacity = widget.settingsService!.getJoystickOpacity();
       _joystickSpeed = widget.settingsService!.getJoystickSpeed();
       // 加载路径
@@ -126,6 +129,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _markerMoveMode = 0;
       _grenadeCreateMode = 0;
       _showMapGrenadeList = false;
+      _highDensityClusterMode = true;
       _joystickOpacity = 0.8;
       _joystickSpeed = 3;
     }
@@ -256,6 +260,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 setState(() => _showMapGrenadeList = value);
                 if (widget.settingsService != null) {
                   await widget.settingsService!.setShowMapGrenadeList(value);
+                }
+              },
+            ),
+            SwitchListTile(
+              title: const Text('高密度模式（强聚合）'),
+              subtitle: const Text('仅增大地图页聚合范围，帮助大量道具时提升流畅度'),
+              value: _highDensityClusterMode,
+              onChanged: (value) async {
+                setState(() => _highDensityClusterMode = value);
+                if (widget.settingsService != null) {
+                  await widget.settingsService!
+                      .setHighDensityClusterMode(value);
                 }
               },
             ),
@@ -556,6 +572,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               onChanged: (value) async {
                 setState(() => _showMapGrenadeList = value);
                 await widget.settingsService!.setShowMapGrenadeList(value);
+              },
+            ),
+            SwitchListTile(
+              title: const Text('高密度模式（强聚合）'),
+              subtitle: const Text('仅增大地图页聚合范围，帮助大量道具时提升流畅度'),
+              value: _highDensityClusterMode,
+              onChanged: (value) async {
+                setState(() => _highDensityClusterMode = value);
+                await widget.settingsService!.setHighDensityClusterMode(value);
               },
             ),
           ],

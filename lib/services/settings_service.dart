@@ -166,6 +166,7 @@ class SettingsService {
   static const String _keyMarkerMoveMode = 'marker_move_mode';
   static const String _keyGrenadeCreateMode = 'grenade_create_mode';
   static const String _keyShowMapGrenadeList = 'show_map_grenade_list';
+  static const String _keyHighDensityClusterMode = 'high_density_cluster_mode';
   static const String _keyJoystickOpacity = 'joystick_opacity';
   static const String _keyJoystickSpeed = 'joystick_speed';
   static const String _keyOverlayNavSpeed = 'overlay_nav_speed';
@@ -350,6 +351,11 @@ class SettingsService {
       }
       if (prefs.containsKey(_keyImpactAreaOpacity)) {
         _cache[_keyImpactAreaOpacity] = prefs.getDouble(_keyImpactAreaOpacity);
+        migrated = true;
+      }
+      if (prefs.containsKey(_keyHighDensityClusterMode)) {
+        _cache[_keyHighDensityClusterMode] =
+            prefs.getBool(_keyHighDensityClusterMode);
         migrated = true;
       }
 
@@ -701,6 +707,23 @@ class SettingsService {
       await _saveValue(_keyShowMapGrenadeList, value);
     } else {
       await _prefs?.setBool(_keyShowMapGrenadeList, value);
+    }
+  }
+
+  /// 地图页高密度模式（仅影响聚合阈值）
+  bool getHighDensityClusterMode() {
+    if (isDesktop) {
+      return _cache[_keyHighDensityClusterMode] as bool? ?? true;
+    }
+    return _prefs?.getBool(_keyHighDensityClusterMode) ?? true;
+  }
+
+  Future<void> setHighDensityClusterMode(bool value) async {
+    if (isDesktop) {
+      _cache[_keyHighDensityClusterMode] = value;
+      await _saveValue(_keyHighDensityClusterMode, value);
+    } else {
+      await _prefs?.setBool(_keyHighDensityClusterMode, value);
     }
   }
 

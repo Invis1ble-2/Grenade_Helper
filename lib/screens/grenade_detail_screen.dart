@@ -18,7 +18,6 @@ import 'package:pasteboard/pasteboard.dart';
 
 import '../models.dart';
 import '../providers.dart';
-import '../config/feature_flags.dart';
 import '../services/data_service.dart';
 import '../services/favorite_folder_service.dart';
 import '../services/tag_service.dart';
@@ -1954,7 +1953,6 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
 
   /// 构建标签编辑区域
   Widget _buildTagSection() {
-    if (!kEnableGrenadeTags) return const SizedBox.shrink();
     if (grenade == null) return const SizedBox.shrink();
     final isar = ref.read(isarProvider);
     final tagService = TagService(isar);

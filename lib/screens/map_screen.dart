@@ -13,7 +13,6 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../models.dart';
 import '../providers.dart';
 import '../main.dart';
-import '../config/feature_flags.dart';
 import '../spawn_point_data.dart';
 import '../widgets/joystick_widget.dart';
 import '../services/data_service.dart';
@@ -69,7 +68,7 @@ final _filteredGrenadesProvider =
       return true;
     }).toList();
 
-    if (kEnableGrenadeTags && selectedTagIds.isNotEmpty) {
+    if (selectedTagIds.isNotEmpty) {
       final matchedGrenadeIds = <int>{};
       for (final tagId in selectedTagIds) {
         final links =
@@ -116,61 +115,125 @@ class GrenadeCluster {
   }
 }
 
+List<GrenadeCluster> _clusterGrenadesByPoint(
+  List<Grenade> grenades, {
+  required double threshold,
+  required ({double x, double y})? Function(Grenade grenade) pointOf,
+}) {
+  if (grenades.isEmpty) return [];
+
+  final points = <({Grenade grenade, double x, double y})>[];
+  for (final grenade in grenades) {
+    final point = pointOf(grenade);
+    if (point == null) continue;
+    points.add((grenade: grenade, x: point.x, y: point.y));
+  }
+  if (points.isEmpty) return [];
+
+  // 阈值为 0 时禁用合并。
+  if (threshold <= 0) {
+    return points
+        .map((p) => GrenadeCluster(
+              xRatio: p.x,
+              yRatio: p.y,
+              grenades: [p.grenade],
+            ))
+        .toList(growable: false);
+  }
+
+  final thresholdSq = threshold * threshold;
+  final cellSize = threshold;
+  final buckets = <(int, int), List<int>>{};
+  final cellXs = List<int>.filled(points.length, 0);
+  final cellYs = List<int>.filled(points.length, 0);
+
+  for (var i = 0; i < points.length; i++) {
+    final p = points[i];
+    final cx = (p.x / cellSize).floor();
+    final cy = (p.y / cellSize).floor();
+    cellXs[i] = cx;
+    cellYs[i] = cy;
+    buckets.putIfAbsent((cx, cy), () => <int>[]).add(i);
+  }
+
+  final active = List<bool>.filled(points.length, true);
+  final clusters = <GrenadeCluster>[];
+
+  for (var i = 0; i < points.length; i++) {
+    if (!active[i]) continue;
+
+    final seed = points[i];
+    active[i] = false;
+    final matchedIndices = <int>[i];
+    final seedCx = cellXs[i];
+    final seedCy = cellYs[i];
+
+    // 只扫描种子点周围 9 个格子中的候选点，避免全量比较。
+    for (var dx = -1; dx <= 1; dx++) {
+      for (var dy = -1; dy <= 1; dy++) {
+        final bucket = buckets[(seedCx + dx, seedCy + dy)];
+        if (bucket == null) continue;
+
+        for (final j in bucket) {
+          if (!active[j]) continue;
+          final p = points[j];
+          final deltaX = p.x - seed.x;
+          final deltaY = p.y - seed.y;
+          if ((deltaX * deltaX + deltaY * deltaY) < thresholdSq) {
+            active[j] = false;
+            matchedIndices.add(j);
+          }
+        }
+      }
+    }
+
+    if (matchedIndices.length > 2) {
+      matchedIndices.sort();
+    }
+
+    var sumX = 0.0;
+    var sumY = 0.0;
+    final clusterGrenades = <Grenade>[];
+    for (final idx in matchedIndices) {
+      final p = points[idx];
+      sumX += p.x;
+      sumY += p.y;
+      clusterGrenades.add(p.grenade);
+    }
+
+    clusters.add(
+      GrenadeCluster(
+        xRatio: sumX / matchedIndices.length,
+        yRatio: sumY / matchedIndices.length,
+        grenades: clusterGrenades,
+      ),
+    );
+  }
+
+  return clusters;
+}
+
 List<GrenadeCluster> clusterGrenades(List<Grenade> grenades,
     {double threshold = 0.0}) {
-  // 禁用合并
-  if (grenades.isEmpty) return [];
-  final List<GrenadeCluster> clusters = [];
-  final List<Grenade> remaining = List.from(grenades);
-
-  while (remaining.isNotEmpty) {
-    final first = remaining.removeAt(0);
-    final nearby = <Grenade>[first];
-    remaining.removeWhere((g) {
-      final dx = (g.xRatio - first.xRatio).abs();
-      final dy = (g.yRatio - first.yRatio).abs();
-      if ((dx * dx + dy * dy) < threshold * threshold) {
-        nearby.add(g);
-        return true;
-      }
-      return false;
-    });
-    final avgX =
-        nearby.map((g) => g.xRatio).reduce((a, b) => a + b) / nearby.length;
-    final avgY =
-        nearby.map((g) => g.yRatio).reduce((a, b) => a + b) / nearby.length;
-    clusters.add(GrenadeCluster(xRatio: avgX, yRatio: avgY, grenades: nearby));
-  }
-  return clusters;
+  return _clusterGrenadesByPoint(
+    grenades,
+    threshold: threshold,
+    pointOf: (g) => (x: g.xRatio, y: g.yRatio),
+  );
 }
 
 List<GrenadeCluster> clusterGrenadesByImpact(List<Grenade> grenades,
     {double threshold = 0.0}) {
-  if (grenades.isEmpty) return [];
-  final List<GrenadeCluster> clusters = [];
-  final List<Grenade> remaining = grenades
-      .where((g) => g.impactXRatio != null && g.impactYRatio != null)
-      .toList();
-
-  while (remaining.isNotEmpty) {
-    final first = remaining.removeAt(0);
-    final nearby = <Grenade>[first];
-    remaining.removeWhere((g) {
-      final dx = (g.impactXRatio! - first.impactXRatio!).abs();
-      final dy = (g.impactYRatio! - first.impactYRatio!).abs();
-      if ((dx * dx + dy * dy) < threshold * threshold) {
-        nearby.add(g);
-        return true;
-      }
-      return false;
-    });
-    final avgX = nearby.map((g) => g.impactXRatio!).reduce((a, b) => a + b) /
-        nearby.length;
-    final avgY = nearby.map((g) => g.impactYRatio!).reduce((a, b) => a + b) /
-        nearby.length;
-    clusters.add(GrenadeCluster(xRatio: avgX, yRatio: avgY, grenades: nearby));
-  }
-  return clusters;
+  return _clusterGrenadesByPoint(
+    grenades,
+    threshold: threshold,
+    pointOf: (g) {
+      final x = g.impactXRatio;
+      final y = g.impactYRatio;
+      if (x == null || y == null) return null;
+      return (x: x, y: y);
+    },
+  );
 }
 
 class MapScreen extends ConsumerStatefulWidget {
@@ -214,6 +277,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   GrenadeCluster? _draggingImpactCluster; // 拖动Cluster
   Offset? _impactDragOffset; // 拖动位置
   Offset? _impactDragAnchorOffset; // 拖动锚点
+  bool _isBatchedClusterLongPressDragActive = false;
   Grenade? _movingSingleImpactGrenade; // 单个爆点移动
   int? _selectedImpactTypeFilter; // 爆点模式下选中的道具类型过滤
   final ValueNotifier<double> _allMapListPanelHeightNotifier =
@@ -222,7 +286,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       TextEditingController();
   String _allMapListSearchQuery = '';
   late final FavoriteFolderService _favoriteFolderService;
-  late final Stream<List<FolderWithGrenades>> _mapFavoritesStream;
   StreamSubscription<void>? _grenadeWatchSubscription;
   List<Grenade> _cachedAllMapGrenades = [];
   List<({Grenade grenade, MapLayer layer})> _cachedAllMapGrenadeEntries = [];
@@ -232,6 +295,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   List<Grenade>? _impactClusterCacheSource;
   double? _impactClusterCacheThreshold;
   List<GrenadeCluster> _impactClusterCache = const [];
+  List<GrenadeCluster>? _frozenThrowBatchClusters;
+  List<GrenadeCluster>? _frozenImpactBatchClusters;
+  final ValueNotifier<int> _batchedDragVisualTick = ValueNotifier<int>(0);
 
   @override
   void initState() {
@@ -239,8 +305,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     _photoViewController = PhotoViewController();
     final isar = ref.read(isarProvider);
     _favoriteFolderService = FavoriteFolderService(isar);
-    _mapFavoritesStream =
-        _favoriteFolderService.watchMapFavorites(widget.gameMap.id);
     _refreshAllMapGrenadeCache(notify: false);
     _grenadeWatchSubscription = isar.grenades.watchLazy().listen((_) {
       if (!mounted) return;
@@ -260,6 +324,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     _grenadeWatchSubscription?.cancel();
     _allMapListPanelHeightNotifier.dispose();
     _allMapListSearchController.dispose();
+    _batchedDragVisualTick.dispose();
     _photoViewController.dispose();
     // 清除悬浮窗
     globalOverlayState?.clearMap();
@@ -280,7 +345,21 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     required double scale,
     required int grenadeCount,
   }) {
+    final highDensityClusterMode =
+        globalSettingsService?.getHighDensityClusterMode() ?? true;
     final baseThreshold = scale >= 2.0 ? 0.008 : 0.02;
+
+    if (!highDensityClusterMode) {
+      if (grenadeCount >= 3200) return baseThreshold * 3.0;
+      if (grenadeCount >= 2000) return baseThreshold * 2.4;
+      if (grenadeCount >= 1200) return baseThreshold * 1.9;
+      if (grenadeCount >= 700) return baseThreshold * 1.5;
+      if (grenadeCount >= 350) return baseThreshold * 1.25;
+      if (grenadeCount >= 200) return baseThreshold * 1.12;
+      if (grenadeCount >= 100) return baseThreshold * 1.05;
+      return baseThreshold;
+    }
+
     if (grenadeCount >= 3200) return baseThreshold * 3.8;
     if (grenadeCount >= 2000) return baseThreshold * 3.0;
     if (grenadeCount >= 1200) return baseThreshold * 2.3;
@@ -483,6 +562,152 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         minX > visibleRect.right + marginX ||
         maxY < visibleRect.top - marginY ||
         minY > visibleRect.bottom + marginY);
+  }
+
+  GrenadeCluster? _hitTestClusterAtGlobalPosition(
+    Offset globalPosition, {
+    required List<GrenadeCluster> clusters,
+    required double photoScale,
+    required ({
+      double width,
+      double height,
+      double offsetX,
+      double offsetY
+    }) imageBounds,
+  }) {
+    if (clusters.isEmpty) return null;
+    final RenderBox? box =
+        _stackKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return null;
+
+    final local = box.globalToLocal(globalPosition);
+    final safeScale = photoScale <= 0 ? 1.0 : photoScale;
+    final hitRadius = 16.0 / safeScale;
+    final hitRadiusSq = hitRadius * hitRadius;
+
+    GrenadeCluster? nearest;
+    var nearestDistSq = double.infinity;
+
+    for (final cluster in clusters) {
+      final cx = imageBounds.offsetX + cluster.xRatio * imageBounds.width;
+      final cy = imageBounds.offsetY + cluster.yRatio * imageBounds.height;
+      final dx = local.dx - cx;
+      final dy = local.dy - cy;
+      final distSq = dx * dx + dy * dy;
+      if (distSq <= hitRadiusSq && distSq < nearestDistSq) {
+        nearestDistSq = distSq;
+        nearest = cluster;
+      }
+    }
+
+    return nearest;
+  }
+
+  Future<void> _handleBatchedThrowClusterLongPressStart(
+    GrenadeCluster cluster,
+    Offset globalPosition,
+    List<GrenadeCluster> batchedClustersSnapshot,
+  ) async {
+    // 移动端检查是否使用摇杆模式
+    if (Platform.isAndroid || Platform.isIOS) {
+      final prefs = await SharedPreferences.getInstance();
+      final markerMoveMode = prefs.getInt('marker_move_mode') ?? 0;
+      if (markerMoveMode == 1) {
+        _isBatchedClusterLongPressDragActive = false;
+        _frozenThrowBatchClusters = null;
+        _showJoystickSheet(cluster);
+        return;
+      }
+    }
+
+    final touchRatio = _getLocalPosition(globalPosition);
+    if (touchRatio == null) return;
+
+    final frozenBatchClusters = batchedClustersSnapshot
+        .where((c) => !_isSameCluster(c, cluster))
+        .toList(growable: false);
+
+    setState(() {
+      _isBatchedClusterLongPressDragActive = true;
+      _frozenThrowBatchClusters = frozenBatchClusters;
+      _frozenImpactBatchClusters = null;
+      _draggingCluster = cluster;
+      _dragAnchorOffset = touchRatio - Offset(cluster.xRatio, cluster.yRatio);
+      _dragOffset = Offset(cluster.xRatio, cluster.yRatio);
+    });
+  }
+
+  Future<void> _handleBatchedImpactClusterLongPressStart(
+    GrenadeCluster cluster,
+    Offset globalPosition,
+    List<GrenadeCluster> batchedClustersSnapshot,
+  ) async {
+    // 移动端检查是否使用摇杆模式
+    if (Platform.isAndroid || Platform.isIOS) {
+      final prefs = await SharedPreferences.getInstance();
+      final markerMoveMode = prefs.getInt('marker_move_mode') ?? 0;
+      if (markerMoveMode == 1) {
+        _isBatchedClusterLongPressDragActive = false;
+        _frozenImpactBatchClusters = null;
+        _showJoystickSheetForImpact(cluster);
+        return;
+      }
+    }
+
+    final touchRatio = _getLocalPosition(globalPosition);
+    if (touchRatio == null) return;
+
+    final frozenBatchClusters = batchedClustersSnapshot
+        .where((c) => !_isSameCluster(c, cluster))
+        .toList(growable: false);
+
+    setState(() {
+      _isBatchedClusterLongPressDragActive = true;
+      _frozenImpactBatchClusters = frozenBatchClusters;
+      _frozenThrowBatchClusters = null;
+      _draggingImpactCluster = cluster;
+      _impactDragAnchorOffset =
+          touchRatio - Offset(cluster.xRatio, cluster.yRatio);
+      _impactDragOffset = Offset(cluster.xRatio, cluster.yRatio);
+    });
+  }
+
+  void _handleBatchedClusterLongPressMoveUpdate(Offset globalPosition) {
+    if (_impactDragAnchorOffset != null) {
+      final touchRatio = _getLocalPosition(globalPosition);
+      if (touchRatio == null) return;
+      final newPos = touchRatio - _impactDragAnchorOffset!;
+      _impactDragOffset = Offset(
+        newPos.dx.clamp(0.0, 1.0),
+        newPos.dy.clamp(0.0, 1.0),
+      );
+      _batchedDragVisualTick.value++;
+      return;
+    }
+
+    if (_dragAnchorOffset != null) {
+      final touchRatio = _getLocalPosition(globalPosition);
+      if (touchRatio == null) return;
+      final newPos = touchRatio - _dragAnchorOffset!;
+      _dragOffset = newPos;
+      _batchedDragVisualTick.value++;
+    }
+  }
+
+  void _handleBatchedClusterLongPressEnd({
+    required double width,
+    required double height,
+  }) {
+    _isBatchedClusterLongPressDragActive = false;
+    _frozenThrowBatchClusters = null;
+    _frozenImpactBatchClusters = null;
+    if (_impactDragAnchorOffset != null || _draggingImpactCluster != null) {
+      _onImpactClusterDragEnd(width, height);
+      return;
+    }
+    if (_dragAnchorOffset != null || _draggingCluster != null) {
+      _onClusterDragEnd(width, height);
+    }
   }
 
   /// 坐标转比例
@@ -3093,7 +3318,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       height: 60,
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: StreamBuilder<List<FolderWithGrenades>>(
-        stream: _mapFavoritesStream,
+        stream: folderService.watchMapFavorites(widget.gameMap.id),
         builder: (context, snapshot) {
           final allFolders = snapshot.data ?? const <FolderWithGrenades>[];
           final visibleFolders =
@@ -3586,7 +3811,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
   /// 显示标签筛选底部弹窗
   void _showTagFilterSheet(int layerId) async {
-    if (!kEnableGrenadeTags) return;
     final isar = ref.read(isarProvider);
     final tagService = TagService(isar);
     await tagService.initializeSystemTags(
@@ -3802,6 +4026,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final grenadesAsync = ref.watch(_filteredGrenadesProvider(currentLayer.id));
     final showMapGrenadeListPanel =
         globalSettingsService?.getShowMapGrenadeList() ?? false;
+    final showFavoritesBar = !isEditMode && _selectedClusterForImpact == null;
+    final floatingButtonsBottomInset = showFavoritesBar ? 80.0 : 30.0;
+    final spawnSidebarBottomInset = showFavoritesBar ? 60.0 : 0.0;
 
     final folderService = _favoriteFolderService;
     final allMapGrenades = _cachedAllMapGrenades;
@@ -4023,6 +4250,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                             _handleMouseWheelZoom(event, constraints);
                           }
                         },
+                        onPointerMove: (event) {
+                          if (!_isBatchedClusterLongPressDragActive) return;
+                          _handleBatchedClusterLongPressMoveUpdate(
+                              event.position);
+                        },
                         child: PhotoView.customChild(
                           key: ValueKey(currentLayer.id),
                           controller: _photoViewController,
@@ -4054,20 +4286,84 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                               final pointCullMarginY = 28 / imageBounds.height;
                               final lineCullMarginX = 40 / imageBounds.width;
                               final lineCullMarginY = 40 / imageBounds.height;
+                              List<GrenadeCluster> batchedTapClusters =
+                                  const [];
+                              var enableBatchedClusterHitTest = false;
+                              var batchedClustersAreImpact = false;
 
                               return GestureDetector(
-                                  onTapUp: (d) => _handleTap(
+                                  onTapUp: (d) {
+                                    if (enableBatchedClusterHitTest) {
+                                      final hitCluster =
+                                          _hitTestClusterAtGlobalPosition(
+                                        d.globalPosition,
+                                        clusters: batchedTapClusters,
+                                        photoScale: scale,
+                                        imageBounds: imageBounds,
+                                      );
+                                      if (hitCluster != null) {
+                                        _handleClusterTap(
+                                            hitCluster, currentLayer.id);
+                                        return;
+                                      }
+                                    }
+                                    _handleTap(
                                       d,
                                       constraints.maxWidth,
                                       constraints.maxHeight,
-                                      currentLayer.id),
+                                      currentLayer.id,
+                                    );
+                                  },
                                   onLongPressStart: (d) {
+                                    if (isEditMode &&
+                                        enableBatchedClusterHitTest) {
+                                      final hitCluster =
+                                          _hitTestClusterAtGlobalPosition(
+                                        d.globalPosition,
+                                        clusters: batchedTapClusters,
+                                        photoScale: scale,
+                                        imageBounds: imageBounds,
+                                      );
+                                      if (hitCluster != null) {
+                                        if (batchedClustersAreImpact) {
+                                          _handleBatchedImpactClusterLongPressStart(
+                                            hitCluster,
+                                            d.globalPosition,
+                                            batchedTapClusters,
+                                          );
+                                        } else {
+                                          _handleBatchedThrowClusterLongPressStart(
+                                            hitCluster,
+                                            d.globalPosition,
+                                            batchedTapClusters,
+                                          );
+                                        }
+                                        return;
+                                      }
+                                    }
                                     if (_getGrenadeCreateMode() !=
                                         _grenadeCreateModeLongPress) {
                                       return;
                                     }
                                     _tryCreateGrenadeAtGlobalPosition(
                                         d.globalPosition, currentLayer.id);
+                                  },
+                                  onLongPressMoveUpdate: (d) {
+                                    if (!isEditMode ||
+                                        !_isBatchedClusterLongPressDragActive) {
+                                      return;
+                                    }
+                                    // 批量拖拽优先使用 Listener.onPointerMove（事件更密）。
+                                  },
+                                  onLongPressEnd: (d) {
+                                    if (!isEditMode ||
+                                        !_isBatchedClusterLongPressDragActive) {
+                                      return;
+                                    }
+                                    _handleBatchedClusterLongPressEnd(
+                                      width: constraints.maxWidth,
+                                      height: constraints.maxHeight,
+                                    );
                                   },
                                   child: Stack(key: _stackKey, children: [
                                     Image.asset(currentLayer.assetPath,
@@ -4183,18 +4479,99 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                                               pointCullMarginY,
                                                         ))
                                                     .toList(growable: false);
+                                            final activeImpactCluster =
+                                                _draggingImpactCluster ??
+                                                    _joystickImpactCluster;
+                                            final useBatchImpactClusterPainter =
+                                                _selectedClusterForImpact ==
+                                                        null &&
+                                                    _isImpactMode;
 
-                                            widgets.addAll(
-                                                visibleImpactClusters.map((c) =>
-                                                    _buildImpactClusterMarker(
-                                                        c,
-                                                        constraints,
-                                                        isEditMode,
-                                                        currentLayer.id,
-                                                        markerScale,
-                                                        imageBounds,
-                                                        denseStyle:
-                                                            denseMarkerStyle)));
+                                            if (useBatchImpactClusterPainter) {
+                                              final impactClustersForBatch =
+                                                  (_isBatchedClusterLongPressDragActive &&
+                                                          activeImpactCluster !=
+                                                              null &&
+                                                          _frozenImpactBatchClusters !=
+                                                              null)
+                                                      ? _frozenImpactBatchClusters!
+                                                      : (activeImpactCluster ==
+                                                              null
+                                                          ? visibleImpactClusters
+                                                          : visibleImpactClusters
+                                                              .where((c) =>
+                                                                  !_isSameCluster(
+                                                                    c,
+                                                                    activeImpactCluster,
+                                                                  ))
+                                                              .toList(
+                                                                  growable:
+                                                                      false));
+                                              batchedTapClusters =
+                                                  impactClustersForBatch;
+                                              enableBatchedClusterHitTest =
+                                                  impactClustersForBatch
+                                                      .isNotEmpty;
+                                              batchedClustersAreImpact = true;
+                                              if (impactClustersForBatch
+                                                  .isNotEmpty) {
+                                                widgets.add(
+                                                  Positioned.fill(
+                                                    child: IgnorePointer(
+                                                      child: RepaintBoundary(
+                                                        child: CustomPaint(
+                                                          painter:
+                                                              _ImpactClusterBatchPainter(
+                                                            clusters:
+                                                                impactClustersForBatch,
+                                                            imageBounds:
+                                                                imageBounds,
+                                                            markerScale:
+                                                                markerScale,
+                                                            denseStyle:
+                                                                denseMarkerStyle,
+                                                            textDirection:
+                                                                Directionality
+                                                                    .of(context),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+                                              if (activeImpactCluster != null) {
+                                                widgets.add(
+                                                  ValueListenableBuilder<int>(
+                                                    valueListenable:
+                                                        _batchedDragVisualTick,
+                                                    builder: (_, __, ___) =>
+                                                        _buildImpactClusterMarker(
+                                                      activeImpactCluster,
+                                                      constraints,
+                                                      isEditMode,
+                                                      currentLayer.id,
+                                                      markerScale,
+                                                      imageBounds,
+                                                      denseStyle:
+                                                          denseMarkerStyle,
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+                                            } else {
+                                              widgets.addAll(
+                                                  visibleImpactClusters.map((c) =>
+                                                      _buildImpactClusterMarker(
+                                                          c,
+                                                          constraints,
+                                                          isEditMode,
+                                                          currentLayer.id,
+                                                          markerScale,
+                                                          imageBounds,
+                                                          denseStyle:
+                                                              denseMarkerStyle)));
+                                            }
                                           } else {
                                             // 标准模式：显示投掷点聚合
                                             final cachedClusters =
@@ -4227,23 +4604,107 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                                               pointCullMarginY,
                                                         ))
                                                     .toList(growable: false);
+                                            final activeThrowCluster =
+                                                _draggingCluster ??
+                                                    _joystickCluster;
                                             final denseMarkerStyle =
                                                 _shouldUseDenseMarkerStyle(
                                               grenadeCount: list.length,
                                               clusterCount:
                                                   cachedClusters.length,
                                             );
+                                            final useBatchClusterPainter =
+                                                _selectedClusterForImpact ==
+                                                        null &&
+                                                    !_isImpactMode;
 
-                                            widgets.addAll(visibleClustersInViewport
-                                                .map((c) => _buildClusterMarker(
-                                                    c,
-                                                    constraints,
-                                                    isEditMode,
-                                                    currentLayer.id,
-                                                    markerScale,
-                                                    imageBounds,
-                                                    denseStyle:
-                                                        denseMarkerStyle)));
+                                            if (useBatchClusterPainter) {
+                                              final throwClustersForBatch =
+                                                  (_isBatchedClusterLongPressDragActive &&
+                                                          activeThrowCluster !=
+                                                              null &&
+                                                          _frozenThrowBatchClusters !=
+                                                              null)
+                                                      ? _frozenThrowBatchClusters!
+                                                      : (activeThrowCluster ==
+                                                              null
+                                                          ? visibleClustersInViewport
+                                                          : visibleClustersInViewport
+                                                              .where((c) =>
+                                                                  !_isSameCluster(
+                                                                    c,
+                                                                    activeThrowCluster,
+                                                                  ))
+                                                              .toList(
+                                                                  growable:
+                                                                      false));
+                                              batchedTapClusters =
+                                                  throwClustersForBatch;
+                                              enableBatchedClusterHitTest =
+                                                  throwClustersForBatch
+                                                      .isNotEmpty;
+                                              batchedClustersAreImpact = false;
+                                              if (throwClustersForBatch
+                                                  .isNotEmpty) {
+                                                widgets.add(
+                                                  Positioned.fill(
+                                                    child: IgnorePointer(
+                                                      child: RepaintBoundary(
+                                                        child: CustomPaint(
+                                                          painter:
+                                                              _ClusterBatchPainter(
+                                                            clusters:
+                                                                throwClustersForBatch,
+                                                            imageBounds:
+                                                                imageBounds,
+                                                            markerScale:
+                                                                markerScale,
+                                                            denseStyle:
+                                                                denseMarkerStyle,
+                                                            textDirection:
+                                                                Directionality
+                                                                    .of(context),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+                                              if (activeThrowCluster != null) {
+                                                widgets.add(
+                                                  ValueListenableBuilder<int>(
+                                                    valueListenable:
+                                                        _batchedDragVisualTick,
+                                                    builder: (_, __, ___) =>
+                                                        _buildClusterMarker(
+                                                      activeThrowCluster,
+                                                      constraints,
+                                                      isEditMode,
+                                                      currentLayer.id,
+                                                      markerScale,
+                                                      imageBounds,
+                                                      denseStyle:
+                                                          denseMarkerStyle,
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+                                            } else {
+                                              widgets.addAll(
+                                                  visibleClustersInViewport.map(
+                                                      (c) =>
+                                                          _buildClusterMarker(
+                                                            c,
+                                                            constraints,
+                                                            isEditMode,
+                                                            currentLayer.id,
+                                                            markerScale,
+                                                            imageBounds,
+                                                            denseStyle:
+                                                                denseMarkerStyle,
+                                                          )));
+                                            }
                                           }
 
                                           // 爆点连线
@@ -4434,35 +4895,43 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                           ],
                                         ),
                                       ),
-                                    if (_draggingCluster != null &&
-                                        _dragOffset != null)
-                                      Positioned(
-                                          left: imageBounds.offsetX +
-                                              _dragOffset!.dx *
-                                                  imageBounds.width -
-                                              14.0, // Fixed offset, not scaled
-                                          top: imageBounds.offsetY +
-                                              _dragOffset!.dy *
-                                                  imageBounds.height -
-                                              14.0, // Fixed offset, not scaled
-                                          child: Transform.scale(
-                                            scale: markerScale,
-                                            alignment: Alignment.center,
-                                            child: Container(
-                                                width: 28,
-                                                height: 28,
-                                                decoration: BoxDecoration(
-                                                    color: Colors.cyan
-                                                        .withValues(alpha: 0.6),
-                                                    shape: BoxShape.circle,
-                                                    border: Border.all(
-                                                        color: Colors.cyan,
-                                                        width: 2)),
-                                                child: const Icon(
-                                                    Icons.open_with,
-                                                    size: 14,
-                                                    color: Colors.white)),
-                                          )),
+                                    if (_draggingCluster != null)
+                                      ValueListenableBuilder<int>(
+                                        valueListenable: _batchedDragVisualTick,
+                                        builder: (_, __, ___) {
+                                          if (_dragOffset == null) {
+                                            return const SizedBox.shrink();
+                                          }
+                                          return Positioned(
+                                              left: imageBounds.offsetX +
+                                                  _dragOffset!.dx *
+                                                      imageBounds.width -
+                                                  14.0,
+                                              top: imageBounds.offsetY +
+                                                  _dragOffset!.dy *
+                                                      imageBounds.height -
+                                                  14.0,
+                                              child: Transform.scale(
+                                                scale: markerScale,
+                                                alignment: Alignment.center,
+                                                child: Container(
+                                                    width: 28,
+                                                    height: 28,
+                                                    decoration: BoxDecoration(
+                                                        color: Colors.cyan
+                                                            .withValues(
+                                                                alpha: 0.6),
+                                                        shape: BoxShape.circle,
+                                                        border: Border.all(
+                                                            color: Colors.cyan,
+                                                            width: 2)),
+                                                    child: const Icon(
+                                                        Icons.open_with,
+                                                        size: 14,
+                                                        color: Colors.white)),
+                                              ));
+                                        },
+                                      ),
                                     if (_tempTapPosition != null)
                                       Positioned(
                                           left: imageBounds.offsetX +
@@ -4547,7 +5016,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 // 爆点模式切换按钮
                 Positioned(
                   left: 16,
-                  bottom: !isEditMode ? 80 : 30, // 与右边按钮组保持一致
+                  bottom: floatingButtonsBottomInset, // 与右边按钮组保持一致
                   child: FloatingActionButton.small(
                     heroTag: 'impact_mode_toggle',
                     backgroundColor:
@@ -4577,19 +5046,18 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 // 右下角按钮组（标签筛选 + 楼层切换）
                 Positioned(
                   right: 16,
-                  bottom: !isEditMode ? 80 : 30,
+                  bottom: floatingButtonsBottomInset,
                   child: Column(
                     children: [
-                      if (kEnableGrenadeTags)
-                        FloatingActionButton.small(
-                          heroTag: "btn_tag_filter",
-                          backgroundColor: Colors.blueGrey,
-                          onPressed: () => _showTagFilterSheet(currentLayer.id),
-                          child: const Icon(Icons.label_outline,
-                              color: Colors.white),
-                        ),
+                      FloatingActionButton.small(
+                        heroTag: "btn_tag_filter",
+                        backgroundColor: Colors.blueGrey,
+                        onPressed: () => _showTagFilterSheet(currentLayer.id),
+                        child: const Icon(Icons.label_outline,
+                            color: Colors.white),
+                      ),
                       if (layers.length > 1) ...[
-                        SizedBox(height: kEnableGrenadeTags ? 16 : 0),
+                        const SizedBox(height: 16),
                         FloatingActionButton.small(
                             heroTag: "btn_up",
                             backgroundColor: layerIndex < layers.length - 1
@@ -4634,12 +5102,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   Positioned(
                     right: 0,
                     top: 0,
-                    bottom: isEditMode ? 0 : 60,
+                    bottom: spawnSidebarBottomInset,
                     child: _buildSpawnPointSidebar(
                         spawnConfig, currentLayer.id, isEditMode),
                   ),
                 // 底部收藏栏（仅在未选中点位时显示）
-                if (!isEditMode && _selectedClusterForImpact == null)
+                if (showFavoritesBar)
                   Positioned(
                       left: 0,
                       right: 0,
@@ -5953,6 +6421,334 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         ],
       ),
     );
+  }
+}
+
+class _ImpactClusterBatchPainter extends CustomPainter {
+  final List<GrenadeCluster> clusters;
+  final ({
+    double width,
+    double height,
+    double offsetX,
+    double offsetY
+  }) imageBounds;
+  final double markerScale;
+  final bool denseStyle;
+  final TextDirection textDirection;
+
+  _ImpactClusterBatchPainter({
+    required this.clusters,
+    required this.imageBounds,
+    required this.markerScale,
+    required this.denseStyle,
+    required this.textDirection,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (clusters.isEmpty) return;
+
+    for (final cluster in clusters) {
+      final center = Offset(
+        imageBounds.offsetX + cluster.xRatio * imageBounds.width,
+        imageBounds.offsetY + cluster.yRatio * imageBounds.height,
+      );
+
+      canvas.save();
+      canvas.translate(center.dx, center.dy);
+      canvas.scale(markerScale, markerScale);
+      _paintCluster(canvas, cluster);
+      canvas.restore();
+    }
+  }
+
+  void _paintCluster(Canvas canvas, GrenadeCluster cluster) {
+    final impactColor = cluster.grenades.length > 1
+        ? Colors.purpleAccent
+        : _typeColor(cluster.primaryType);
+
+    const baseRadius = 10.0;
+    final fillPaint = Paint()
+      ..color = Colors.black.withValues(alpha: denseStyle ? 0.28 : 0.4)
+      ..style = PaintingStyle.fill;
+    final borderPaint = Paint()
+      ..color = impactColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+
+    canvas.drawCircle(Offset.zero, baseRadius, fillPaint);
+    canvas.drawCircle(Offset.zero, baseRadius, borderPaint);
+
+    _drawIconGlyph(
+      canvas,
+      Icons.close,
+      impactColor,
+      center: Offset.zero,
+      size: 12,
+    );
+  }
+
+  void _drawIconGlyph(
+    Canvas canvas,
+    IconData icon,
+    Color color, {
+    required Offset center,
+    required double size,
+  }) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: String.fromCharCode(icon.codePoint),
+        style: TextStyle(
+          inherit: false,
+          color: color,
+          fontSize: size,
+          fontFamily: icon.fontFamily,
+          package: icon.fontPackage,
+        ),
+      ),
+      textDirection: textDirection,
+    )..layout();
+
+    painter.paint(
+      canvas,
+      Offset(center.dx - painter.width / 2, center.dy - painter.height / 2),
+    );
+  }
+
+  Color _typeColor(int type) {
+    switch (type) {
+      case GrenadeType.smoke:
+        return Colors.white;
+      case GrenadeType.flash:
+        return Colors.yellow;
+      case GrenadeType.molotov:
+        return Colors.red;
+      case GrenadeType.he:
+        return Colors.green;
+      case GrenadeType.wallbang:
+        return Colors.cyan;
+      default:
+        return Colors.white;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ImpactClusterBatchPainter oldDelegate) {
+    return oldDelegate.clusters != clusters ||
+        oldDelegate.markerScale != markerScale ||
+        oldDelegate.denseStyle != denseStyle ||
+        oldDelegate.textDirection != textDirection ||
+        oldDelegate.imageBounds.width != imageBounds.width ||
+        oldDelegate.imageBounds.height != imageBounds.height ||
+        oldDelegate.imageBounds.offsetX != imageBounds.offsetX ||
+        oldDelegate.imageBounds.offsetY != imageBounds.offsetY;
+  }
+}
+
+class _ClusterBatchPainter extends CustomPainter {
+  final List<GrenadeCluster> clusters;
+  final ({
+    double width,
+    double height,
+    double offsetX,
+    double offsetY
+  }) imageBounds;
+  final double markerScale;
+  final bool denseStyle;
+  final TextDirection textDirection;
+
+  _ClusterBatchPainter({
+    required this.clusters,
+    required this.imageBounds,
+    required this.markerScale,
+    required this.denseStyle,
+    required this.textDirection,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (clusters.isEmpty) return;
+
+    for (final cluster in clusters) {
+      final center = Offset(
+        imageBounds.offsetX + cluster.xRatio * imageBounds.width,
+        imageBounds.offsetY + cluster.yRatio * imageBounds.height,
+      );
+
+      canvas.save();
+      canvas.translate(center.dx, center.dy);
+      canvas.scale(markerScale, markerScale);
+      _paintCluster(canvas, cluster);
+      canvas.restore();
+    }
+  }
+
+  void _paintCluster(Canvas canvas, GrenadeCluster cluster) {
+    final borderColor = _teamColor(cluster.primaryTeam).withValues(alpha: 0.5);
+    final count = cluster.grenades.length;
+    final iconData = cluster.hasMultipleTypes
+        ? Icons.layers
+        : _typeIcon(cluster.primaryType);
+    final iconColor = cluster.hasMultipleTypes
+        ? Colors.purpleAccent.withValues(alpha: 0.9)
+        : _typeColor(cluster.primaryType);
+
+    const baseRadius = 10.0;
+    final fillPaint = Paint()
+      ..color = Colors.black.withValues(alpha: 0.3)
+      ..style = PaintingStyle.fill;
+    final borderPaint = Paint()
+      ..color = borderColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+
+    canvas.drawCircle(Offset.zero, baseRadius, fillPaint);
+    canvas.drawCircle(Offset.zero, baseRadius, borderPaint);
+
+    _drawIconGlyph(
+      canvas,
+      iconData,
+      iconColor,
+      center: Offset.zero,
+      size: 10,
+    );
+
+    if (count > 1) {
+      final badgeCenter = const Offset(8, -8);
+      canvas.drawCircle(
+        badgeCenter,
+        6,
+        Paint()..color = Colors.orange,
+      );
+      _drawText(
+        canvas,
+        '$count',
+        const TextStyle(
+          fontSize: 8,
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+        ),
+        center: badgeCenter,
+      );
+    }
+
+    if (cluster.hasNewImport && !denseStyle) {
+      canvas.drawCircle(
+        const Offset(-8, -8),
+        3,
+        Paint()..color = Colors.red,
+      );
+    }
+
+    if (cluster.hasFavorite && !denseStyle) {
+      canvas.drawCircle(
+        const Offset(-8, 8),
+        2.5,
+        Paint()..color = Colors.amberAccent,
+      );
+    }
+  }
+
+  void _drawIconGlyph(
+    Canvas canvas,
+    IconData icon,
+    Color color, {
+    required Offset center,
+    required double size,
+  }) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: String.fromCharCode(icon.codePoint),
+        style: TextStyle(
+          inherit: false,
+          color: color,
+          fontSize: size,
+          fontFamily: icon.fontFamily,
+          package: icon.fontPackage,
+        ),
+      ),
+      textDirection: textDirection,
+    )..layout();
+
+    painter.paint(
+      canvas,
+      Offset(center.dx - painter.width / 2, center.dy - painter.height / 2),
+    );
+  }
+
+  void _drawText(
+    Canvas canvas,
+    String text,
+    TextStyle style, {
+    required Offset center,
+  }) {
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: textDirection,
+      maxLines: 1,
+    )..layout();
+
+    painter.paint(
+      canvas,
+      Offset(center.dx - painter.width / 2, center.dy - painter.height / 2),
+    );
+  }
+
+  Color _teamColor(int team) {
+    switch (team) {
+      case TeamType.ct:
+        return Colors.blueAccent;
+      case TeamType.t:
+        return Colors.amber;
+      default:
+        return Colors.white;
+    }
+  }
+
+  Color _typeColor(int type) {
+    switch (type) {
+      case GrenadeType.smoke:
+        return Colors.white;
+      case GrenadeType.flash:
+        return Colors.yellow;
+      case GrenadeType.molotov:
+        return Colors.red;
+      case GrenadeType.he:
+        return Colors.green;
+      case GrenadeType.wallbang:
+        return Colors.cyan;
+      default:
+        return Colors.white;
+    }
+  }
+
+  IconData _typeIcon(int type) {
+    switch (type) {
+      case GrenadeType.smoke:
+        return Icons.cloud;
+      case GrenadeType.flash:
+        return Icons.flash_on;
+      case GrenadeType.molotov:
+        return Icons.local_fire_department;
+      case GrenadeType.he:
+        return Icons.trip_origin;
+      case GrenadeType.wallbang:
+        return Icons.apps;
+      default:
+        return Icons.circle;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ClusterBatchPainter oldDelegate) {
+    return oldDelegate.clusters != clusters ||
+        oldDelegate.markerScale != markerScale ||
+        oldDelegate.denseStyle != denseStyle ||
+        oldDelegate.textDirection != textDirection ||
+        oldDelegate.imageBounds.width != imageBounds.width ||
+        oldDelegate.imageBounds.height != imageBounds.height ||
+        oldDelegate.imageBounds.offsetX != imageBounds.offsetX ||
+        oldDelegate.imageBounds.offsetY != imageBounds.offsetY;
   }
 }
 
