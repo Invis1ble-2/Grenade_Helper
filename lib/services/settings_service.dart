@@ -165,6 +165,7 @@ class SettingsService {
   static const String _keyThemeMode = 'theme_mode';
   static const String _keyMarkerMoveMode = 'marker_move_mode';
   static const String _keyGrenadeCreateMode = 'grenade_create_mode';
+  static const String _keyShowMapGrenadeList = 'show_map_grenade_list';
   static const String _keyJoystickOpacity = 'joystick_opacity';
   static const String _keyJoystickSpeed = 'joystick_speed';
   static const String _keyOverlayNavSpeed = 'overlay_nav_speed';
@@ -683,6 +684,23 @@ class SettingsService {
       await _saveValue(_keyGrenadeCreateMode, value);
     } else {
       await _prefs?.setInt(_keyGrenadeCreateMode, value);
+    }
+  }
+
+  /// 地图页显示当前地图全部道具列表（管理面板）
+  bool getShowMapGrenadeList() {
+    if (isDesktop) {
+      return _cache[_keyShowMapGrenadeList] as bool? ?? false;
+    }
+    return _prefs?.getBool(_keyShowMapGrenadeList) ?? false;
+  }
+
+  Future<void> setShowMapGrenadeList(bool value) async {
+    if (isDesktop) {
+      _cache[_keyShowMapGrenadeList] = value;
+      await _saveValue(_keyShowMapGrenadeList, value);
+    } else {
+      await _prefs?.setBool(_keyShowMapGrenadeList, value);
     }
   }
 

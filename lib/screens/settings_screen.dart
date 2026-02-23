@@ -66,6 +66,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // 摇杆设置
   late int _markerMoveMode;
   late int _grenadeCreateMode;
+  late bool _showMapGrenadeList;
   late double _joystickOpacity;
   late int _joystickSpeed;
   // 存储路径
@@ -105,6 +106,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
       _markerMoveMode = widget.settingsService!.getMarkerMoveMode();
       _grenadeCreateMode = widget.settingsService!.getGrenadeCreateMode();
+      _showMapGrenadeList = widget.settingsService!.getShowMapGrenadeList();
       _joystickOpacity = widget.settingsService!.getJoystickOpacity();
       _joystickSpeed = widget.settingsService!.getJoystickSpeed();
       // 加载路径
@@ -123,6 +125,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _impactAreaOpacity = 0.4;
       _markerMoveMode = 0;
       _grenadeCreateMode = 0;
+      _showMapGrenadeList = false;
       _joystickOpacity = 0.8;
       _joystickSpeed = 3;
     }
@@ -244,6 +247,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   }
                 },
               ),
+            ),
+            SwitchListTile(
+              title: const Text('地图界面显示道具列表'),
+              subtitle: const Text('显示当前地图全部道具列表，便于管理和删除'),
+              value: _showMapGrenadeList,
+              onChanged: (value) async {
+                setState(() => _showMapGrenadeList = value);
+                if (widget.settingsService != null) {
+                  await widget.settingsService!.setShowMapGrenadeList(value);
+                }
+              },
             ),
             ListTile(
               title: const Text('移动模式'),
@@ -534,6 +548,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       .setGrenadeCreateMode(value.first);
                 },
               ),
+            ),
+            SwitchListTile(
+              title: const Text('地图界面显示道具列表'),
+              subtitle: const Text('显示当前地图全部道具列表，便于管理和删除'),
+              value: _showMapGrenadeList,
+              onChanged: (value) async {
+                setState(() => _showMapGrenadeList = value);
+                await widget.settingsService!.setShowMapGrenadeList(value);
+              },
             ),
           ],
         ),

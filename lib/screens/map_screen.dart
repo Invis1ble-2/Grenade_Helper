@@ -182,6 +182,9 @@ class MapScreen extends ConsumerStatefulWidget {
 class _MapScreenState extends ConsumerState<MapScreen> {
   static const int _grenadeCreateModeTap = 0;
   static const int _grenadeCreateModeLongPress = 1;
+  static const double _allMapListPanelCollapsedHeight = 60;
+  static const double _allMapListPanelDefaultHeight = 260;
+  static const double _allMapListPanelMinExpandedHeight = 180;
 
   Offset? _tempTapPosition;
   GrenadeCluster? _draggingCluster;
@@ -212,11 +215,22 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   Offset? _impactDragAnchorOffset; // 拖动锚点
   Grenade? _movingSingleImpactGrenade; // 单个爆点移动
   int? _selectedImpactTypeFilter; // 爆点模式下选中的道具类型过滤
+  final ValueNotifier<double> _allMapListPanelHeightNotifier =
+      ValueNotifier(_allMapListPanelDefaultHeight);
+  final TextEditingController _allMapListSearchController =
+      TextEditingController();
+  String _allMapListSearchQuery = '';
+  late final FavoriteFolderService _favoriteFolderService;
+  late final Stream<List<FolderWithGrenades>> _mapFavoritesStream;
 
   @override
   void initState() {
     super.initState();
     _photoViewController = PhotoViewController();
+    final isar = ref.read(isarProvider);
+    _favoriteFolderService = FavoriteFolderService(isar);
+    _mapFavoritesStream =
+        _favoriteFolderService.watchMapFavorites(widget.gameMap.id);
     widget.gameMap.layers.loadSync();
     final defaultIndex = widget.gameMap.layers.length > 1 ? 1 : 0;
     Future.microtask(() {
@@ -228,6 +242,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
   @override
   void dispose() {
+    _allMapListPanelHeightNotifier.dispose();
+    _allMapListSearchController.dispose();
     _photoViewController.dispose();
     // 清除悬浮窗
     globalOverlayState?.clearMap();
@@ -372,6 +388,37 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         duration: const Duration(seconds: 2),
       ),
     );
+  }
+
+  void _toggleAllMapListPanelCollapsed() {
+    final current = _allMapListPanelHeightNotifier.value;
+    final shouldExpand = current < _allMapListPanelMinExpandedHeight;
+    _allMapListPanelHeightNotifier.value = shouldExpand
+        ? _allMapListPanelDefaultHeight
+        : _allMapListPanelCollapsedHeight;
+  }
+
+  void _resizeAllMapListPanel(double deltaDy, double maxHeight) {
+    final next = (_allMapListPanelHeightNotifier.value - deltaDy)
+        .clamp(_allMapListPanelCollapsedHeight, maxHeight);
+    _allMapListPanelHeightNotifier.value = (next as num).toDouble();
+  }
+
+  void _snapAllMapListPanelHeight(double maxHeight) {
+    final current = _allMapListPanelHeightNotifier.value;
+    if (current <
+        (_allMapListPanelCollapsedHeight + _allMapListPanelMinExpandedHeight) /
+            2) {
+      _allMapListPanelHeightNotifier.value = _allMapListPanelCollapsedHeight;
+      return;
+    }
+    if (current < _allMapListPanelMinExpandedHeight) {
+      _allMapListPanelHeightNotifier.value = _allMapListPanelMinExpandedHeight;
+      return;
+    }
+    if (current > maxHeight) {
+      _allMapListPanelHeightNotifier.value = maxHeight;
+    }
   }
 
   void _tryCreateGrenadeAtGlobalPosition(Offset globalPosition, int layerId) {
@@ -633,9 +680,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 GrenadeDetailScreen(grenadeId: id, isEditing: true)));
   }
 
-  void _onSearchResultSelected(Grenade g) {
-    g.layer.loadSync();
-    final targetLayerId = g.layer.value?.id;
+  void _switchToLayerById(int? targetLayerId, {String? layerName}) {
+    if (targetLayerId == null) return;
     widget.gameMap.layers.loadSync();
     final layers = widget.gameMap.layers.toList();
     final targetIndex = layers.indexWhere((l) => l.id == targetLayerId);
@@ -643,11 +689,16 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         targetIndex != ref.read(selectedLayerIndexProvider)) {
       ref.read(selectedLayerIndexProvider.notifier).state = targetIndex;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text("已跳转至 ${g.layer.value?.name ?? '目标楼层'}"),
+        content: Text("已跳转至 ${layerName ?? layers[targetIndex].name}"),
         duration: const Duration(milliseconds: 800),
         behavior: SnackBarBehavior.floating,
       ));
     }
+  }
+
+  void _onSearchResultSelected(Grenade g) {
+    g.layer.loadSync();
+    _switchToLayerById(g.layer.value?.id, layerName: g.layer.value?.name);
     _handleGrenadeTap(g, isEditing: false);
   }
 
@@ -789,6 +840,327 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     }
 
     _showClusterBottomSheet(cluster, layerId);
+  }
+
+  Future<void> _deleteGrenadeFromMapList(Grenade g) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).colorScheme.surface,
+        title: Text("删除道具",
+            style: TextStyle(color: Theme.of(ctx).textTheme.bodyLarge?.color)),
+        content: Text("确定要删除 \"${g.title}\" 吗？",
+            style: TextStyle(color: Theme.of(ctx).textTheme.bodySmall?.color)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text("取消"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text("删除", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    await _deleteGrenadesInBatch([g]);
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("✓ 道具已删除"),
+        backgroundColor: Colors.redAccent,
+        duration: Duration(seconds: 1),
+      ),
+    );
+  }
+
+  Widget _buildAllMapGrenadesPanel(
+      List<({Grenade grenade, MapLayer layer})> entries,
+      bool isEditMode,
+      int currentLayerId) {
+    final maxPanelHeight =
+        ((MediaQuery.of(context).size.height * 0.65).clamp(240.0, 560.0) as num)
+            .toDouble();
+    final query = _allMapListSearchQuery.trim().toLowerCase();
+    final sortedEntries = [...entries]..sort((a, b) {
+        final layerCompare = a.layer.name.compareTo(b.layer.name);
+        if (layerCompare != 0) return layerCompare;
+        return a.grenade.title.compareTo(b.grenade.title);
+      });
+    final filteredEntries = query.isEmpty
+        ? sortedEntries
+        : sortedEntries.where((entry) {
+            final g = entry.grenade;
+            return g.title.toLowerCase().contains(query);
+          }).toList();
+
+    return ValueListenableBuilder<double>(
+      valueListenable: _allMapListPanelHeightNotifier,
+      builder: (context, rawPanelHeight, _) {
+        final panelHeight = (rawPanelHeight as num)
+            .clamp(_allMapListPanelCollapsedHeight, maxPanelHeight)
+            .toDouble();
+        final showExpandedContent =
+            panelHeight >= _allMapListPanelMinExpandedHeight;
+
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOut,
+          height: panelHeight,
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.3),
+                blurRadius: 10,
+                offset: const Offset(0, -2),
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onVerticalDragUpdate: (details) =>
+                    _resizeAllMapListPanel(details.delta.dy, maxPanelHeight),
+                onVerticalDragEnd: (_) =>
+                    _snapAllMapListPanelHeight(maxPanelHeight),
+                child: Column(
+                  children: [
+                    SizedBox(height: showExpandedContent ? 6 : 4),
+                    Center(
+                      child: Container(
+                        width: 34,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.grey.withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: showExpandedContent ? 8 : 4,
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.list_alt,
+                              color: Colors.blueAccent, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              showExpandedContent
+                                  ? '地图道具列表（${filteredEntries.length}/${sortedEntries.length}）'
+                                  : '地图道具列表（${sortedEntries.length}）',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                          if (showExpandedContent)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 4),
+                              child: Text(
+                                isEditMode ? '点击编辑，右侧可删' : '点击查看',
+                                style: TextStyle(
+                                  color: Theme.of(context).hintColor,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ),
+                          IconButton(
+                            tooltip: showExpandedContent ? '折叠列表' : '展开列表',
+                            onPressed: _toggleAllMapListPanelCollapsed,
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 32,
+                              minHeight: 32,
+                            ),
+                            icon: Icon(
+                              showExpandedContent
+                                  ? Icons.expand_more
+                                  : Icons.expand_less,
+                              color: Colors.blueAccent,
+                              size: 20,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (showExpandedContent)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                  child: TextField(
+                    controller: _allMapListSearchController,
+                    onChanged: (value) =>
+                        setState(() => _allMapListSearchQuery = value),
+                    style: const TextStyle(fontSize: 11),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: '搜索道具名称',
+                      prefixIcon: const Icon(Icons.search, size: 16),
+                      prefixIconConstraints: const BoxConstraints(
+                        minWidth: 30,
+                        minHeight: 30,
+                      ),
+                      suffixIconConstraints: const BoxConstraints(
+                        minWidth: 28,
+                        minHeight: 28,
+                      ),
+                      suffixIcon: _allMapListSearchQuery.isEmpty
+                          ? null
+                          : IconButton(
+                              tooltip: '清空搜索',
+                              icon: const Icon(Icons.close, size: 14),
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 28,
+                                minHeight: 28,
+                              ),
+                              onPressed: () {
+                                _allMapListSearchController.clear();
+                                setState(() => _allMapListSearchQuery = '');
+                              },
+                            ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 8,
+                      ),
+                    ),
+                  ),
+                ),
+              if (showExpandedContent)
+                Divider(
+                  height: 1,
+                  color: Theme.of(context).dividerColor.withValues(alpha: 0.2),
+                ),
+              if (showExpandedContent)
+                Expanded(
+                  child: sortedEntries.isEmpty
+                      ? const Center(
+                          child: Text(
+                            '当前地图暂无道具',
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                        )
+                      : filteredEntries.isEmpty
+                          ? const Center(
+                              child: Text(
+                                '没有匹配的道具',
+                                style: TextStyle(color: Colors.grey),
+                              ),
+                            )
+                          : ListView.separated(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              itemCount: filteredEntries.length,
+                              separatorBuilder: (_, __) => Divider(
+                                height: 1,
+                                color:
+                                    Theme.of(context).dividerColor.withValues(
+                                          alpha: 0.12,
+                                        ),
+                              ),
+                              itemBuilder: (context, index) {
+                                final entry = filteredEntries[index];
+                                final g = entry.grenade;
+                                final layer = entry.layer;
+                                final isCurrentLayer =
+                                    layer.id == currentLayerId;
+                                final typeColor = _getTypeColor(g.type);
+
+                                return ListTile(
+                                  dense: true,
+                                  visualDensity: VisualDensity.compact,
+                                  tileColor: isCurrentLayer
+                                      ? Colors.blueAccent
+                                          .withValues(alpha: 0.08)
+                                      : null,
+                                  leading: Container(
+                                    width: 28,
+                                    height: 28,
+                                    decoration: BoxDecoration(
+                                      color: Colors.black54,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                          color: typeColor, width: 1.8),
+                                    ),
+                                    child: Icon(
+                                      _getTypeIcon(g.type),
+                                      size: 14,
+                                      color: typeColor,
+                                    ),
+                                  ),
+                                  title: Text(
+                                    g.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                  subtitle: Text(
+                                    '${layer.name} • ${_getTypeName(g.type)} • ${_getTeamName(g.team)}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: Theme.of(context).hintColor,
+                                    ),
+                                  ),
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (g.isFavorite)
+                                        const Icon(Icons.star,
+                                            color: Colors.amber, size: 14),
+                                      if (isEditMode)
+                                        IconButton(
+                                          onPressed: () =>
+                                              _deleteGrenadeFromMapList(g),
+                                          icon:
+                                              const Icon(Icons.delete_outline),
+                                          color: Colors.redAccent,
+                                          tooltip: '删除道具',
+                                          iconSize: 18,
+                                          padding: EdgeInsets.zero,
+                                          constraints: const BoxConstraints(
+                                            minWidth: 32,
+                                            minHeight: 32,
+                                          ),
+                                        )
+                                      else
+                                        const Icon(Icons.chevron_right,
+                                            color: Colors.grey, size: 16),
+                                    ],
+                                  ),
+                                  onTap: () {
+                                    _switchToLayerById(layer.id,
+                                        layerName: layer.name);
+                                    _handleGrenadeTap(g, isEditing: isEditMode);
+                                  },
+                                );
+                              },
+                            ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   void _showClusterBottomSheet(GrenadeCluster cluster, int layerId) async {
@@ -2514,7 +2886,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       height: 60,
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: StreamBuilder<List<FolderWithGrenades>>(
-        stream: folderService.watchMapFavorites(widget.gameMap.id),
+        stream: _mapFavoritesStream,
         builder: (context, snapshot) {
           final allFolders = snapshot.data ?? const <FolderWithGrenades>[];
           final visibleFolders =
@@ -3221,16 +3593,23 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     }
 
     final grenadesAsync = ref.watch(_filteredGrenadesProvider(currentLayer.id));
+    final showMapGrenadeListPanel =
+        globalSettingsService?.getShowMapGrenadeList() ?? false;
 
     // 搜索数据：从数据库查询该地图所有楼层的道具
     final isar = ref.read(isarProvider);
-    final folderService = FavoriteFolderService(isar);
+    final folderService = _favoriteFolderService;
     final allMapGrenades = <Grenade>[];
+    final allMapGrenadeEntries = <({Grenade grenade, MapLayer layer})>[];
     for (final layer in layers) {
-      allMapGrenades.addAll(isar.grenades
+      final layerGrenades = isar.grenades
           .filter()
           .layer((q) => q.idEqualTo(layer.id))
-          .findAllSync());
+          .findAllSync();
+      allMapGrenades.addAll(layerGrenades);
+      for (final grenade in layerGrenades) {
+        allMapGrenadeEntries.add((grenade: grenade, layer: layer));
+      }
     }
 
     return Scaffold(
@@ -3962,7 +4341,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           ),
           // 底部道具列表面板（选中点位时显示）
           if (_selectedClusterForImpact != null)
-            _buildClusterListPanel(currentLayer.id, isEditMode),
+            _buildClusterListPanel(currentLayer.id, isEditMode)
+          else if (showMapGrenadeListPanel)
+            _buildAllMapGrenadesPanel(
+              allMapGrenadeEntries,
+              isEditMode,
+              currentLayer.id,
+            ),
         ],
       ),
     );
