@@ -254,8 +254,9 @@ Future<void> _packageFilesInIsolate(_PackageParams params) async {
   // 压缩为 .cs2pkg
   final encoder = ZipFileEncoder();
   encoder.create(params.zipPath);
-  encoder.addDirectory(exportDir);
-  encoder.close();
+  // archive 4.x 的 addDirectory/close 是异步方法，必须等待完成，否则会生成空包/半成品包
+  await encoder.addDirectory(exportDir, includeDirName: false);
+  await encoder.close();
 }
 
 class DataService {
@@ -362,7 +363,7 @@ class DataService {
           schemaVersion = 1;
         }
       } else {
-        if (archiveFile.isFile && archiveFile.content != null) {
+        if (archiveFile.isFile) {
           memoryImages[fileName] = archiveFile.content as List<int>;
         }
       }
