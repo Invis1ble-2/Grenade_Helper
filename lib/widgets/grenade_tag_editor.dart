@@ -3,6 +3,35 @@ import '../models/tag.dart';
 import '../services/tag_service.dart';
 import '../widgets/color_picker_widget.dart';
 
+const List<int> _tagDimensionDisplayOrder = <int>[
+  TagDimension.role,
+  TagDimension.phase,
+  TagDimension.spawn,
+  TagDimension.purpose,
+  TagDimension.area,
+  TagDimension.custom,
+];
+
+int _tagDimensionRank(int dimension) {
+  final index = _tagDimensionDisplayOrder.indexOf(dimension);
+  return index >= 0 ? index : _tagDimensionDisplayOrder.length + dimension;
+}
+
+List<Tag> _sortTagsForDisplay(List<Tag> tags) {
+  final sorted = List<Tag>.from(tags);
+  sorted.sort((a, b) {
+    final rankCompare = _tagDimensionRank(a.dimension)
+        .compareTo(_tagDimensionRank(b.dimension));
+    if (rankCompare != 0) return rankCompare;
+
+    final orderCompare = a.sortOrder.compareTo(b.sortOrder);
+    if (orderCompare != 0) return orderCompare;
+
+    return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+  });
+  return sorted;
+}
+
 /// 道具标签编辑器
 class GrenadeTagEditor extends StatefulWidget {
   final int grenadeId;
@@ -104,7 +133,10 @@ class _GrenadeTagEditorState extends State<GrenadeTagEditor> {
             : Wrap(
                 spacing: 8,
                 runSpacing: 8,
-                children: _allTags.map((tag) => _buildTagChip(tag)).toList()),
+                children: _sortTagsForDisplay(_allTags)
+                    .map((tag) => _buildTagChip(tag))
+                    .toList(),
+              ),
       ],
     );
   }
@@ -222,10 +254,11 @@ class GrenadeTagDisplay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (tags.isEmpty) return const SizedBox.shrink();
+    final sortedTags = _sortTagsForDisplay(tags);
     return Wrap(
       spacing: 4,
       runSpacing: 4,
-      children: tags.map((tag) {
+      children: sortedTags.map((tag) {
         final color = Color(tag.colorValue);
         return Container(
           padding: EdgeInsets.symmetric(

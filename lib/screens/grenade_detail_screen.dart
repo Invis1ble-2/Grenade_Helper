@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:grenade_helper/models/tag.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:pro_image_editor/pro_image_editor.dart';
@@ -1952,7 +1953,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
   }
 
   /// 构建标签编辑区域
-  Widget _buildTagSection() {
+  Widget _buildTagSection(bool isEditing) {
     if (grenade == null) return const SizedBox.shrink();
     final isar = ref.read(isarProvider);
     final tagService = TagService(isar);
@@ -1971,12 +1972,47 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
         border: Border.all(
             color: Colors.blueAccent.withValues(alpha: 0.3), width: 1),
       ),
-      child: GrenadeTagEditor(
-        grenadeId: grenade!.id,
-        mapId: map.id,
-        tagService: tagService,
-        onTagsChanged: () => sendOverlayCommand('reload_data'),
-      ),
+      child: isEditing
+          ? GrenadeTagEditor(
+              grenadeId: grenade!.id,
+              mapId: map.id,
+              tagService: tagService,
+              onTagsChanged: () => sendOverlayCommand('reload_data'),
+            )
+          : FutureBuilder<List<Tag>>(
+              future: tagService.getGrenadeTags(grenade!.id),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const SizedBox(
+                    height: 28,
+                    child: Center(
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  );
+                }
+
+                final tags = snapshot.data ?? const <Tag>[];
+                if (tags.isEmpty) {
+                  return const Text(
+                    '未绑定标签',
+                    style: TextStyle(color: Colors.grey, fontSize: 12),
+                  );
+                }
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '标签',
+                      style:
+                          TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 8),
+                    GrenadeTagDisplay(tags: tags),
+                  ],
+                );
+              },
+            ),
     );
   }
 
@@ -2004,7 +2040,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
           // 爆点卡片（编辑模式且非穿点类型时显示）
           if (showImpactCard) _buildImpactPointSection(isEditing),
           // 标签编辑器
-          _buildTagSection(),
+          _buildTagSection(isEditing),
           // 步骤卡片
           ...steps.map((step) => _buildStepCard(step, isEditing)),
         ],
@@ -2016,6 +2052,8 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
         children: [
           // 爆点卡片（有爆点时显示）
           if (showImpactCard) _buildImpactPointSection(isEditing),
+          // 标签（只读展示）
+          _buildTagSection(isEditing),
           // 步骤卡片
           ...steps.map((step) => _buildStepCard(step, isEditing)),
         ],

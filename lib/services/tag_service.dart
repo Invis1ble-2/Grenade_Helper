@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:isar_community/isar.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/tag.dart';
 import '../models/grenade_tag.dart';
 import '../data/map_area_presets.dart';
@@ -49,8 +50,62 @@ class EnsureSystemTagSummary {
 
 class TagService {
   final Isar isar;
+  static const String _deletedSystemTagPrefsPrefix =
+      'tag_service.deleted_system_tag_uuids.v1';
+  static Future<SharedPreferences>? _prefsFuture;
 
   TagService(this.isar);
+
+  static Future<SharedPreferences> _prefs() {
+    return _prefsFuture ??= SharedPreferences.getInstance();
+  }
+
+  String _deletedSystemTagPrefsKey(int mapId) {
+    return '$_deletedSystemTagPrefsPrefix.$mapId';
+  }
+
+  String _normalizeTagUuid(String value) {
+    return value.trim().toLowerCase();
+  }
+
+  Future<Set<String>> _loadDeletedSystemTagUuids(int mapId) async {
+    final prefs = await _prefs();
+    final values = prefs.getStringList(_deletedSystemTagPrefsKey(mapId)) ??
+        const <String>[];
+    return values.map(_normalizeTagUuid).where((e) => e.isNotEmpty).toSet();
+  }
+
+  Future<void> _markDeletedSystemTagUuid(int mapId, String tagUuid) async {
+    final normalized = _normalizeTagUuid(tagUuid);
+    if (normalized.isEmpty) return;
+
+    final prefs = await _prefs();
+    final key = _deletedSystemTagPrefsKey(mapId);
+    final current = (prefs.getStringList(key) ?? const <String>[])
+        .map(_normalizeTagUuid)
+        .where((e) => e.isNotEmpty)
+        .toSet();
+    if (!current.add(normalized)) return;
+    await prefs.setStringList(key, current.toList()..sort());
+  }
+
+  Future<void> _clearDeletedSystemTagUuid(int mapId, String tagUuid) async {
+    final normalized = _normalizeTagUuid(tagUuid);
+    if (normalized.isEmpty) return;
+
+    final prefs = await _prefs();
+    final key = _deletedSystemTagPrefsKey(mapId);
+    final current = (prefs.getStringList(key) ?? const <String>[])
+        .map(_normalizeTagUuid)
+        .where((e) => e.isNotEmpty)
+        .toSet();
+    if (!current.remove(normalized)) return;
+    if (current.isEmpty) {
+      await prefs.remove(key);
+      return;
+    }
+    await prefs.setStringList(key, current.toList()..sort());
+  }
 
   /// 初始化地图的系统标签
   Future<void> initializeSystemTags(int mapId, String mapName) async {
@@ -132,12 +187,17 @@ class TagService {
         await isar.tags.filter().mapIdEqualTo(map.id).findAll();
     final byAnyKey = <String, Tag>{};
     final bySystemKey = <String, Tag>{};
+    final bySystemUuid = <String, Tag>{};
     int nextOrder = 0;
     for (final tag in existingTags) {
       final key = _systemTagKey(tag.dimension, tag.name);
       byAnyKey.putIfAbsent(key, () => tag);
       if (tag.isSystem) {
         bySystemKey.putIfAbsent(key, () => tag);
+        final normalizedUuid = _normalizeTagUuid(tag.tagUuid);
+        if (normalizedUuid.isNotEmpty) {
+          bySystemUuid.putIfAbsent(normalizedUuid, () => tag);
+        }
       }
       if (tag.sortOrder >= nextOrder) {
         nextOrder = tag.sortOrder + 1;
@@ -146,17 +206,29 @@ class TagService {
 
     final toCreate = <Tag>[];
     final toUpdate = <Tag>[];
+    final requiredUuids = <String>{};
     final requiredKeys =
         required.map((e) => _systemTagKey(e.dimension, e.name)).toSet();
+    final deletedSystemTagUuids = await _loadDeletedSystemTagUuids(map.id);
     for (final def in required) {
       final key = _systemTagKey(def.dimension, def.name);
-      final existing = bySystemKey[key] ?? byAnyKey[key];
       final expectedUuid = TagUuidService.buildSystemTagUuid(
         mapName: mapName,
         mapIconPath: map.iconPath,
         dimension: def.dimension,
         tagName: def.name,
       );
+      final normalizedExpectedUuid = _normalizeTagUuid(expectedUuid);
+      requiredUuids.add(normalizedExpectedUuid);
+
+      final uuidMatched = bySystemUuid[normalizedExpectedUuid];
+      final keyMatched = bySystemKey[key] ?? byAnyKey[key];
+      final existing = uuidMatched ?? keyMatched;
+
+      if (uuidMatched == null &&
+          deletedSystemTagUuids.contains(normalizedExpectedUuid)) {
+        continue;
+      }
 
       if (existing == null) {
         final created = Tag(
@@ -179,17 +251,21 @@ class TagService {
         existing.isSystem = true;
         changed = true;
       }
-      if (existing.colorValue != def.colorValue) {
+      final preserveUserOverrides = uuidMatched != null &&
+          _systemTagKey(existing.dimension, existing.name) != key;
+      if (!preserveUserOverrides && existing.colorValue != def.colorValue) {
         existing.colorValue = def.colorValue;
         changed = true;
       }
-      if (existing.tagUuid.trim() != expectedUuid) {
+      if (!preserveUserOverrides && existing.tagUuid.trim() != expectedUuid) {
         existing.tagUuid = expectedUuid;
         changed = true;
       }
       if (changed) {
         toUpdate.add(existing);
       }
+
+      await _clearDeletedSystemTagUuid(map.id, expectedUuid);
     }
 
     final staleDeleteIds = <int>{};
@@ -198,7 +274,9 @@ class TagService {
       final staleSystemTags = existingTags.where((tag) {
         if (!tag.isSystem) return false;
         final key = _systemTagKey(tag.dimension, tag.name);
-        return !requiredKeys.contains(key);
+        final normalizedUuid = _normalizeTagUuid(tag.tagUuid);
+        return !requiredKeys.contains(key) &&
+            !requiredUuids.contains(normalizedUuid);
       });
 
       for (final stale in staleSystemTags) {
@@ -739,9 +817,49 @@ class TagService {
 
   /// 更新标签
   Future<void> updateTag(Tag tag) async {
+    final original = await isar.tags.get(tag.id);
+    String? deletedSystemUuidToMark;
+    if (original != null && original.isSystem) {
+      final renamed = original.name.trim() != tag.name.trim();
+      final dimensionChanged = original.dimension != tag.dimension;
+      if (renamed || dimensionChanged) {
+        deletedSystemUuidToMark = original.tagUuid;
+        tag.isSystem = false;
+        tag.tagUuid = TagUuidService.newRandomUuid();
+      }
+    }
+
     await isar.writeTxn(() async {
       await isar.tags.put(tag);
+
+      final linkedAreas =
+          await isar.mapAreas.filter().tagIdEqualTo(tag.id).findAll();
+      if (linkedAreas.isEmpty) return;
+
+      final areasToUpdate = <MapArea>[];
+      for (final area in linkedAreas) {
+        var changed = false;
+        if (area.name != tag.name) {
+          area.name = tag.name;
+          changed = true;
+        }
+        if (area.colorValue != tag.colorValue) {
+          area.colorValue = tag.colorValue;
+          changed = true;
+        }
+        if (changed) {
+          areasToUpdate.add(area);
+        }
+      }
+
+      if (areasToUpdate.isNotEmpty) {
+        await isar.mapAreas.putAll(areasToUpdate);
+      }
     });
+
+    if (deletedSystemUuidToMark != null) {
+      await _markDeletedSystemTagUuid(tag.mapId, deletedSystemUuidToMark);
+    }
   }
 
   /// 为历史标签补齐 UUID
@@ -773,14 +891,17 @@ class TagService {
       String candidate = current;
 
       if (tag.isSystem) {
-        final map = mapById[tag.mapId];
-        if (map != null) {
-          candidate = TagUuidService.buildSystemTagUuid(
-            mapName: map.name,
-            mapIconPath: map.iconPath,
-            dimension: tag.dimension,
-            tagName: tag.name,
-          );
+        final needsSystemUuid = current.isEmpty || occupied.contains(current);
+        if (needsSystemUuid) {
+          final map = mapById[tag.mapId];
+          if (map != null) {
+            candidate = TagUuidService.buildSystemTagUuid(
+              mapName: map.name,
+              mapIconPath: map.iconPath,
+              dimension: tag.dimension,
+              tagName: tag.name,
+            );
+          }
         }
       }
 
@@ -807,6 +928,7 @@ class TagService {
   /// 删除标签
   /// [deleteRelatedAreas] 为 true 时同时删除绑定到该标签的区域几何数据。
   Future<void> deleteTag(int tagId, {bool deleteRelatedAreas = false}) async {
+    final tag = await isar.tags.get(tagId);
     await isar.writeTxn(() async {
       await isar.grenadeTags.filter().tagIdEqualTo(tagId).deleteAll();
       if (deleteRelatedAreas) {
@@ -814,6 +936,10 @@ class TagService {
       }
       await isar.tags.delete(tagId);
     });
+
+    if (tag != null && tag.isSystem) {
+      await _markDeletedSystemTagUuid(tag.mapId, tag.tagUuid);
+    }
   }
 
   /// 为道具添加标签
