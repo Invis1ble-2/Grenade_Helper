@@ -1,7 +1,7 @@
 name: grenade_helper
 description: A CS2 grenade helper App.
 publish_to: 'none'
-version: 1.4.0+19
+version: 1.5.0+20
 
 environment:
   sdk: '>=3.2.0 <4.0.0'
@@ -59,10 +59,12 @@ dependencies:
 
   tray_manager: ^0.5.2
   shared_preferences: ^2.5.4   # 用户设置存储
+  bonsoir: ^6.0.1
   desktop_drop: ^0.7.0
   desktop_multi_window: ^0.3.0 # 多窗口支持
   font_awesome_flutter: ^10.12.0
   pasteboard: ^0.4.0
+  crypto: ^3.0.7
 
 
 

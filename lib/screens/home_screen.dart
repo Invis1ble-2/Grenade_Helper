@@ -13,6 +13,7 @@ import 'import_screen.dart';
 import 'share_screen.dart';
 import 'settings_screen.dart';
 import 'about_screen.dart';
+import 'lan_sync_screen.dart';
 import '../widgets/spring_festival_fu.dart';
 import '../widgets/spring_festival_banner.dart';
 
@@ -206,6 +207,19 @@ class HomeScreen extends ConsumerWidget {
                           context,
                           MaterialPageRoute(
                               builder: (_) => const ShareScreen()));
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.wifi_tethering),
+                    title: const Text("局域网同步"),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const LanSyncScreen(),
+                        ),
+                      );
                     },
                   ),
                   ListTile(

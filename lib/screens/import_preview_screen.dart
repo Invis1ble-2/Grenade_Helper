@@ -373,6 +373,8 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
           _buildTypeFilter(),
           // 全选栏
           _buildSelectAllBar(selectedInCurrent, grenades.length),
+          if (_preview != null && _preview!.schemaVersion >= 2)
+            _buildPackageMetaBar(),
           // 列表
           Expanded(
             child: grenades.isEmpty
@@ -458,6 +460,45 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
             style: TextStyle(color: Colors.grey[600], fontSize: 12),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildPackageMetaBar() {
+    final preview = _preview!;
+    final chips = <String>[
+      '协议 v${preview.schemaVersion}',
+      '标签 ${preview.tagsByUuid.length}',
+      '区域 ${preview.areas.length}',
+    ];
+    if (preview.schemaVersion >= 3) {
+      chips.add('收藏夹 ${preview.favoriteFolders.length}');
+      chips.add('爆点分组 ${preview.impactGroups.length}');
+    }
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: chips
+            .map(
+              (text) => Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(text, style: const TextStyle(fontSize: 12)),
+              ),
+            )
+            .toList(),
       ),
     );
   }

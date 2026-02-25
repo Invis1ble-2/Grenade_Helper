@@ -51,5 +51,11 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>用于发现同一局域网内的设备并进行道具数据同步。</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_grenadehelper._tcp</string>
+	</array>
 </dict>
 </plist>
