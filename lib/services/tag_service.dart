@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:isar_community/isar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/tag.dart';
@@ -8,6 +9,7 @@ import '../data/map_area_presets.dart';
 import '../data/builtin_area_region_presets.dart';
 import '../models/map_area.dart';
 import '../models.dart';
+import 'lan_sync/lan_sync_local_store.dart';
 import 'tag_uuid_service.dart';
 
 class DefaultAreaTagReimportSummary {
@@ -66,6 +68,16 @@ class TagService {
 
   String _normalizeTagUuid(String value) {
     return value.trim().toLowerCase();
+  }
+
+  Future<void> _touchGrenadeForTagRelationChange(int grenadeId) async {
+    final grenade = await isar.grenades.get(grenadeId);
+    if (grenade == null) return;
+    grenade.updatedAt = DateTime.now();
+    grenade.hasLocalEdits = true;
+    await isar.writeTxn(() async {
+      await isar.grenades.put(grenade);
+    });
   }
 
   Future<Set<String>> _loadDeletedSystemTagUuids(int mapId) async {
@@ -929,6 +941,55 @@ class TagService {
   /// [deleteRelatedAreas] 为 true 时同时删除绑定到该标签的区域几何数据。
   Future<void> deleteTag(int tagId, {bool deleteRelatedAreas = false}) async {
     final tag = await isar.tags.get(tagId);
+    final tombstones = <LanSyncEntityTombstoneEntry>[];
+    if (tag != null) {
+      final map = await isar.gameMaps.get(tag.mapId);
+      final mapName = map?.name.trim() ?? '';
+      final tagUuid = tag.tagUuid.trim();
+      if (mapName.isNotEmpty && tagUuid.isNotEmpty) {
+        tombstones.add(
+          LanSyncEntityTombstoneEntry(
+            entityType: LanSyncEntityTombstoneType.tag,
+            entityKey: tagUuid,
+            mapName: mapName,
+            deletedAt: DateTime.now().millisecondsSinceEpoch,
+            payload: {
+              'tagUuid': tagUuid,
+              'tagName': tag.name,
+              'dimension': tag.dimension,
+              'colorValue': tag.colorValue,
+              'deleteRelatedAreas': deleteRelatedAreas,
+            },
+          ),
+        );
+      }
+      if (deleteRelatedAreas && map != null && tagUuid.isNotEmpty) {
+        await map.layers.load();
+        final layerNameById = <int, String>{
+          for (final layer in map.layers) layer.id: layer.name,
+        };
+        final areas =
+            await isar.mapAreas.filter().tagIdEqualTo(tagId).findAll();
+        for (final area in areas) {
+          final layerName = area.layerId == null
+              ? 'Default'
+              : (layerNameById[area.layerId!] ?? 'Default');
+          tombstones.add(
+            LanSyncEntityTombstoneEntry(
+              entityType: LanSyncEntityTombstoneType.area,
+              entityKey: '$tagUuid|${layerName.trim().toLowerCase()}',
+              mapName: mapName,
+              deletedAt: DateTime.now().millisecondsSinceEpoch,
+              payload: {
+                'tagUuid': tagUuid,
+                'tagName': tag.name,
+                'layerName': layerName,
+              },
+            ),
+          );
+        }
+      }
+    }
     await isar.writeTxn(() async {
       await isar.grenadeTags.filter().tagIdEqualTo(tagId).deleteAll();
       if (deleteRelatedAreas) {
@@ -937,6 +998,9 @@ class TagService {
       await isar.tags.delete(tagId);
     });
 
+    if (tombstones.isNotEmpty) {
+      await LanSyncLocalStore().upsertEntityTombstones(tombstones);
+    }
     if (tag != null && tag.isSystem) {
       await _markDeletedSystemTagUuid(tag.mapId, tag.tagUuid);
     }
@@ -955,18 +1019,24 @@ class TagService {
       await isar.grenadeTags
           .put(GrenadeTag(grenadeId: grenadeId, tagId: tagId));
     });
+    await _touchGrenadeForTagRelationChange(grenadeId);
   }
 
   /// 移除道具标签
   Future<void> removeTagFromGrenade(int grenadeId, int tagId) async {
+    var changed = false;
     await isar.writeTxn(() async {
-      await isar.grenadeTags
+      final removed = await isar.grenadeTags
           .filter()
           .grenadeIdEqualTo(grenadeId)
           .and()
           .tagIdEqualTo(tagId)
           .deleteAll();
+      changed = removed > 0;
     });
+    if (changed) {
+      await _touchGrenadeForTagRelationChange(grenadeId);
+    }
   }
 
   /// 获取道具的所有标签ID
@@ -1017,13 +1087,21 @@ class TagService {
 
   /// 批量设置道具标签
   Future<void> setGrenadeTags(int grenadeId, Set<int> tagIds) async {
+    final existingLinks =
+        await isar.grenadeTags.filter().grenadeIdEqualTo(grenadeId).findAll();
+    final existingTagIds = existingLinks.map((e) => e.tagId).toSet();
+    final normalizedTagIds = Set<int>.from(tagIds);
+    if (setEquals(existingTagIds, normalizedTagIds)) {
+      return;
+    }
     await isar.writeTxn(() async {
       await isar.grenadeTags.filter().grenadeIdEqualTo(grenadeId).deleteAll();
-      for (final tagId in tagIds) {
+      for (final tagId in normalizedTagIds) {
         await isar.grenadeTags
             .put(GrenadeTag(grenadeId: grenadeId, tagId: tagId));
       }
     });
+    await _touchGrenadeForTagRelationChange(grenadeId);
   }
 }
 

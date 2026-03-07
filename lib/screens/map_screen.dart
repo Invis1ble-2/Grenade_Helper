@@ -6332,16 +6332,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     );
     if (confirm == true) {
       final isar = ref.read(isarProvider);
-      // 将属于该分组的投掷点的 impactGroupId 设为 null
-      final grenades =
-          await isar.grenades.filter().impactGroupIdEqualTo(group.id).findAll();
-      await isar.writeTxn(() async {
-        for (final g in grenades) {
-          g.impactGroupId = null;
-          await isar.grenades.put(g);
-        }
-        await isar.impactGroups.delete(group.id);
-      });
+      await DataService(isar).deleteImpactGroup(group);
       setPanelState?.call(() {});
       setState(() {});
     }

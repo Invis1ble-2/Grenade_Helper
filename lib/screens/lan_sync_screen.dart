@@ -14,6 +14,8 @@ import '../services/lan_sync/lan_sync_discovery_service.dart';
 import '../services/lan_sync/lan_sync_local_store.dart';
 import '../services/lan_sync/lan_sync_receive_controller.dart';
 import '../services/lan_sync/lan_sync_transfer_client.dart';
+import '../widgets/selectable_grenade_list_item.dart';
+import 'grenade_detail_screen.dart';
 import 'import_preview_screen.dart';
 
 enum _LanSendScope { all, map, grenades }
@@ -48,6 +50,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
   final Set<String> _handledIncomingRequestDialogs = <String>{};
   final Set<String> _autoOpenedImportTaskIds = <String>{};
   bool _isAutoOpeningImportPreview = false;
+  bool _isLoadingSyncDebug = false;
 
   @override
   void initState() {
@@ -200,10 +203,25 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
   Future<void> _loadLocalState() async {
     final nodeId = await _localStore.loadOrCreateStableNodeId();
     _receiveController.setLocalNodeId(nodeId);
+    await _refreshSyncDebugInfo();
     if (!mounted) return;
     setState(() {
       _isLoadingLocal = false;
     });
+  }
+
+  Future<void> _refreshSyncDebugInfo() async {
+    if (_isLoadingSyncDebug) return;
+    _isLoadingSyncDebug = true;
+    try {
+      await _localStore.cleanupSyncTombstones();
+      await _localStore.loadBaselineDebugPeers();
+      await _localStore.loadTombstoneStats();
+      if (!mounted) return;
+      setState(() {});
+    } finally {
+      _isLoadingSyncDebug = false;
+    }
   }
 
   Future<void> _appendHistory({
@@ -428,7 +446,8 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
 
   Future<void> _pickGrenadesForSend() async {
     final isar = ref.read(isarProvider);
-    final allGrenades = isar.grenades.where().findAllSync();
+    final allGrenades = isar.grenades.where().findAllSync()
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
     if (allGrenades.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -436,78 +455,11 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       return;
     }
 
-    final selectedIds = _selectedGrenadesForSend.map((e) => e.id).toSet();
-    final result = await showDialog<List<int>>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setLocalState) => AlertDialog(
-          title: const Text('选择道具'),
-          content: SizedBox(
-            width: 520,
-            height: 420,
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    TextButton(
-                      onPressed: () => setLocalState(() {
-                        selectedIds
-                          ..clear()
-                          ..addAll(allGrenades.map((e) => e.id));
-                      }),
-                      child: const Text('全选'),
-                    ),
-                    TextButton(
-                      onPressed: () => setLocalState(selectedIds.clear),
-                      child: const Text('清空'),
-                    ),
-                    const Spacer(),
-                    Text('已选 ${selectedIds.length} 个'),
-                  ],
-                ),
-                const Divider(height: 1),
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: allGrenades.length,
-                    itemBuilder: (ctx2, index) {
-                      final g = allGrenades[index];
-                      g.layer.loadSync();
-                      g.layer.value?.map.loadSync();
-                      final mapName = g.layer.value?.map.value?.name ?? '-';
-                      final layerName = g.layer.value?.name ?? '-';
-                      return CheckboxListTile(
-                        dense: true,
-                        value: selectedIds.contains(g.id),
-                        title: Text(
-                          g.title.isEmpty ? '(未命名道具)' : g.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        subtitle: Text('$mapName / $layerName'),
-                        onChanged: (v) => setLocalState(() {
-                          if (v == true) {
-                            selectedIds.add(g.id);
-                          } else {
-                            selectedIds.remove(g.id);
-                          }
-                        }),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, selectedIds.toList()),
-              child: const Text('确定'),
-            ),
-          ],
+    final result = await Navigator.of(context).push<List<int>>(
+      MaterialPageRoute(
+        builder: (_) => _LanSyncGrenadePickerScreen(
+          grenades: allGrenades,
+          initialSelectedIds: _selectedGrenadesForSend.map((e) => e.id).toSet(),
         ),
       ),
     );
@@ -634,10 +586,12 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
     final scopeMapKeys = _resolveScopeMapKeys(isar);
     final scopeMapList = scopeMapKeys.toList(growable: false);
     final peerNodeId = _resolvePeerNodeId(originalHost, port);
+    Map<String, LanSyncAckedMapBaselineEntry> ackedBaselines = const {};
     Map<String, String> baseMapBaselineIds = const {};
     Map<String, Map<String, String>> currentMapDigests = const {};
     List<Grenade>? incrementalGrenades;
     List<PackageGrenadeTombstoneData> incrementalTombstones = const [];
+    List<PackageEntityTombstoneData> incrementalEntityTombstones = const [];
     if (_sendMode == _LanSyncMode.incremental) {
       if (_sendScope == _LanSendScope.grenades) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -657,10 +611,14 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
         );
         return;
       }
-      baseMapBaselineIds = await _localStore.loadAckedMapBaselineIds(
+      ackedBaselines = await _localStore.loadAckedMapBaselineEntries(
         peerNodeId: peerNodeId,
         mapKeys: scopeMapList,
       );
+      baseMapBaselineIds = {
+        for (final entry in ackedBaselines.entries)
+          entry.key: entry.value.baselineId,
+      };
       if (baseMapBaselineIds.length != scopeMapList.length) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -735,7 +693,26 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
           })
           .whereType<PackageGrenadeTombstoneData>()
           .toList(growable: false);
-      if (changedUniqueIds.isEmpty && incrementalTombstones.isEmpty) {
+      final entityTombstones = await _localStore.loadEntityTombstones(
+        mapKeys: scopeMapList,
+      );
+      incrementalEntityTombstones = entityTombstones.values
+          .where((entry) {
+            final baseline = ackedBaselines[entry.mapName];
+            if (baseline == null) return false;
+            return entry.deletedAt > baseline.updatedAtMs;
+          })
+          .map((entry) => PackageEntityTombstoneData(
+                entityType: entry.entityType,
+                entityKey: entry.entityKey,
+                mapName: entry.mapName,
+                deletedAt: entry.deletedAt,
+                payload: entry.payload,
+              ))
+          .toList(growable: false);
+      if (changedUniqueIds.isEmpty &&
+          incrementalTombstones.isEmpty &&
+          incrementalEntityTombstones.isEmpty) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('当前范围没有可同步的增量变更')),
@@ -770,6 +747,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
                 ? incrementalGrenades
                 : null,
             grenadeTombstones: incrementalTombstones,
+            entityTombstones: incrementalEntityTombstones,
           );
           break;
         case _LanSendScope.map:
@@ -782,6 +760,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
                 ? incrementalGrenades
                 : null,
             grenadeTombstones: incrementalTombstones,
+            entityTombstones: incrementalEntityTombstones,
           );
           break;
         case _LanSendScope.grenades:
@@ -789,6 +768,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
             scopeType: 2,
             explicitGrenades: _selectedGrenadesForSend,
             grenadeTombstones: const [],
+            entityTombstones: const [],
           );
           break;
       }
@@ -824,7 +804,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
         syncEnvelopeId: syncEnvelopeId,
         senderNodeId: _receiveController.localNodeId,
         receiverNodeId: peerNodeId.contains(':') ? '' : peerNodeId,
-        packageSchemaVersion: 4,
+        packageSchemaVersion: 5,
         baseMapBaselineIds: baseMapBaselineIds,
       );
       if (!reqResp.ok || reqResp.requestId.trim().isEmpty) {
@@ -957,6 +937,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
           mapDigests: scopedDigests,
           baselineId: nextBaselineId,
         );
+        await _refreshSyncDebugInfo();
       }
 
       await _appendHistory(
@@ -1242,13 +1223,6 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              '本机节点ID：${_receiveController.localNodeId}',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-            ),
-            const SizedBox(height: 8),
-            Text(
               '本机地址：',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
@@ -1516,14 +1490,13 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
                             onSelected: (_) =>
                                 setState(() => _sendScope = _LanSendScope.map),
                           ),
-                          ChoiceChip(
-                            label: const Text('按道具'),
-                            selected: _sendScope == _LanSendScope.grenades,
-                            onSelected: _sendMode == _LanSyncMode.incremental
-                                ? null
-                                : (_) => setState(
-                                    () => _sendScope = _LanSendScope.grenades),
-                          ),
+                          if (_sendMode != _LanSyncMode.incremental)
+                            ChoiceChip(
+                              label: const Text('按道具'),
+                              selected: _sendScope == _LanSendScope.grenades,
+                              onSelected: (_) => setState(
+                                  () => _sendScope = _LanSendScope.grenades),
+                            ),
                         ],
                       ),
                       const SizedBox(height: 8),
@@ -1536,13 +1509,14 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
                             icon: const Icon(Icons.map_outlined),
                             label: const Text('选择地图'),
                           ),
-                          OutlinedButton.icon(
-                            onPressed: _pickGrenadesForSend,
-                            icon: const Icon(Icons.list_alt),
-                            label: Text(_selectedGrenadesForSend.isEmpty
-                                ? '选择道具'
-                                : '已选 ${_selectedGrenadesForSend.length} 个道具'),
-                          ),
+                          if (_sendMode != _LanSyncMode.incremental)
+                            OutlinedButton.icon(
+                              onPressed: _pickGrenadesForSend,
+                              icon: const Icon(Icons.list_alt),
+                              label: Text(_selectedGrenadesForSend.isEmpty
+                                  ? '选择道具'
+                                  : '已选 ${_selectedGrenadesForSend.length} 个道具'),
+                            ),
                         ],
                       ),
                       const SizedBox(height: 8),
@@ -1707,6 +1681,226 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
                 _buildReceiveTasks(colorScheme),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LanSyncGrenadePickerScreen extends StatefulWidget {
+  final List<Grenade> grenades;
+  final Set<int> initialSelectedIds;
+
+  const _LanSyncGrenadePickerScreen({
+    required this.grenades,
+    required this.initialSelectedIds,
+  });
+
+  @override
+  State<_LanSyncGrenadePickerScreen> createState() =>
+      _LanSyncGrenadePickerScreenState();
+}
+
+class _LanSyncGrenadePickerScreenState
+    extends State<_LanSyncGrenadePickerScreen> {
+  late final Set<int> _selectedIds;
+  int? _filterType;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedIds = {...widget.initialSelectedIds};
+  }
+
+  List<Grenade> get _visibleGrenades {
+    if (_filterType == null) return widget.grenades;
+    return widget.grenades
+        .where((grenade) => grenade.type == _filterType)
+        .toList(growable: false);
+  }
+
+  void _toggleSelection(int id) {
+    setState(() {
+      if (_selectedIds.contains(id)) {
+        _selectedIds.remove(id);
+      } else {
+        _selectedIds.add(id);
+      }
+    });
+  }
+
+  void _toggleSelectAllVisible() {
+    final visibleIds = _visibleGrenades.map((e) => e.id).toSet();
+    final allSelected =
+        visibleIds.isNotEmpty && visibleIds.every(_selectedIds.contains);
+    setState(() {
+      if (allSelected) {
+        _selectedIds.removeAll(visibleIds);
+      } else {
+        _selectedIds.addAll(visibleIds);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final visibleGrenades = _visibleGrenades;
+    final selectedInVisible =
+        visibleGrenades.where((e) => _selectedIds.contains(e.id)).length;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('选择道具'),
+        actions: [
+          if (widget.grenades.isNotEmpty)
+            TextButton.icon(
+              onPressed: _toggleSelectAllVisible,
+              icon: Icon(
+                visibleGrenades.isNotEmpty &&
+                        selectedInVisible == visibleGrenades.length
+                    ? Icons.deselect
+                    : Icons.select_all,
+                size: 18,
+              ),
+              label: Text(
+                visibleGrenades.isNotEmpty &&
+                        selectedInVisible == visibleGrenades.length
+                    ? '取消全选'
+                    : '全选',
+              ),
+            ),
+        ],
+      ),
+      body: Column(
+        children: [
+          _buildTypeFilter(),
+          _buildSelectionBar(selectedInVisible, visibleGrenades.length),
+          Expanded(
+            child: visibleGrenades.isEmpty
+                ? const Center(
+                    child: Text(
+                      '当前筛选下没有道具',
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.all(8),
+                    itemCount: visibleGrenades.length,
+                    itemBuilder: (context, index) {
+                      final grenade = visibleGrenades[index];
+                      final isSelected = _selectedIds.contains(grenade.id);
+                      return SelectableGrenadeListItem(
+                        grenade: grenade,
+                        selected: isSelected,
+                        onChanged: (_) => _toggleSelection(grenade.id),
+                        onTap: () => _toggleSelection(grenade.id),
+                        onPreview: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => GrenadeDetailScreen(
+                                grenadeId: grenade.id,
+                                isEditing: false,
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+      bottomNavigationBar: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.08),
+              blurRadius: 6,
+              offset: const Offset(0, -2),
+            ),
+          ],
+        ),
+        child: SafeArea(
+          child: FilledButton.icon(
+            onPressed: () => Navigator.pop(context, _selectedIds.toList()),
+            icon: const Icon(Icons.check),
+            label: Text('确认选择 (${_selectedIds.length})'),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTypeFilter() {
+    const types = [
+      (null, '全部', Icons.apps),
+      (GrenadeType.smoke, '烟雾', Icons.cloud_outlined),
+      (GrenadeType.flash, '闪光', Icons.flash_on_outlined),
+      (GrenadeType.molotov, '燃烧', Icons.local_fire_department_outlined),
+      (GrenadeType.he, '手雷', Icons.trip_origin),
+      (GrenadeType.wallbang, '穿点', Icons.grid_4x4),
+    ];
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: types.map((item) {
+            final isSelected = _filterType == item.$1;
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: FilterChip(
+                selected: isSelected,
+                onSelected: (_) => setState(() => _filterType = item.$1),
+                label: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      item.$3,
+                      size: 16,
+                      color: isSelected ? Colors.white : Colors.grey,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(item.$2),
+                  ],
+                ),
+                selectedColor: Colors.orange,
+                checkmarkColor: Colors.white,
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSelectionBar(int selected, int total) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Row(
+        children: [
+          Checkbox(
+            value: total > 0 && selected == total,
+            tristate: selected > 0 && selected < total,
+            onChanged: (_) => _toggleSelectAllVisible(),
+            activeColor: Colors.orange,
+          ),
+          Text(
+            '当前筛选全选 ($selected/$total)',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const Spacer(),
+          Text(
+            '总计已选 ${_selectedIds.length} 个',
+            style: TextStyle(color: Colors.grey[600], fontSize: 12),
           ),
         ],
       ),

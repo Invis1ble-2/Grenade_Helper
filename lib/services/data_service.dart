@@ -14,6 +14,7 @@ import '../models.dart';
 import '../models/tag.dart';
 import '../models/map_area.dart';
 import '../models/grenade_tag.dart';
+import 'favorite_folder_service.dart';
 import 'lan_sync/lan_sync_local_store.dart';
 
 /// 导入状态
@@ -55,6 +56,7 @@ class PackagePreviewResult {
   final List<PackageFavoriteFolderData> favoriteFolders;
   final List<PackageImpactGroupData> impactGroups;
   final List<PackageGrenadeTombstoneData> grenadeTombstones;
+  final List<PackageEntityTombstoneData> entityTombstones;
 
   PackagePreviewResult({
     required this.grenadesByMap,
@@ -66,6 +68,7 @@ class PackagePreviewResult {
     this.favoriteFolders = const [],
     this.impactGroups = const [],
     this.grenadeTombstones = const [],
+    this.entityTombstones = const [],
   });
 
   bool get isMultiMap => mapNames.length > 1;
@@ -82,6 +85,11 @@ class PackagePreviewResult {
       ordered.add(trimmed);
     }
     for (final tombstone in grenadeTombstones) {
+      final trimmed = tombstone.mapName.trim();
+      if (trimmed.isEmpty || !seen.add(trimmed)) continue;
+      ordered.add(trimmed);
+    }
+    for (final tombstone in entityTombstones) {
       final trimmed = tombstone.mapName.trim();
       if (trimmed.isEmpty || !seen.add(trimmed)) continue;
       ordered.add(trimmed);
@@ -114,6 +122,44 @@ class PackageGrenadeTombstoneData {
         'uniqueId': uniqueId,
         'mapName': mapName,
         'deletedAt': deletedAt,
+      };
+}
+
+class PackageEntityTombstoneData {
+  final String entityType;
+  final String entityKey;
+  final String mapName;
+  final int deletedAt;
+  final Map<String, dynamic> payload;
+
+  const PackageEntityTombstoneData({
+    required this.entityType,
+    required this.entityKey,
+    required this.mapName,
+    required this.deletedAt,
+    this.payload = const {},
+  });
+
+  factory PackageEntityTombstoneData.fromJson(Map<String, dynamic> json) {
+    final rawPayload = json['payload'];
+    return PackageEntityTombstoneData(
+      entityType: (json['entityType'] as String? ?? '').trim(),
+      entityKey: (json['entityKey'] as String? ?? '').trim(),
+      mapName: (json['mapName'] as String? ?? '').trim(),
+      deletedAt:
+          json['deletedAt'] as int? ?? DateTime.now().millisecondsSinceEpoch,
+      payload: rawPayload is Map
+          ? Map<String, dynamic>.from(rawPayload)
+          : const <String, dynamic>{},
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'entityType': entityType,
+        'entityKey': entityKey,
+        'mapName': mapName,
+        'deletedAt': deletedAt,
+        'payload': payload,
       };
 }
 
@@ -327,6 +373,37 @@ class ImportConflictBundle {
   });
 }
 
+class ImportConflictNotice {
+  final List<GrenadePreviewItem> newerLocalGrenades;
+  final List<GrenadePreviewItem> newerLocalDeleteConflicts;
+  final List<String> newerLocalFavoriteFolderDeletes;
+
+  const ImportConflictNotice({
+    this.newerLocalGrenades = const [],
+    this.newerLocalDeleteConflicts = const [],
+    this.newerLocalFavoriteFolderDeletes = const [],
+  });
+
+  bool get hasConflicts =>
+      newerLocalGrenades.isNotEmpty ||
+      newerLocalDeleteConflicts.isNotEmpty ||
+      newerLocalFavoriteFolderDeletes.isNotEmpty;
+}
+
+class EntityTombstoneApplyResult {
+  final int deletedCount;
+  final int skippedCount;
+  final Map<String, int> deletedByType;
+  final Map<String, int> skippedByType;
+
+  const EntityTombstoneApplyResult({
+    required this.deletedCount,
+    required this.skippedCount,
+    this.deletedByType = const {},
+    this.skippedByType = const {},
+  });
+}
+
 /// isolate 中执行的打包参数
 class _PackageParams {
   final String exportDirPath;
@@ -432,6 +509,7 @@ class _LanSyncExportBundle {
   final List<Map<String, dynamic>> favoriteFolders;
   final List<Map<String, dynamic>> impactGroups;
   final List<Map<String, dynamic>> grenadeTombstones;
+  final List<Map<String, dynamic>> entityTombstones;
   final Set<String> filesToZip;
 
   const _LanSyncExportBundle({
@@ -441,17 +519,19 @@ class _LanSyncExportBundle {
     required this.favoriteFolders,
     required this.impactGroups,
     required this.grenadeTombstones,
+    required this.entityTombstones,
     required this.filesToZip,
   });
 
   Map<String, dynamic> toJson() => {
-        'schemaVersion': 4,
+        'schemaVersion': 5,
         'grenades': grenades,
         'tags': tags,
         'areas': areas,
         'favoriteFolders': favoriteFolders,
         'impactGroups': impactGroups,
         'grenadeTombstones': grenadeTombstones,
+        'entityTombstones': entityTombstones,
       };
 }
 
@@ -692,6 +772,58 @@ class DataService {
     return deleteGrenades(grenades);
   }
 
+  Future<void> deleteImpactGroup(
+    ImpactGroup group, {
+    bool recordSyncTombstone = true,
+  }) async {
+    MapLayer? layer;
+    GameMap? map;
+    if (recordSyncTombstone) {
+      layer = await isar.mapLayers.get(group.layerId);
+      if (layer != null) {
+        await layer.map.load();
+        map = layer.map.value;
+      }
+    }
+
+    final grenades =
+        await isar.grenades.filter().impactGroupIdEqualTo(group.id).findAll();
+    await isar.writeTxn(() async {
+      for (final g in grenades) {
+        g.impactGroupId = null;
+        g.updatedAt = DateTime.now();
+        await isar.grenades.put(g);
+      }
+      await isar.impactGroups.delete(group.id);
+    });
+
+    if (recordSyncTombstone && map != null && layer != null) {
+      final entityKey = buildImpactGroupEntityKey(
+        mapName: map.name,
+        layerName: layer.name,
+        type: group.type,
+        name: group.name,
+        impactXRatio: group.impactXRatio,
+        impactYRatio: group.impactYRatio,
+      );
+      await LanSyncLocalStore().upsertEntityTombstones([
+        LanSyncEntityTombstoneEntry(
+          entityType: LanSyncEntityTombstoneType.impactGroup,
+          entityKey: entityKey,
+          mapName: map.name,
+          deletedAt: DateTime.now().millisecondsSinceEpoch,
+          payload: {
+            'name': group.name,
+            'layerName': layer.name,
+            'type': group.type,
+            'impactXRatio': group.impactXRatio,
+            'impactYRatio': group.impactYRatio,
+          },
+        ),
+      ]);
+    }
+  }
+
   /// 预览包
   Future<PackagePreviewResult?> previewPackage(String filePath) async {
     if (!filePath.toLowerCase().endsWith('.cs2pkg')) {
@@ -712,6 +844,7 @@ class DataService {
     final favoriteFolders = <PackageFavoriteFolderData>[];
     final impactGroups = <PackageImpactGroupData>[];
     final grenadeTombstones = <PackageGrenadeTombstoneData>[];
+    final entityTombstones = <PackageEntityTombstoneData>[];
     final Map<String, List<int>> memoryImages = {};
 
     for (var archiveFile in archive) {
@@ -776,6 +909,20 @@ class DataService {
               grenadeTombstones.add(tombstone);
             }
           }
+          final entityTombstonesRaw = decoded['entityTombstones'];
+          if (entityTombstonesRaw is List) {
+            for (final raw in entityTombstonesRaw) {
+              if (raw is! Map<String, dynamic>) continue;
+              final tombstone = PackageEntityTombstoneData.fromJson(raw);
+              if (!LanSyncEntityTombstoneType.values
+                      .contains(tombstone.entityType) ||
+                  tombstone.entityKey.isEmpty ||
+                  tombstone.mapName.isEmpty) {
+                continue;
+              }
+              entityTombstones.add(tombstone);
+            }
+          }
         } else if (decoded is List) {
           grenadesData = decoded;
           schemaVersion = 1;
@@ -787,7 +934,11 @@ class DataService {
       }
     }
 
-    if (grenadesData.isEmpty && grenadeTombstones.isEmpty) return null;
+    if (grenadesData.isEmpty &&
+        grenadeTombstones.isEmpty &&
+        entityTombstones.isEmpty) {
+      return null;
+    }
 
     // 按地图分组
     final Map<String, List<GrenadePreviewItem>> grenadesByMap = {};
@@ -882,6 +1033,7 @@ class DataService {
       favoriteFolders: favoriteFolders,
       impactGroups: impactGroups,
       grenadeTombstones: grenadeTombstones,
+      entityTombstones: entityTombstones,
     );
   }
 
@@ -969,6 +1121,8 @@ class DataService {
         'type': g.type,
         'team': g.team,
         'author': g.author,
+        'sourceUrl': g.sourceUrl,
+        'sourceNote': g.sourceNote,
         'hasLocalEdits': g.hasLocalEdits,
         'x': g.xRatio,
         'y': g.yRatio,
@@ -1111,6 +1265,45 @@ class DataService {
     return '${mapName.trim().toLowerCase()}|${nameKey.trim().toLowerCase()}';
   }
 
+  String entityTombstoneKey({
+    required String entityType,
+    required String entityKey,
+  }) {
+    return '${entityType.trim()}|${entityKey.trim()}';
+  }
+
+  String buildAreaEntityKey({
+    required String tagUuid,
+    required String layerName,
+  }) {
+    return '${tagUuid.trim()}|${layerName.trim().toLowerCase()}';
+  }
+
+  String buildFavoriteFolderEntityKey({
+    required String mapName,
+    required String nameKey,
+  }) {
+    return _favoriteFolderRefKey(mapName: mapName, nameKey: nameKey);
+  }
+
+  String buildImpactGroupEntityKey({
+    required String mapName,
+    required String layerName,
+    required int type,
+    required String name,
+    required double impactXRatio,
+    required double impactYRatio,
+  }) {
+    return _impactGroupSemanticKey(
+      mapName: mapName,
+      layerName: layerName,
+      type: type,
+      name: name,
+      impactXRatio: impactXRatio,
+      impactYRatio: impactYRatio,
+    );
+  }
+
   Future<List<Grenade>> _resolveExportGrenades({
     required int scopeType,
     Grenade? singleGrenade,
@@ -1137,6 +1330,7 @@ class DataService {
   Future<_LanSyncExportBundle> _buildLanSyncBundle(
     List<Grenade> grenades, {
     List<PackageGrenadeTombstoneData> grenadeTombstones = const [],
+    List<PackageEntityTombstoneData> entityTombstones = const [],
   }) async {
     final base = await _buildExportBundle(grenades);
     final grenadeItems = base.grenades
@@ -1257,11 +1451,13 @@ class DataService {
       impactGroups: impactGroupsData,
       grenadeTombstones:
           grenadeTombstones.map((e) => e.toJson()).toList(growable: false),
+      entityTombstones:
+          entityTombstones.map((e) => e.toJson()).toList(growable: false),
       filesToZip: base.filesToZip,
     );
   }
 
-  /// 构建局域网同步专用包（schemaVersion=3），包含收藏夹与爆点分组。
+  /// 构建局域网同步专用包（schemaVersion=5），包含局域网专用附加数据。
   /// 不影响普通分享/导出逻辑。
   Future<String> buildLanSyncPackageToTemp({
     required int scopeType,
@@ -1269,6 +1465,7 @@ class DataService {
     GameMap? singleMap,
     List<Grenade>? explicitGrenades,
     List<PackageGrenadeTombstoneData> grenadeTombstones = const [],
+    List<PackageEntityTombstoneData> entityTombstones = const [],
   }) async {
     final grenades = await _resolveExportGrenades(
       scopeType: scopeType,
@@ -1276,13 +1473,16 @@ class DataService {
       singleMap: singleMap,
       explicitGrenades: explicitGrenades,
     );
-    if (grenades.isEmpty && grenadeTombstones.isEmpty) {
+    if (grenades.isEmpty &&
+        grenadeTombstones.isEmpty &&
+        entityTombstones.isEmpty) {
       throw StateError('没有可同步的道具');
     }
 
     final syncBundle = await _buildLanSyncBundle(
       grenades,
       grenadeTombstones: grenadeTombstones,
+      entityTombstones: entityTombstones,
     );
     final tempDir = await getTemporaryDirectory();
     final exportDirPath = p.join(tempDir.path, "lan_sync_export_temp");
@@ -1364,6 +1564,8 @@ class DataService {
         'type': grenade.type,
         'team': grenade.team,
         'author': grenade.author,
+        'sourceUrl': grenade.sourceUrl,
+        'sourceNote': grenade.sourceNote,
         'hasLocalEdits': grenade.hasLocalEdits,
         'x': grenade.xRatio,
         'y': grenade.yRatio,
@@ -1864,6 +2066,81 @@ class DataService {
     return groups;
   }
 
+  Future<ImportConflictNotice> collectImportConflictNotice(
+    PackagePreviewResult preview,
+    Set<String> selectedUniqueIds,
+  ) async {
+    final newerLocalGrenades = <GrenadePreviewItem>[];
+    for (final mapItems in preview.grenadesByMap.values) {
+      for (final item in mapItems) {
+        if (!selectedUniqueIds.contains(item.uniqueId)) continue;
+        if (item.status == ImportStatus.skip) {
+          newerLocalGrenades.add(item);
+        }
+      }
+    }
+
+    final newerLocalDeleteConflicts = <GrenadePreviewItem>[];
+    if (preview.grenadeTombstones.isNotEmpty) {
+      final localItems = await loadLocalGrenadePreviewItemsByUniqueIds(
+        preview.grenadeTombstones.map((e) => e.uniqueId),
+      );
+      for (final tombstone in preview.grenadeTombstones) {
+        final local = localItems[tombstone.uniqueId];
+        if (local == null) continue;
+        final deletedAt =
+            DateTime.fromMillisecondsSinceEpoch(tombstone.deletedAt);
+        if (local.updatedAt.isAfter(deletedAt)) {
+          newerLocalDeleteConflicts.add(local);
+        }
+      }
+    }
+
+    final newerLocalFavoriteFolderDeletes = <String>[];
+    final favoriteFolderTombstones = preview.entityTombstones
+        .where((e) => e.entityType == LanSyncEntityTombstoneType.favoriteFolder)
+        .toList(growable: false);
+    if (favoriteFolderTombstones.isNotEmpty) {
+      final mapNames =
+          favoriteFolderTombstones.map((e) => e.mapName).toSet().toList();
+      final mapByName = <String, GameMap>{};
+      for (final mapName in mapNames) {
+        final map =
+            await isar.gameMaps.filter().nameEqualTo(mapName).findFirst();
+        if (map != null) {
+          mapByName[mapName] = map;
+        }
+      }
+      for (final tombstone in favoriteFolderTombstones) {
+        final map = mapByName[tombstone.mapName];
+        final nameKey = _normalizeFolderNameKey(
+            tombstone.payload['nameKey'] as String? ?? '');
+        if (map == null || nameKey.isEmpty) continue;
+        final folders =
+            await isar.favoriteFolders.filter().mapIdEqualTo(map.id).findAll();
+        final local = folders.where((folder) {
+          final localKey = folder.nameKey.trim().isEmpty
+              ? _normalizeFolderNameKey(folder.name)
+              : _normalizeFolderNameKey(folder.nameKey);
+          return localKey == nameKey;
+        }).firstOrNull;
+        if (local == null) continue;
+        final deletedAt =
+            DateTime.fromMillisecondsSinceEpoch(tombstone.deletedAt);
+        if (local.updatedAt.isAfter(deletedAt)) {
+          newerLocalFavoriteFolderDeletes
+              .add('${tombstone.mapName} / ${local.name}');
+        }
+      }
+    }
+
+    return ImportConflictNotice(
+      newerLocalGrenades: newerLocalGrenades,
+      newerLocalDeleteConflicts: newerLocalDeleteConflicts,
+      newerLocalFavoriteFolderDeletes: newerLocalFavoriteFolderDeletes,
+    );
+  }
+
   // --- 导入 ---
 
   Future<String> importData() async {
@@ -1910,7 +2187,8 @@ class DataService {
     Map<String, ImportAreaConflictResolution> areaResolutions = const {},
   }) async {
     final hasGrenadeSelection = selectedUniqueIds.isNotEmpty;
-    final hasTombstones = preview.grenadeTombstones.isNotEmpty;
+    final hasTombstones = preview.grenadeTombstones.isNotEmpty ||
+        preview.entityTombstones.isNotEmpty;
     if (!hasGrenadeSelection && !hasTombstones) {
       return "未选择任何道具";
     }
@@ -1920,6 +2198,7 @@ class DataService {
     final memoryImages = preview.memoryImages;
 
     final tombstoneResult = await _applyGrenadeTombstones(preview);
+    final entityTombstoneResult = await _applyEntityTombstones(preview);
 
     final selectedTagUuids = hasGrenadeSelection
         ? _collectSelectedTagUuids(preview, selectedUniqueIds)
@@ -2056,6 +2335,29 @@ class DataService {
     if (tombstoneResult.skippedCount > 0) {
       messages.add("忽略 ${tombstoneResult.skippedCount} 条较新的本地版本");
     }
+    if (entityTombstoneResult.deletedByType.isNotEmpty) {
+      final orderedTypes = <String>[
+        LanSyncEntityTombstoneType.tag,
+        LanSyncEntityTombstoneType.area,
+        LanSyncEntityTombstoneType.favoriteFolder,
+        LanSyncEntityTombstoneType.impactGroup,
+      ];
+      for (final type in orderedTypes) {
+        final count = entityTombstoneResult.deletedByType[type] ?? 0;
+        if (count <= 0) continue;
+        messages.add('${_entityTypeLabel(type)}删除 $count 条');
+      }
+    }
+    if (entityTombstoneResult.skippedByType.isNotEmpty) {
+      final orderedTypes = <String>[
+        LanSyncEntityTombstoneType.favoriteFolder,
+      ];
+      for (final type in orderedTypes) {
+        final count = entityTombstoneResult.skippedByType[type] ?? 0;
+        if (count <= 0) continue;
+        messages.add('忽略 $count 条较新的${_entityTypeLabel(type)}删除');
+      }
+    }
 
     if (messages.isEmpty) {
       return "没有可导入的道具";
@@ -2096,6 +2398,200 @@ class DataService {
     final deletedCount =
         await deleteGrenades(toDelete, recordSyncTombstones: false);
     return (deletedCount: deletedCount, skippedCount: skippedCount);
+  }
+
+  String _entityTypeLabel(String type) {
+    switch (type) {
+      case LanSyncEntityTombstoneType.tag:
+        return '标签';
+      case LanSyncEntityTombstoneType.area:
+        return '区域';
+      case LanSyncEntityTombstoneType.favoriteFolder:
+        return '收藏夹';
+      case LanSyncEntityTombstoneType.impactGroup:
+        return '爆点分组';
+      default:
+        return '对象';
+    }
+  }
+
+  Future<EntityTombstoneApplyResult> _applyEntityTombstones(
+    PackagePreviewResult preview,
+  ) async {
+    if (preview.entityTombstones.isEmpty) {
+      return const EntityTombstoneApplyResult(
+        deletedCount: 0,
+        skippedCount: 0,
+      );
+    }
+
+    final deletedByType = <String, int>{};
+    final skippedByType = <String, int>{};
+
+    void markDeleted(String type) {
+      deletedByType[type] = (deletedByType[type] ?? 0) + 1;
+    }
+
+    void markSkipped(String type) {
+      skippedByType[type] = (skippedByType[type] ?? 0) + 1;
+    }
+
+    final mapByName = <String, GameMap>{};
+    Future<GameMap?> resolveMap(String mapName) async {
+      final key = mapName.trim();
+      if (key.isEmpty) return null;
+      final existing = mapByName[key];
+      if (existing != null) return existing;
+      final map = await isar.gameMaps.filter().nameEqualTo(key).findFirst();
+      if (map != null) {
+        mapByName[key] = map;
+      }
+      return map;
+    }
+
+    for (final tombstone in preview.entityTombstones) {
+      switch (tombstone.entityType) {
+        case LanSyncEntityTombstoneType.tag:
+          final tagUuid =
+              (tombstone.payload['tagUuid'] as String? ?? tombstone.entityKey)
+                  .trim();
+          if (tagUuid.isEmpty) continue;
+          final tag =
+              await isar.tags.filter().tagUuidEqualTo(tagUuid).findFirst();
+          if (tag == null) continue;
+          final deleteRelatedAreas =
+              tombstone.payload['deleteRelatedAreas'] == true;
+          await isar.writeTxn(() async {
+            await isar.grenadeTags.filter().tagIdEqualTo(tag.id).deleteAll();
+            if (deleteRelatedAreas) {
+              await isar.mapAreas.filter().tagIdEqualTo(tag.id).deleteAll();
+            }
+            await isar.tags.delete(tag.id);
+          });
+          markDeleted(tombstone.entityType);
+          break;
+        case LanSyncEntityTombstoneType.area:
+          final tagUuid =
+              (tombstone.payload['tagUuid'] as String? ?? '').trim();
+          final layerName =
+              (tombstone.payload['layerName'] as String? ?? '').trim();
+          final map = await resolveMap(tombstone.mapName);
+          if (tagUuid.isEmpty || layerName.isEmpty || map == null) continue;
+          final tag =
+              await isar.tags.filter().tagUuidEqualTo(tagUuid).findFirst();
+          if (tag == null || tag.mapId != map.id) continue;
+          await map.layers.load();
+          final layer = map.layers
+              .where((item) => item.name.trim() == layerName)
+              .firstOrNull;
+          if (layer == null) continue;
+          final matchedAreas = await isar.mapAreas
+              .filter()
+              .mapIdEqualTo(map.id)
+              .tagIdEqualTo(tag.id)
+              .and()
+              .layerIdEqualTo(layer.id)
+              .findAll();
+          if (matchedAreas.isEmpty) continue;
+          await isar.writeTxn(() async {
+            await isar.mapAreas
+                .deleteAll(matchedAreas.map((item) => item.id).toList());
+          });
+          markDeleted(tombstone.entityType);
+          break;
+        case LanSyncEntityTombstoneType.favoriteFolder:
+          final map = await resolveMap(tombstone.mapName);
+          final nameKey = _normalizeFolderNameKey(
+              tombstone.payload['nameKey'] as String? ?? '');
+          if (map == null || nameKey.isEmpty) continue;
+          final folders = await isar.favoriteFolders
+              .filter()
+              .mapIdEqualTo(map.id)
+              .findAll();
+          final folder = folders.where((item) {
+            final localKey = item.nameKey.trim().isEmpty
+                ? _normalizeFolderNameKey(item.name)
+                : _normalizeFolderNameKey(item.nameKey);
+            return localKey == nameKey;
+          }).firstOrNull;
+          if (folder == null) continue;
+          final deletedAt =
+              DateTime.fromMillisecondsSinceEpoch(tombstone.deletedAt);
+          if (folder.updatedAt.isAfter(deletedAt)) {
+            markSkipped(tombstone.entityType);
+            continue;
+          }
+          final folderService = FavoriteFolderService(isar);
+          await folderService.deleteFolder(
+            folder.id,
+            FavoriteFolderDeleteStrategy.unfavorite,
+            recordSyncTombstone: false,
+          );
+          markDeleted(tombstone.entityType);
+          break;
+        case LanSyncEntityTombstoneType.impactGroup:
+          final map = await resolveMap(tombstone.mapName);
+          final layerName =
+              (tombstone.payload['layerName'] as String? ?? '').trim();
+          final name = (tombstone.payload['name'] as String? ?? '').trim();
+          final type = tombstone.payload['type'] as int?;
+          final impactXRatio =
+              (tombstone.payload['impactXRatio'] as num?)?.toDouble();
+          final impactYRatio =
+              (tombstone.payload['impactYRatio'] as num?)?.toDouble();
+          if (map == null ||
+              layerName.isEmpty ||
+              name.isEmpty ||
+              type == null ||
+              impactXRatio == null ||
+              impactYRatio == null) {
+            continue;
+          }
+          await map.layers.load();
+          final layer = map.layers
+              .where((item) => item.name.trim() == layerName)
+              .firstOrNull;
+          if (layer == null) continue;
+          final groups = await isar.impactGroups
+              .filter()
+              .layerIdEqualTo(layer.id)
+              .findAll();
+          final targetKey = buildImpactGroupEntityKey(
+            mapName: map.name,
+            layerName: layer.name,
+            type: type,
+            name: name,
+            impactXRatio: impactXRatio,
+            impactYRatio: impactYRatio,
+          );
+          final group = groups.where((item) {
+            final currentKey = buildImpactGroupEntityKey(
+              mapName: map.name,
+              layerName: layer.name,
+              type: item.type,
+              name: item.name,
+              impactXRatio: item.impactXRatio,
+              impactYRatio: item.impactYRatio,
+            );
+            return currentKey == targetKey;
+          }).firstOrNull;
+          if (group == null) continue;
+          await deleteImpactGroup(group, recordSyncTombstone: false);
+          markDeleted(tombstone.entityType);
+          break;
+      }
+    }
+
+    final deletedCount =
+        deletedByType.values.fold(0, (sum, item) => sum + item);
+    final skippedCount =
+        skippedByType.values.fold(0, (sum, item) => sum + item);
+    return EntityTombstoneApplyResult(
+      deletedCount: deletedCount,
+      skippedCount: skippedCount,
+      deletedByType: deletedByType,
+      skippedByType: skippedByType,
+    );
   }
 
   List<String> _readTagUuids(Map<String, dynamic> item) {
@@ -2701,6 +3197,8 @@ class DataService {
     existing.type = item['type'];
     existing.team = item['team'];
     existing.author = item['author'] as String?;
+    existing.sourceUrl = item['sourceUrl'] as String?;
+    existing.sourceNote = item['sourceNote'] as String?;
     existing.hasLocalEdits = false; // 重置
     existing.isImported = true; // 导入标记
     existing.xRatio = (item['x'] as num).toDouble();
@@ -2795,6 +3293,8 @@ class DataService {
           : DateTime.now(),
     );
     g.author = item['author'] as String?;
+    g.sourceUrl = item['sourceUrl'] as String?;
+    g.sourceNote = item['sourceNote'] as String?;
     g.impactXRatio = (item['impactX'] as num?)?.toDouble();
     g.impactYRatio = (item['impactY'] as num?)?.toDouble();
     g.impactAreaStrokes = item['impactAreaStrokes'] as String?;

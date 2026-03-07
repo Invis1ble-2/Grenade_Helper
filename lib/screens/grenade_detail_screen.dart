@@ -186,12 +186,16 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
 
   /// 标记道具已进行本地实质性编辑
   Future<void> _markAsLocallyEdited() async {
-    if (grenade == null || grenade!.hasLocalEdits) return;
+    if (grenade == null) return;
     final isar = ref.read(isarProvider);
     grenade!.hasLocalEdits = true;
+    grenade!.updatedAt = DateTime.now();
     await isar.writeTxn(() async {
       await isar.grenades.put(grenade!);
     });
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   void _updateGrenade(
@@ -222,6 +226,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     await isar.writeTxn(() async {
       await isar.grenades.put(grenade!);
     });
+    await _markAsLocallyEdited();
     _loadData(resetTitle: false);
   }
 
@@ -1967,7 +1972,10 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
               grenadeId: grenade!.id,
               mapId: map.id,
               tagService: tagService,
-              onTagsChanged: () => sendOverlayCommand('reload_data'),
+              onTagsChanged: () {
+                _loadData(resetTitle: false);
+                sendOverlayCommand('reload_data');
+              },
             )
           : FutureBuilder<List<Tag>>(
               future: tagService.getGrenadeTags(grenade!.id),
@@ -2551,7 +2559,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
 
   Widget _buildFooterInfo() {
     if (grenade == null) return const SizedBox();
-    final fmt = DateFormat('yyyy-MM-dd HH:mm');
+    final fmt = DateFormat('yyyy-MM-dd HH:mm:ss');
     final authorText =
         grenade!.author?.isNotEmpty == true ? grenade!.author! : _defaultAuthor;
     final isEditing = widget.isEditing;

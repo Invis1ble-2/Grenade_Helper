@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:isar_community/isar.dart';
 
 import '../models.dart';
+import 'lan_sync/lan_sync_local_store.dart';
 
 enum FavoriteFolderDeleteStrategy {
   moveToDefault,
@@ -280,7 +281,10 @@ class FavoriteFolderService {
   }
 
   Future<void> deleteFolder(
-      int folderId, FavoriteFolderDeleteStrategy strategy) async {
+    int folderId,
+    FavoriteFolderDeleteStrategy strategy, {
+    bool recordSyncTombstone = true,
+  }) async {
     final folder = await isar.favoriteFolders.get(folderId);
     if (folder == null) return;
 
@@ -293,6 +297,28 @@ class FavoriteFolderService {
         throw StateError('默认收藏夹不可使用“迁移到默认收藏夹”删除');
       }
       moveTarget = await getOrCreateDefaultFolder(folder.mapId);
+    }
+
+    final map =
+        recordSyncTombstone ? await isar.gameMaps.get(folder.mapId) : null;
+    if (recordSyncTombstone && map != null) {
+      final nameKey = folder.nameKey.trim().isEmpty
+          ? normalizeFolderName(folder.name)
+          : normalizeFolderName(folder.nameKey);
+      final entityKey =
+          '${map.name.trim().toLowerCase()}|${nameKey.trim().toLowerCase()}';
+      await LanSyncLocalStore().upsertEntityTombstones([
+        LanSyncEntityTombstoneEntry(
+          entityType: LanSyncEntityTombstoneType.favoriteFolder,
+          entityKey: entityKey,
+          mapName: map.name,
+          deletedAt: DateTime.now().millisecondsSinceEpoch,
+          payload: {
+            'name': folder.name,
+            'nameKey': nameKey,
+          },
+        ),
+      ]);
     }
 
     await isar.writeTxn(() async {

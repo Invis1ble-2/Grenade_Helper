@@ -6,6 +6,7 @@ import '../models.dart';
 import '../models/tag.dart';
 import '../providers.dart';
 import '../services/data_service.dart';
+import '../services/lan_sync/lan_sync_local_store.dart';
 import 'grenade_preview_screen.dart';
 
 /// 导入预览
@@ -116,6 +117,17 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
     return tombstones;
   }
 
+  List<PackageEntityTombstoneData> _getCurrentEntityTombstones() {
+    if (_preview == null) return const [];
+    final selectedMap = _selectedMap;
+    final tombstones = _preview!.entityTombstones.where((item) {
+      if (selectedMap == null) return true;
+      return item.mapName.trim() == selectedMap.trim();
+    }).toList(growable: false)
+      ..sort((a, b) => b.deletedAt.compareTo(a.deletedAt));
+    return tombstones;
+  }
+
   /// 切换全选
   void _toggleSelectAll() {
     final currentGrenades = _getCurrentGrenades();
@@ -134,13 +146,29 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
   /// 执行导入
   Future<void> _doImport() async {
     if (_preview == null) return;
-    if (_selectedIds.isEmpty && _preview!.grenadeTombstones.isEmpty) return;
+    if (_selectedIds.isEmpty &&
+        _preview!.grenadeTombstones.isEmpty &&
+        _preview!.entityTombstones.isEmpty) {
+      return;
+    }
 
     setState(() => _isImporting = true);
 
     try {
       final isar = ref.read(isarProvider);
       final dataService = DataService(isar);
+      final conflictNotice = await dataService.collectImportConflictNotice(
+          _preview!, _selectedIds);
+      if (conflictNotice.hasConflicts) {
+        if (!mounted) return;
+        final continueImport = await _showConflictNoticeDialog(conflictNotice);
+        if (continueImport != true) {
+          if (mounted) {
+            setState(() => _isImporting = false);
+          }
+          return;
+        }
+      }
       final tagResolutions = <String, ImportTagConflictResolution>{};
       final areaResolutions = <String, ImportAreaConflictResolution>{};
 
@@ -207,6 +235,56 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
         setState(() => _isImporting = false);
       }
     }
+  }
+
+  Future<bool?> _showConflictNoticeDialog(ImportConflictNotice notice) {
+    final lines = <String>[];
+    for (final item in notice.newerLocalGrenades.take(6)) {
+      lines.add('本地较新，将跳过更新：${item.mapName} / ${item.title}');
+    }
+    for (final item in notice.newerLocalDeleteConflicts.take(6)) {
+      lines.add('本地较新，将跳过删除：${item.mapName} / ${item.title}');
+    }
+    for (final item in notice.newerLocalFavoriteFolderDeletes.take(6)) {
+      lines.add('本地较新，将跳过收藏夹删除：$item');
+    }
+    final hiddenCount = notice.newerLocalGrenades.length +
+        notice.newerLocalDeleteConflicts.length +
+        notice.newerLocalFavoriteFolderDeletes.length -
+        lines.length;
+    if (hiddenCount > 0) {
+      lines.add('还有 $hiddenCount 条冲突未展开');
+    }
+
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('发现同步冲突'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('以下内容会在导入时被保留为本地版本，不会被对端覆盖或删除：'),
+            const SizedBox(height: 8),
+            ...lines.map((line) => Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(line),
+                )),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('继续导入'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<ImportTagConflictResolution?> _showTagConflictDialog(
@@ -334,7 +412,9 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
       );
     }
 
-    if (_preview!.totalCount == 0 && _preview!.grenadeTombstones.isNotEmpty) {
+    if (_preview!.totalCount == 0 &&
+        (_preview!.grenadeTombstones.isNotEmpty ||
+            _preview!.entityTombstones.isNotEmpty)) {
       return _buildTombstoneOnlyScreen();
     }
 
@@ -349,18 +429,19 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
 
   Widget _buildTombstoneOnlyScreen() {
     final tombstones = _getCurrentTombstones();
+    final entityTombstones = _getCurrentEntityTombstones();
     return Scaffold(
       appBar: AppBar(title: const Text("删除同步预览")),
       body: Column(
         children: [
           _buildPackageMetaBar(),
           Expanded(
-            child: ListView.separated(
+            child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: tombstones.length,
-              itemBuilder: (context, index) =>
-                  _buildTombstoneItem(tombstones[index]),
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              children: [
+                ...tombstones.map(_buildTombstoneItem),
+                ...entityTombstones.map(_buildEntityTombstoneItem),
+              ],
             ),
           ),
           _buildImportButton(),
@@ -387,12 +468,18 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
                 final tombstoneCount = preview.grenadeTombstones
                     .where((item) => item.mapName.trim() == mapName.trim())
                     .length;
+                final entityTombstoneCount = preview.entityTombstones
+                    .where((item) => item.mapName.trim() == mapName.trim())
+                    .length;
                 final gameMap =
                     isar.gameMaps.filter().nameEqualTo(mapName).findFirstSync();
 
                 final subtitleParts = <String>['$count 个道具'];
                 if (tombstoneCount > 0) {
                   subtitleParts.add('删除 $tombstoneCount 条');
+                }
+                if (entityTombstoneCount > 0) {
+                  subtitleParts.add('其他删除 $entityTombstoneCount 条');
                 }
 
                 return Card(
@@ -426,10 +513,13 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
   Widget _buildGrenadeListScreen() {
     final grenades = _getCurrentGrenades();
     final tombstones = _getCurrentTombstones();
+    final entityTombstones = _getCurrentEntityTombstones();
     final currentIds = grenades.map((g) => g.uniqueId).toSet();
     final selectedInCurrent =
         currentIds.where((id) => _selectedIds.contains(id)).length;
-    final hasVisibleItems = grenades.isNotEmpty || tombstones.isNotEmpty;
+    final hasVisibleItems = grenades.isNotEmpty ||
+        tombstones.isNotEmpty ||
+        entityTombstones.isNotEmpty;
 
     return Scaffold(
       appBar: AppBar(
@@ -471,12 +561,67 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
                         const SizedBox(height: 8),
                         ...tombstones.map(_buildTombstoneItem),
                       ],
+                      if (entityTombstones.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          '其他删除记录',
+                          style:
+                              Theme.of(context).textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                        ),
+                        const SizedBox(height: 8),
+                        ...entityTombstones.map(_buildEntityTombstoneItem),
+                      ],
                     ],
                   ),
           ),
           // 底部按钮
           _buildImportButton(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildEntityTombstoneItem(PackageEntityTombstoneData item) {
+    final deletedAt = DateTime.fromMillisecondsSinceEpoch(item.deletedAt);
+    final deletedAtText =
+        '${deletedAt.year}-${deletedAt.month.toString().padLeft(2, '0')}-${deletedAt.day.toString().padLeft(2, '0')} '
+        '${deletedAt.hour.toString().padLeft(2, '0')}:${deletedAt.minute.toString().padLeft(2, '0')}';
+    final (icon, title, subtitle) = switch (item.entityType) {
+      LanSyncEntityTombstoneType.tag => (
+          Icons.sell_outlined,
+          '标签：${(item.payload['tagName'] as String? ?? item.entityKey).trim()}',
+          '${item.mapName} · ${TagDimension.getName(item.payload['dimension'] as int? ?? TagDimension.custom)} · $deletedAtText',
+        ),
+      LanSyncEntityTombstoneType.area => (
+          Icons.polyline_outlined,
+          '区域：${(item.payload['tagName'] as String? ?? item.entityKey).trim()}',
+          '${item.mapName} / ${(item.payload['layerName'] as String? ?? 'Default').trim()} · $deletedAtText',
+        ),
+      LanSyncEntityTombstoneType.favoriteFolder => (
+          Icons.folder_delete_outlined,
+          '收藏夹：${(item.payload['name'] as String? ?? item.entityKey).trim()}',
+          '${item.mapName} · $deletedAtText',
+        ),
+      LanSyncEntityTombstoneType.impactGroup => (
+          Icons.scatter_plot_outlined,
+          '爆点分组：${(item.payload['name'] as String? ?? item.entityKey).trim()}',
+          '${item.mapName} / ${(item.payload['layerName'] as String? ?? '-').trim()} · $deletedAtText',
+        ),
+      _ => (
+          Icons.delete_outline,
+          item.entityKey,
+          '${item.mapName} · $deletedAtText',
+        ),
+    };
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: Icon(icon, color: Colors.redAccent),
+        title: Text(title),
+        subtitle: Text(subtitle),
       ),
     );
   }
@@ -602,6 +747,25 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
     if (preview.schemaVersion >= 3) {
       chips.add('收藏夹 ${preview.favoriteFolders.length}');
       chips.add('爆点分组 ${preview.impactGroups.length}');
+    }
+    final entityByType = <String, int>{};
+    for (final tombstone in preview.entityTombstones) {
+      entityByType[tombstone.entityType] =
+          (entityByType[tombstone.entityType] ?? 0) + 1;
+    }
+    if ((entityByType[LanSyncEntityTombstoneType.tag] ?? 0) > 0) {
+      chips.add('标签删 ${(entityByType[LanSyncEntityTombstoneType.tag] ?? 0)}');
+    }
+    if ((entityByType[LanSyncEntityTombstoneType.area] ?? 0) > 0) {
+      chips.add('区域删 ${(entityByType[LanSyncEntityTombstoneType.area] ?? 0)}');
+    }
+    if ((entityByType[LanSyncEntityTombstoneType.favoriteFolder] ?? 0) > 0) {
+      chips.add(
+          '收藏夹删 ${(entityByType[LanSyncEntityTombstoneType.favoriteFolder] ?? 0)}');
+    }
+    if ((entityByType[LanSyncEntityTombstoneType.impactGroup] ?? 0) > 0) {
+      chips.add(
+          '分组删 ${(entityByType[LanSyncEntityTombstoneType.impactGroup] ?? 0)}');
     }
 
     return Container(
@@ -753,7 +917,8 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
 
   Widget _buildImportButton() {
     final grenadeCount = _selectedIds.length;
-    final tombstoneCount = _preview?.grenadeTombstones.length ?? 0;
+    final tombstoneCount = (_preview?.grenadeTombstones.length ?? 0) +
+        (_preview?.entityTombstones.length ?? 0);
     final canImport = grenadeCount > 0 || tombstoneCount > 0;
     final label = grenadeCount > 0 && tombstoneCount > 0
         ? "确认导入 ($grenadeCount 个道具 + 删除 $tombstoneCount 条)"

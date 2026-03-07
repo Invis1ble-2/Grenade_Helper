@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +8,7 @@ import 'package:isar_community/isar.dart';
 import '../services/settings_service.dart';
 import '../services/seasonal_theme_service.dart';
 import '../services/data_service.dart';
+import '../services/lan_sync/lan_sync_local_store.dart';
 import '../services/tag_service.dart';
 import '../models.dart';
 import '../providers.dart';
@@ -73,6 +75,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // 存储路径
   String _currentDataPath = '';
   String _defaultDataPath = '';
+  bool _isLoadingLanSyncDebug = false;
+  bool _isLanSyncDebugExpanded = false;
+  List<LanSyncBaselineDebugPeerInfo> _lanSyncDebugPeers = const [];
+  LanSyncTombstoneStats _lanSyncTombstoneStats =
+      const LanSyncTombstoneStats(grenadeCount: 0, entityCount: 0);
 
   bool get _isDesktop =>
       Platform.isWindows || Platform.isMacOS || Platform.isLinux;
@@ -186,6 +193,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ],
         const SizedBox(height: 16),
         _buildDataManagementSection(),
+        if (kDebugMode) ...[
+          const SizedBox(height: 16),
+          _buildLanSyncDebugSection(),
+        ],
       ],
     );
   }
@@ -616,6 +627,159 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ),
       ],
     );
+  }
+
+  Widget _buildLanSyncDebugSection() {
+    return _buildSection(
+      title: '🧪 调试信息',
+      subtitle: '仅 Debug 构建显示',
+      children: [
+        InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () {
+            final nextExpanded = !_isLanSyncDebugExpanded;
+            setState(() => _isLanSyncDebugExpanded = nextExpanded);
+            if (nextExpanded) {
+              _loadLanSyncDebugInfo();
+            }
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        '局域网同步增量基线',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _isLoadingLanSyncDebug
+                            ? '正在加载...'
+                            : '删除日志 ${_lanSyncTombstoneStats.grenadeCount + _lanSyncTombstoneStats.entityCount} 条',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  _isLanSyncDebugExpanded
+                      ? Icons.expand_less
+                      : Icons.expand_more,
+                ),
+              ],
+            ),
+          ),
+        ),
+        AnimatedCrossFade(
+          firstChild: const SizedBox.shrink(),
+          secondChild: _buildLanSyncDebugExpandedContent(),
+          crossFadeState: _isLanSyncDebugExpanded
+              ? CrossFadeState.showSecond
+              : CrossFadeState.showFirst,
+          duration: const Duration(milliseconds: 180),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLanSyncDebugExpandedContent() {
+    if (_isLoadingLanSyncDebug) {
+      return const Padding(
+        padding: EdgeInsets.all(16),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_lanSyncDebugPeers.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(16, 8, 16, 16),
+        child: Text('当前还没有可显示的增量基线。'),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              Chip(label: Text('道具删除 ${_lanSyncTombstoneStats.grenadeCount}')),
+              Chip(label: Text('其他删除 ${_lanSyncTombstoneStats.entityCount}')),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ..._lanSyncDebugPeers.map((peer) => Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        peer.peerNodeId,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      ...peer.maps.map((entry) {
+                        final updatedAt = entry.updatedAtMs <= 0
+                            ? '未知'
+                            : _formatDateTime(
+                                DateTime.fromMillisecondsSinceEpoch(
+                                    entry.updatedAtMs),
+                              );
+                        final baseline = entry.baselineId.isEmpty
+                            ? '-'
+                            : (entry.baselineId.length > 18
+                                ? '${entry.baselineId.substring(0, 18)}...'
+                                : entry.baselineId);
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Text(
+                            '${entry.mapKey} · $updatedAt · 快照 ${entry.snapshotCount} 条 · $baseline',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+              )),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _loadLanSyncDebugInfo() async {
+    if (_isLoadingLanSyncDebug) return;
+    setState(() => _isLoadingLanSyncDebug = true);
+    try {
+      final store = LanSyncLocalStore();
+      await store.cleanupSyncTombstones();
+      final peers = await store.loadBaselineDebugPeers();
+      final stats = await store.loadTombstoneStats();
+      if (!mounted) return;
+      setState(() {
+        _lanSyncDebugPeers = peers;
+        _lanSyncTombstoneStats = stats;
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingLanSyncDebug = false);
+      }
+    }
+  }
+
+  String _formatDateTime(DateTime value) {
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${value.year}-${two(value.month)}-${two(value.day)} ${two(value.hour)}:${two(value.minute)}';
   }
 
   Future<void> _scanAndCleanupOrphanMediaFiles() async {

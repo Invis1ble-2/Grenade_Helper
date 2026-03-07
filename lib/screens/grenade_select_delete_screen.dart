@@ -4,6 +4,7 @@ import 'package:isar_community/isar.dart';
 import '../models.dart';
 import '../providers.dart';
 import '../services/data_service.dart';
+import '../widgets/selectable_grenade_list_item.dart';
 import 'grenade_detail_screen.dart';
 
 /// 道具批量选择删除页面
@@ -274,131 +275,13 @@ class _GrenadeSelectDeleteScreenState
   }
 
   Widget _buildGrenadeItem(Grenade grenade, bool isSelected) {
-    final typeIcon = _getTypeIcon(grenade.type);
-    grenade.layer.loadSync();
-    final layerName = grenade.layer.value?.name ?? '';
-    final hasImpact =
-        grenade.impactXRatio != null && grenade.impactYRatio != null;
-
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-      color: isSelected
-          ? Colors.red.withValues(alpha: 0.15)
-          : Theme.of(context).colorScheme.surfaceContainerHighest,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-        side: isSelected
-            ? const BorderSide(color: Colors.red, width: 1.5)
-            : BorderSide.none,
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: () => _toggleSelection(grenade.id),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              // 选择框
-              Checkbox(
-                value: isSelected,
-                onChanged: (_) => _toggleSelection(grenade.id),
-                activeColor: Colors.red,
-              ),
-              // 类型图标
-              Text(typeIcon, style: const TextStyle(fontSize: 24)),
-              const SizedBox(width: 12),
-              // 信息
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            grenade.title,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (hasImpact)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.green.withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.my_location,
-                                    size: 10, color: Colors.green),
-                                SizedBox(width: 2),
-                                Text('爆点',
-                                    style: TextStyle(
-                                        fontSize: 10, color: Colors.green)),
-                              ],
-                            ),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Icon(Icons.layers, size: 12, color: Colors.grey[600]),
-                        const SizedBox(width: 4),
-                        Text(
-                          layerName,
-                          style:
-                              TextStyle(fontSize: 12, color: Colors.grey[600]),
-                        ),
-                        if (grenade.author != null) ...[
-                          const SizedBox(width: 12),
-                          Icon(Icons.person, size: 12, color: Colors.grey[600]),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text(
-                              grenade.author!,
-                              style: TextStyle(
-                                  fontSize: 12, color: Colors.grey[600]),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              // 预览按钮
-              IconButton(
-                onPressed: () => _previewGrenade(grenade),
-                icon: const Icon(Icons.visibility, color: Colors.orange),
-                tooltip: '预览',
-              ),
-            ],
-          ),
-        ),
-      ),
+    return SelectableGrenadeListItem(
+      grenade: grenade,
+      selected: isSelected,
+      accentColor: Colors.red,
+      onChanged: (_) => _toggleSelection(grenade.id),
+      onTap: () => _toggleSelection(grenade.id),
+      onPreview: () => _previewGrenade(grenade),
     );
-  }
-
-  String _getTypeIcon(int type) {
-    switch (type) {
-      case GrenadeType.smoke:
-        return "☁️";
-      case GrenadeType.flash:
-        return "⚡";
-      case GrenadeType.molotov:
-        return "🔥";
-      case GrenadeType.he:
-        return "💣";
-      case GrenadeType.wallbang:
-        return "🧱";
-      default:
-        return "❓";
-    }
   }
 }

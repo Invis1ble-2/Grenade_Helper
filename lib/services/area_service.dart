@@ -5,6 +5,7 @@ import '../models/map_area.dart';
 import '../models/tag.dart';
 import '../models/grenade_tag.dart';
 import '../models.dart';
+import 'lan_sync/lan_sync_local_store.dart';
 
 class AutoTagSummary {
   final int processedGrenades;
@@ -44,6 +45,26 @@ class AreaService {
 
   final Isar isar;
   AreaService(this.isar);
+
+  Future<void> _touchGrenadesForTagRelationChanges(
+    Iterable<int> grenadeIds,
+  ) async {
+    final ids = grenadeIds.toSet().toList(growable: false);
+    if (ids.isEmpty) return;
+    final grenades = await isar.grenades.getAll(ids);
+    final toUpdate = <Grenade>[];
+    final now = DateTime.now();
+    for (final grenade in grenades) {
+      if (grenade == null) continue;
+      grenade.updatedAt = now;
+      grenade.hasLocalEdits = true;
+      toUpdate.add(grenade);
+    }
+    if (toUpdate.isEmpty) return;
+    await isar.writeTxn(() async {
+      await isar.grenades.putAll(toUpdate);
+    });
+  }
 
   /// 获取地图的所有区域
   Future<List<MapArea>> getAreas(int mapId) async {
@@ -107,6 +128,51 @@ class AreaService {
   /// [deleteTag] 为 true 时会同时删除区域标签与关联关系。
   /// 传 false 时仅删除区域几何数据。
   Future<void> deleteArea(MapArea area, {bool deleteTag = true}) async {
+    final tag = await isar.tags.get(area.tagId);
+    final map = await isar.gameMaps.get(area.mapId);
+    String layerName = 'Default';
+    if (area.layerId != null) {
+      final layer = await isar.mapLayers.get(area.layerId!);
+      if (layer != null && layer.name.trim().isNotEmpty) {
+        layerName = layer.name;
+      }
+    }
+    final tombstones = <LanSyncEntityTombstoneEntry>[];
+    final tagUuid = tag?.tagUuid.trim() ?? '';
+    final mapName = map?.name.trim() ?? '';
+    final deletedAt = DateTime.now().millisecondsSinceEpoch;
+    if (tagUuid.isNotEmpty && mapName.isNotEmpty) {
+      tombstones.add(
+        LanSyncEntityTombstoneEntry(
+          entityType: LanSyncEntityTombstoneType.area,
+          entityKey: '$tagUuid|${layerName.trim().toLowerCase()}',
+          mapName: mapName,
+          deletedAt: deletedAt,
+          payload: {
+            'tagUuid': tagUuid,
+            'tagName': tag?.name ?? area.name,
+            'layerName': layerName,
+          },
+        ),
+      );
+      if (deleteTag) {
+        tombstones.add(
+          LanSyncEntityTombstoneEntry(
+            entityType: LanSyncEntityTombstoneType.tag,
+            entityKey: tagUuid,
+            mapName: mapName,
+            deletedAt: deletedAt,
+            payload: {
+              'tagUuid': tagUuid,
+              'tagName': tag?.name ?? area.name,
+              'dimension': tag?.dimension ?? TagDimension.area,
+              'colorValue': tag?.colorValue ?? area.colorValue,
+              'deleteRelatedAreas': true,
+            },
+          ),
+        );
+      }
+    }
     await isar.writeTxn(() async {
       if (deleteTag) {
         // 删除标签关联
@@ -115,6 +181,10 @@ class AreaService {
       }
       await isar.mapAreas.delete(area.id);
     });
+
+    if (tombstones.isNotEmpty) {
+      await LanSyncLocalStore().upsertEntityTombstones(tombstones);
+    }
   }
 
   /// 更新区域及其标签
@@ -191,6 +261,7 @@ class AreaService {
     final matchedAreaTagIds = areas.map((a) => a.tagId).toSet();
     final allAreaTagIds = scopedAreaTagIds ??
         (syncExistingAreaTags ? await _getAreaTagIds(mapId) : const <int>{});
+    var changed = false;
 
     await isar.writeTxn(() async {
       if (syncExistingAreaTags && allAreaTagIds.isNotEmpty) {
@@ -202,6 +273,7 @@ class AreaService {
           if (allAreaTagIds.contains(link.tagId) &&
               !matchedAreaTagIds.contains(link.tagId)) {
             await isar.grenadeTags.delete(link.id);
+            changed = true;
           }
         }
       }
@@ -217,9 +289,13 @@ class AreaService {
         if (existing == null) {
           await isar.grenadeTags
               .put(GrenadeTag(grenadeId: grenade.id, tagId: tagId));
+          changed = true;
         }
       }
     });
+    if (changed) {
+      await _touchGrenadesForTagRelationChanges([grenade.id]);
+    }
   }
 
   /// 批量为地图所有道具自动标签
@@ -301,6 +377,7 @@ class AreaService {
 
     int addedLinks = 0;
     int removedLinks = 0;
+    final changedGrenadeIds = <int>{};
 
     await isar.writeTxn(() async {
       for (final area in areas) {
@@ -315,6 +392,7 @@ class AreaService {
           if (isDuplicate || !newIds.contains(link.grenadeId)) {
             await isar.grenadeTags.delete(link.id);
             removedLinks++;
+            changedGrenadeIds.add(link.grenadeId);
           } else {
             existingIds.add(link.grenadeId);
           }
@@ -325,10 +403,12 @@ class AreaService {
             await isar.grenadeTags
                 .put(GrenadeTag(grenadeId: grenadeId, tagId: area.tagId));
             addedLinks++;
+            changedGrenadeIds.add(grenadeId);
           }
         }
       }
     });
+    await _touchGrenadesForTagRelationChanges(changedGrenadeIds);
 
     return AutoTagSummary(
       processedGrenades: processedGrenades,
@@ -387,6 +467,7 @@ class AreaService {
 
     int addedLinks = 0;
     int removedLinks = 0;
+    final changedGrenadeIds = <int>{};
 
     await isar.writeTxn(() async {
       final existingLinks =
@@ -400,6 +481,7 @@ class AreaService {
         if (isDuplicate || !matchedGrenadeIds.contains(link.grenadeId)) {
           await isar.grenadeTags.delete(link.id);
           removedLinks++;
+          changedGrenadeIds.add(link.grenadeId);
         } else {
           existingIds.add(link.grenadeId);
         }
@@ -410,9 +492,11 @@ class AreaService {
           await isar.grenadeTags
               .put(GrenadeTag(grenadeId: grenadeId, tagId: area.tagId));
           addedLinks++;
+          changedGrenadeIds.add(grenadeId);
         }
       }
     });
+    await _touchGrenadesForTagRelationChanges(changedGrenadeIds);
 
     return AreaTagSyncSummary(
       processedGrenades: candidates.length,
