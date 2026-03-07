@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 
 class LanSyncPeerEntry {
   final String id;
@@ -144,10 +145,322 @@ class LanSyncHistoryEntry {
   }
 }
 
+class LanSyncGrenadeTombstoneEntry {
+  final String uniqueId;
+  final String mapName;
+  final int deletedAt;
+
+  const LanSyncGrenadeTombstoneEntry({
+    required this.uniqueId,
+    required this.mapName,
+    required this.deletedAt,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'uniqueId': uniqueId,
+        'mapName': mapName,
+        'deletedAt': deletedAt,
+      };
+
+  factory LanSyncGrenadeTombstoneEntry.fromJson(Map<String, dynamic> json) {
+    return LanSyncGrenadeTombstoneEntry(
+      uniqueId: (json['uniqueId'] as String? ?? '').trim(),
+      mapName: (json['mapName'] as String? ?? '').trim(),
+      deletedAt:
+          json['deletedAt'] as int? ?? DateTime.now().millisecondsSinceEpoch,
+    );
+  }
+}
+
 class LanSyncLocalStore {
   static const _peersKey = 'lan_sync_peers_v1';
   static const _historyKey = 'lan_sync_history_v1';
+  static const _stableNodeIdKey = 'lan_sync_stable_node_id_v1';
+  static const _ackedMapBaselinesKey = 'lan_sync_acked_map_baselines_v1';
+  static const _mapBaselineSnapshotsKey = 'lan_sync_map_baseline_snapshots_v1';
+  static const _grenadeTombstonesKey = 'lan_sync_grenade_tombstones_v1';
   static const _historyLimit = 120;
+
+  Future<String> loadOrCreateStableNodeId() async {
+    final prefs = await SharedPreferences.getInstance();
+    final existing = (prefs.getString(_stableNodeIdKey) ?? '').trim();
+    if (existing.isNotEmpty) return existing;
+    final created = 'node_${const Uuid().v4()}';
+    await prefs.setString(_stableNodeIdKey, created);
+    return created;
+  }
+
+  Future<Map<String, String>> loadAckedMapBaselineIds({
+    required String peerNodeId,
+    required Iterable<String> mapKeys,
+  }) async {
+    final peerKey = peerNodeId.trim();
+    if (peerKey.isEmpty) return const {};
+    final keys =
+        mapKeys.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
+    if (keys.isEmpty) return const {};
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_ackedMapBaselinesKey);
+    if (raw == null || raw.trim().isEmpty) return const {};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return const {};
+      final all = Map<String, dynamic>.from(decoded);
+      final peerRaw = all[peerKey];
+      if (peerRaw is! Map) return const {};
+      final peerMap = Map<String, dynamic>.from(peerRaw);
+      final result = <String, String>{};
+      for (final mapKey in keys) {
+        final entry = peerMap[mapKey];
+        if (entry is! Map) continue;
+        final baselineId = (entry['baselineId'] as String? ?? '').trim();
+        if (baselineId.isNotEmpty) {
+          result[mapKey] = baselineId;
+        }
+      }
+      return result;
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  Future<bool> hasAckedMapBaselines({
+    required String peerNodeId,
+    required Iterable<String> mapKeys,
+  }) async {
+    final keys =
+        mapKeys.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
+    if (keys.isEmpty) return false;
+    final map = await loadAckedMapBaselineIds(
+      peerNodeId: peerNodeId,
+      mapKeys: keys,
+    );
+    return map.length == keys.length;
+  }
+
+  Future<void> upsertAckedMapBaselines({
+    required String peerNodeId,
+    required Iterable<String> mapKeys,
+    String? baselineId,
+  }) async {
+    final peerKey = peerNodeId.trim();
+    if (peerKey.isEmpty) return;
+    final keys =
+        mapKeys.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
+    if (keys.isEmpty) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_ackedMapBaselinesKey);
+    final all = <String, dynamic>{};
+    if (raw != null && raw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          all.addAll(Map<String, dynamic>.from(decoded));
+        }
+      } catch (_) {}
+    }
+
+    final peerRaw = all[peerKey];
+    final peerMap = <String, dynamic>{};
+    if (peerRaw is Map) {
+      peerMap.addAll(Map<String, dynamic>.from(peerRaw));
+    }
+
+    final nextBaselineId =
+        (baselineId ?? 'bl_${DateTime.now().microsecondsSinceEpoch}').trim();
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    for (final mapKey in keys) {
+      peerMap[mapKey] = {
+        'baselineId': nextBaselineId,
+        'updatedAtMs': nowMs,
+      };
+    }
+
+    all[peerKey] = peerMap;
+    await prefs.setString(_ackedMapBaselinesKey, jsonEncode(all));
+  }
+
+  Future<Map<String, Map<String, String>>> loadMapBaselineSnapshots({
+    required String peerNodeId,
+    required Iterable<String> mapKeys,
+    Map<String, String>? expectedBaselineIds,
+  }) async {
+    final peerKey = peerNodeId.trim();
+    if (peerKey.isEmpty) return const {};
+    final keys =
+        mapKeys.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
+    if (keys.isEmpty) return const {};
+
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_mapBaselineSnapshotsKey);
+    if (raw == null || raw.trim().isEmpty) return const {};
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return const {};
+      final all = Map<String, dynamic>.from(decoded);
+      final peerRaw = all[peerKey];
+      if (peerRaw is! Map) return const {};
+      final peerMap = Map<String, dynamic>.from(peerRaw);
+
+      final result = <String, Map<String, String>>{};
+      for (final mapKey in keys) {
+        final entryRaw = peerMap[mapKey];
+        if (entryRaw is! Map) continue;
+        final entry = Map<String, dynamic>.from(entryRaw);
+
+        final expectedBaselineId = (expectedBaselineIds?[mapKey] ?? '').trim();
+        if (expectedBaselineId.isNotEmpty) {
+          final currentBaselineId =
+              (entry['baselineId'] as String? ?? '').trim();
+          if (currentBaselineId != expectedBaselineId) {
+            continue;
+          }
+        }
+
+        final digestsRaw = entry['grenadeDigests'];
+        if (digestsRaw is! Map) continue;
+        final digests = <String, String>{};
+        for (final e in Map<String, dynamic>.from(digestsRaw).entries) {
+          final key = e.key.trim();
+          final value = (e.value as String? ?? '').trim();
+          if (key.isEmpty || value.isEmpty) continue;
+          digests[key] = value;
+        }
+        result[mapKey] = digests;
+      }
+      return result;
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  Future<void> upsertMapBaselineSnapshots({
+    required String peerNodeId,
+    required Map<String, Map<String, String>> mapDigests,
+    required String baselineId,
+  }) async {
+    final peerKey = peerNodeId.trim();
+    final nextBaselineId = baselineId.trim();
+    if (peerKey.isEmpty || nextBaselineId.isEmpty || mapDigests.isEmpty) {
+      return;
+    }
+
+    final normalized = <String, Map<String, String>>{};
+    for (final entry in mapDigests.entries) {
+      final mapKey = entry.key.trim();
+      if (mapKey.isEmpty) continue;
+      final digests = <String, String>{};
+      for (final digestEntry in entry.value.entries) {
+        final uid = digestEntry.key.trim();
+        final digest = digestEntry.value.trim();
+        if (uid.isEmpty || digest.isEmpty) continue;
+        digests[uid] = digest;
+      }
+      normalized[mapKey] = digests;
+    }
+    if (normalized.isEmpty) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_mapBaselineSnapshotsKey);
+    final all = <String, dynamic>{};
+    if (raw != null && raw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          all.addAll(Map<String, dynamic>.from(decoded));
+        }
+      } catch (_) {}
+    }
+
+    final peerRaw = all[peerKey];
+    final peerMap = <String, dynamic>{};
+    if (peerRaw is Map) {
+      peerMap.addAll(Map<String, dynamic>.from(peerRaw));
+    }
+
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    for (final entry in normalized.entries) {
+      peerMap[entry.key] = {
+        'baselineId': nextBaselineId,
+        'updatedAtMs': nowMs,
+        'grenadeDigests': entry.value,
+      };
+    }
+
+    all[peerKey] = peerMap;
+    await prefs.setString(_mapBaselineSnapshotsKey, jsonEncode(all));
+  }
+
+  Future<void> upsertGrenadeTombstones(
+    Iterable<LanSyncGrenadeTombstoneEntry> tombstones,
+  ) async {
+    final normalized = <String, LanSyncGrenadeTombstoneEntry>{};
+    for (final entry in tombstones) {
+      final uniqueId = entry.uniqueId.trim();
+      final mapName = entry.mapName.trim();
+      if (uniqueId.isEmpty || mapName.isEmpty) continue;
+      normalized[uniqueId] = LanSyncGrenadeTombstoneEntry(
+        uniqueId: uniqueId,
+        mapName: mapName,
+        deletedAt: entry.deletedAt,
+      );
+    }
+    if (normalized.isEmpty) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_grenadeTombstonesKey);
+    final all = <String, dynamic>{};
+    if (raw != null && raw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          all.addAll(Map<String, dynamic>.from(decoded));
+        }
+      } catch (_) {}
+    }
+
+    for (final entry in normalized.entries) {
+      all[entry.key] = entry.value.toJson();
+    }
+
+    await prefs.setString(_grenadeTombstonesKey, jsonEncode(all));
+  }
+
+  Future<Map<String, LanSyncGrenadeTombstoneEntry>> loadGrenadeTombstones({
+    Iterable<String>? uniqueIds,
+    Iterable<String>? mapKeys,
+  }) async {
+    final targetIds =
+        uniqueIds?.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
+    final targetMaps =
+        mapKeys?.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
+
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_grenadeTombstonesKey);
+    if (raw == null || raw.trim().isEmpty) return const {};
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return const {};
+      final all = Map<String, dynamic>.from(decoded);
+      final result = <String, LanSyncGrenadeTombstoneEntry>{};
+      for (final rawEntry in all.entries) {
+        if (rawEntry.value is! Map) continue;
+        final entry = LanSyncGrenadeTombstoneEntry.fromJson(
+          Map<String, dynamic>.from(rawEntry.value as Map),
+        );
+        if (entry.uniqueId.isEmpty || entry.mapName.isEmpty) continue;
+        if (targetIds != null && !targetIds.contains(entry.uniqueId)) continue;
+        if (targetMaps != null && !targetMaps.contains(entry.mapName)) continue;
+        result[entry.uniqueId] = entry;
+      }
+      return result;
+    } catch (_) {
+      return const {};
+    }
+  }
 
   Future<List<LanSyncPeerEntry>> loadPeers() async {
     final prefs = await SharedPreferences.getInstance();

@@ -156,575 +156,607 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       appBar: AppBar(
         title: const Text('设置'),
       ),
-      body: _isDesktop ? _buildDesktopSettings() : _buildMobileSettings(),
+      body: _buildSettingsContent(),
     );
   }
 
-  Widget _buildMobileSettings() {
+  Widget _buildSettingsContent() {
+    if (_isDesktop && widget.settingsService == null) {
+      return const Center(child: Text('设置服务未初始化'));
+    }
     final themeMode = ref.watch(themeModeProvider);
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _buildSection(
-          title: '🎨 外观设置',
-          children: [
-            ListTile(
-              title: const Text('主题模式'),
-              trailing: SegmentedButton<int>(
-                segments: const [
-                  ButtonSegment(
-                      value: 0,
-                      icon: Icon(Icons.brightness_auto),
-                      label: Text('自动')),
-                  ButtonSegment(
-                      value: 1,
-                      icon: Icon(Icons.light_mode),
-                      label: Text('浅色')),
-                  ButtonSegment(
-                      value: 2, icon: Icon(Icons.dark_mode), label: Text('深色')),
-                ],
-                selected: {themeMode},
-                onSelectionChanged: (value) async {
-                  ref.read(themeModeProvider.notifier).state = value.first;
-                  if (widget.settingsService != null) {
-                    await widget.settingsService!.setThemeMode(value.first);
-                  }
-                },
-              ),
-            ),
-            // 节日主题开关（仅在有激活节日主题时显示）
-            if (SeasonalThemeManager.getActiveTheme() != null)
-              _buildSeasonalThemeToggle(),
-          ],
-        ),
+        if (_isDesktop) ...[
+          _buildDesktopHotkeySection(),
+          const SizedBox(height: 16),
+          _buildDesktopOverlaySection(),
+          const SizedBox(height: 16),
+        ],
+        _buildGeneralAppearanceSection(themeMode),
         const SizedBox(height: 16),
-        _buildSection(
-          title: '🗺️ 地图显示',
-          children: [
-            ListTile(
-              title: const Text('连接线颜色'),
-              subtitle: _buildColorPickerRow(),
-            ),
-            ListTile(
-              title: const Text('连接线透明度'),
-              subtitle: Text('${(_mapLineOpacity * 100).toInt()}%'),
-              trailing: SizedBox(
-                width: 150,
-                child: Slider(
-                  value: _mapLineOpacity,
-                  min: 0.1,
-                  max: 1.0,
-                  divisions: 9,
-                  onChanged: (value) async {
-                    setState(() => _mapLineOpacity = value);
-                    ref.read(mapLineOpacityProvider.notifier).state = value;
-                    if (widget.settingsService != null) {
-                      await widget.settingsService!.setMapLineOpacity(value);
-                    }
-                  },
-                ),
-              ),
-            ),
-          ],
-        ),
+        _buildMapDisplaySection(),
         const SizedBox(height: 16),
-        _buildSection(
-          title: '📍 标点操作',
-          children: [
-            ListTile(
-              title: const Text('新增方式'),
-              subtitle: Text(
-                _grenadeCreateMode == 0 ? '单点地图立即新增道具' : '长按地图新增道具',
-              ),
-              trailing: SegmentedButton<int>(
-                segments: const [
-                  ButtonSegment(value: 0, label: Text('单点新增')),
-                  ButtonSegment(value: 1, label: Text('长按新增')),
-                ],
-                selected: {_grenadeCreateMode},
-                onSelectionChanged: (value) async {
-                  setState(() => _grenadeCreateMode = value.first);
-                  if (widget.settingsService != null) {
-                    await widget.settingsService!
-                        .setGrenadeCreateMode(value.first);
-                  }
-                },
-              ),
-            ),
-            SwitchListTile(
-              title: const Text('地图界面显示道具列表'),
-              subtitle: const Text('显示当前地图全部道具列表，便于管理和删除'),
-              value: _showMapGrenadeList,
-              onChanged: (value) async {
-                setState(() => _showMapGrenadeList = value);
-                if (widget.settingsService != null) {
-                  await widget.settingsService!.setShowMapGrenadeList(value);
-                }
-              },
-            ),
-            SwitchListTile(
-              title: const Text('高密度模式（强聚合）'),
-              subtitle: const Text('仅增大地图页聚合范围，帮助大量道具时提升流畅度'),
-              value: _highDensityClusterMode,
-              onChanged: (value) async {
-                setState(() => _highDensityClusterMode = value);
-                if (widget.settingsService != null) {
-                  await widget.settingsService!
-                      .setHighDensityClusterMode(value);
-                }
-              },
-            ),
-            ListTile(
-              title: const Text('移动模式'),
-              subtitle:
-                  Text(_markerMoveMode == 0 ? '长按选定后点击目标位置' : '长按选定后使用摇杆'),
-              trailing: SegmentedButton<int>(
-                segments: const [
-                  ButtonSegment(value: 0, label: Text('长按选定')),
-                  ButtonSegment(value: 1, label: Text('摇杆移动')),
-                ],
-                selected: {_markerMoveMode},
-                onSelectionChanged: (value) async {
-                  setState(() => _markerMoveMode = value.first);
-                  if (widget.settingsService != null) {
-                    await widget.settingsService!
-                        .setMarkerMoveMode(value.first);
-                  }
-                },
-              ),
-            ),
-            if (_markerMoveMode == 1) ...[
-              ListTile(
-                title: const Text('摇杆透明度'),
-                subtitle: Text('${(_joystickOpacity * 100).toInt()}%'),
-                trailing: SizedBox(
-                  width: 150,
-                  child: Slider(
-                    value: _joystickOpacity,
-                    min: 0.1,
-                    max: 1.0,
-                    divisions: 9,
-                    onChanged: (value) async {
-                      setState(() => _joystickOpacity = value);
-                      if (widget.settingsService != null) {
-                        await widget.settingsService!.setJoystickOpacity(value);
-                      }
-                    },
-                  ),
-                ),
-              ),
-              ListTile(
-                title: const Text('移动速度'),
-                subtitle: Text('$_joystickSpeed 档'),
-                trailing: SizedBox(
-                  width: 150,
-                  child: Slider(
-                    value: _joystickSpeed.toDouble(),
-                    min: 1,
-                    max: 5,
-                    divisions: 4,
-                    onChanged: (value) async {
-                      setState(() => _joystickSpeed = value.toInt());
-                      if (widget.settingsService != null) {
-                        await widget.settingsService!
-                            .setJoystickSpeed(value.toInt());
-                      }
-                    },
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
+        _buildMarkerOperationSection(),
+        if (_isDesktop) ...[
+          const SizedBox(height: 16),
+          _buildDesktopDataStorageSection(),
+        ],
         const SizedBox(height: 16),
-        _buildSection(
-          title: '🗄️ 数据管理',
-          children: [
-            ListTile(
-              leading: const Icon(Icons.playlist_add_check, color: Colors.teal),
-              title: const Text('重导入默认区域标签/数据'),
-              subtitle: const Text('一键补齐内置默认区域标签与区域几何数据'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _reimportDefaultAreaTagsForAllMaps(),
+        _buildDataManagementSection(),
+      ],
+    );
+  }
+
+  Widget _buildDesktopHotkeySection() {
+    return _buildSection(
+      title: '🔧 快捷键配置',
+      subtitle: '点击可自定义快捷键',
+      children: [
+        _buildHotkeyTile(HotkeyAction.toggleOverlay, '显示/隐藏悬浮窗'),
+        const Divider(height: 1),
+        _buildHotkeyTile(HotkeyAction.navigateUp, '向上导航点位'),
+        _buildHotkeyTile(HotkeyAction.navigateDown, '向下导航点位'),
+        _buildHotkeyTile(HotkeyAction.navigateLeft, '向左导航点位'),
+        _buildHotkeyTile(HotkeyAction.navigateRight, '向右导航点位'),
+        const Divider(height: 1),
+        _buildHotkeyTile(HotkeyAction.prevGrenade, '上一个道具'),
+        _buildHotkeyTile(HotkeyAction.nextGrenade, '下一个道具'),
+        _buildHotkeyTile(HotkeyAction.prevStep, '上一个步骤'),
+        _buildHotkeyTile(HotkeyAction.nextStep, '下一个步骤'),
+        const Divider(height: 1),
+        _buildHotkeyTile(HotkeyAction.toggleSmoke, '烟雾弹过滤开关'),
+        _buildHotkeyTile(HotkeyAction.toggleFlash, '闪光弹过滤开关'),
+        _buildHotkeyTile(HotkeyAction.toggleMolotov, '燃烧弹过滤开关'),
+        _buildHotkeyTile(HotkeyAction.toggleHE, '手雷过滤开关'),
+        _buildHotkeyTile(HotkeyAction.toggleWallbang, '穿点过滤开关'),
+        const Divider(height: 1),
+        _buildHotkeyTile(HotkeyAction.togglePlayPause, '悬浮窗播放/暂停视频'),
+        const Divider(height: 1),
+        _buildHotkeyTile(HotkeyAction.increaseNavSpeed, '增加导航速度'),
+        _buildHotkeyTile(HotkeyAction.decreaseNavSpeed, '减少导航速度'),
+        const Divider(height: 1),
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: OutlinedButton.icon(
+            onPressed: _resetHotkeysToDefault,
+            icon: const Icon(Icons.restore, size: 18),
+            label: const Text('恢复默认快捷键'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.orange,
+              side: const BorderSide(color: Colors.orange),
             ),
-            ListTile(
-              leading: const Icon(Icons.delete_sweep, color: Colors.redAccent),
-              title: const Text('清空地图道具'),
-              subtitle: const Text('删除选定地图的所有道具数据'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _showDeleteMapGrenadesDialog(),
-            ),
-            ListTile(
-              leading: const Icon(Icons.checklist, color: Colors.orange),
-              title: const Text('批量选择删除'),
-              subtitle: const Text('精确选择要删除的道具，支持预览'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (_) => const GrenadeSelectDeleteScreen()),
-              ),
-            ),
-          ],
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildDesktopSettings() {
-    if (widget.settingsService == null) {
-      return const Center(child: Text('设置服务未初始化'));
-    }
-
-    return ListView(
-      padding: const EdgeInsets.all(16),
+  Widget _buildDesktopOverlaySection() {
+    return _buildSection(
+      title: '🎨 悬浮窗设置',
       children: [
-        _buildSection(
-          title: '🔧 快捷键配置',
-          subtitle: '点击可自定义快捷键',
-          children: [
-            _buildHotkeyTile(HotkeyAction.toggleOverlay, '显示/隐藏悬浮窗'),
-            const Divider(height: 1),
-            _buildHotkeyTile(HotkeyAction.navigateUp, '向上导航点位'),
-            _buildHotkeyTile(HotkeyAction.navigateDown, '向下导航点位'),
-            _buildHotkeyTile(HotkeyAction.navigateLeft, '向左导航点位'),
-            _buildHotkeyTile(HotkeyAction.navigateRight, '向右导航点位'),
-            const Divider(height: 1),
-            _buildHotkeyTile(HotkeyAction.prevGrenade, '上一个道具'),
-            _buildHotkeyTile(HotkeyAction.nextGrenade, '下一个道具'),
-            _buildHotkeyTile(HotkeyAction.prevStep, '上一个步骤'),
-            _buildHotkeyTile(HotkeyAction.nextStep, '下一个步骤'),
-            const Divider(height: 1),
-            _buildHotkeyTile(HotkeyAction.toggleSmoke, '烟雾弹过滤开关'),
-            _buildHotkeyTile(HotkeyAction.toggleFlash, '闪光弹过滤开关'),
-            _buildHotkeyTile(HotkeyAction.toggleMolotov, '燃烧弹过滤开关'),
-            _buildHotkeyTile(HotkeyAction.toggleHE, '手雷过滤开关'),
-            _buildHotkeyTile(HotkeyAction.toggleWallbang, '穿点过滤开关'),
-            const Divider(height: 1),
-            _buildHotkeyTile(HotkeyAction.togglePlayPause, '悬浮窗播放/暂停视频'),
-            const Divider(height: 1),
-            _buildHotkeyTile(HotkeyAction.increaseNavSpeed, '增加导航速度'),
-            _buildHotkeyTile(HotkeyAction.decreaseNavSpeed, '减少导航速度'),
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: OutlinedButton.icon(
-                onPressed: _resetHotkeysToDefault,
-                icon: const Icon(Icons.restore, size: 18),
-                label: const Text('恢复默认快捷键'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.orange,
-                  side: const BorderSide(color: Colors.orange),
-                ),
+        ListTile(
+          title: const Text('透明度'),
+          subtitle: Text('${(_overlayOpacity * 100).toInt()}%'),
+          trailing: SizedBox(
+            width: 200,
+            child: Slider(
+              value: _overlayOpacity,
+              min: 0.3,
+              max: 1.0,
+              divisions: 14,
+              onChanged: (value) async {
+                setState(() => _overlayOpacity = value);
+                await widget.settingsService!.setOverlayOpacity(value);
+                sendOverlayCommand('update_opacity', {'opacity': value});
+              },
+            ),
+          ),
+        ),
+        ListTile(
+          title: const Text('窗口尺寸'),
+          subtitle:
+              Text(['小 (500×800)', '中 (550×850)', '大 (600×950)'][_overlaySize]),
+          trailing: SegmentedButton<int>(
+            segments: const [
+              ButtonSegment(value: 0, label: Text('小')),
+              ButtonSegment(value: 1, label: Text('中')),
+              ButtonSegment(value: 2, label: Text('大')),
+            ],
+            selected: {_overlaySize},
+            onSelectionChanged: (value) async {
+              final newSize = value.first;
+              setState(() => _overlaySize = newSize);
+              await widget.settingsService!.setOverlaySize(newSize);
+              sendOverlayCommand('update_size', {'sizeIndex': newSize});
+            },
+          ),
+        ),
+        ListTile(
+          title: const Text('导航速度'),
+          subtitle: Text('$_overlayNavSpeed 档'),
+          trailing: SizedBox(
+            width: 200,
+            child: Slider(
+              value: _overlayNavSpeed.toDouble(),
+              min: 1,
+              max: 5,
+              divisions: 4,
+              label: '$_overlayNavSpeed 档',
+              onChanged: (value) async {
+                final speedLevel = value.round();
+                setState(() => _overlayNavSpeed = speedLevel);
+                await widget.settingsService!.setOverlayNavSpeed(speedLevel);
+                sendOverlayCommand('update_nav_speed', {'speed': speedLevel});
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGeneralAppearanceSection(int themeMode) {
+    return _buildSection(
+      title: _isDesktop ? '⚙️ 通用设置' : '🎨 外观设置',
+      children: [
+        ListTile(
+          title: const Text('主题模式'),
+          trailing: SegmentedButton<int>(
+            segments: const [
+              ButtonSegment(
+                  value: 0,
+                  icon: Icon(Icons.brightness_auto),
+                  label: Text('自动')),
+              ButtonSegment(
+                  value: 1, icon: Icon(Icons.light_mode), label: Text('浅色')),
+              ButtonSegment(
+                  value: 2, icon: Icon(Icons.dark_mode), label: Text('深色')),
+            ],
+            selected: {themeMode},
+            onSelectionChanged: (value) async {
+              ref.read(themeModeProvider.notifier).state = value.first;
+              if (widget.settingsService != null) {
+                await widget.settingsService!.setThemeMode(value.first);
+              }
+            },
+          ),
+        ),
+        if (SeasonalThemeManager.getActiveTheme() != null)
+          _buildSeasonalThemeToggle(),
+        if (_isDesktop)
+          SwitchListTile(
+            title: const Text('关闭按钮最小化到托盘'),
+            subtitle: const Text('关闭时隐藏到系统托盘，而非退出程序'),
+            value: _closeToTray,
+            onChanged: (value) async {
+              setState(() => _closeToTray = value);
+              await widget.settingsService!.setCloseToTray(value);
+            },
+          ),
+      ],
+    );
+  }
+
+  Widget _buildMapDisplaySection() {
+    return _buildSection(
+      title: '🗺️ 地图显示',
+      children: [
+        ListTile(
+          title: const Text('连接线颜色'),
+          subtitle: _isDesktop
+              ? Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: _buildColorPickerRow(),
+                )
+              : _buildColorPickerRow(),
+        ),
+        ListTile(
+          title: const Text('连接线透明度'),
+          subtitle: Text('${(_mapLineOpacity * 100).toInt()}%'),
+          trailing: SizedBox(
+            width: _isDesktop ? 200 : 150,
+            child: Slider(
+              value: _mapLineOpacity,
+              min: 0.1,
+              max: 1.0,
+              divisions: 9,
+              onChanged: (value) async {
+                setState(() => _mapLineOpacity = value);
+                ref.read(mapLineOpacityProvider.notifier).state = value;
+                if (widget.settingsService != null) {
+                  await widget.settingsService!.setMapLineOpacity(value);
+                }
+              },
+            ),
+          ),
+        ),
+        if (_isDesktop)
+          ListTile(
+            title: const Text('爆点区域透明度'),
+            subtitle: Text('${(_impactAreaOpacity * 100).toInt()}%'),
+            trailing: SizedBox(
+              width: 200,
+              child: Slider(
+                value: _impactAreaOpacity,
+                min: 0.1,
+                max: 1.0,
+                divisions: 9,
+                onChanged: (value) async {
+                  setState(() => _impactAreaOpacity = value);
+                  ref.read(impactAreaOpacityProvider.notifier).state = value;
+                  if (widget.settingsService != null) {
+                    await widget.settingsService!.setImpactAreaOpacity(value);
+                  }
+                },
               ),
             ),
-          ],
+          ),
+      ],
+    );
+  }
+
+  Widget _buildMarkerOperationSection() {
+    return _buildSection(
+      title: '📍 标点操作',
+      children: [
+        ListTile(
+          title: const Text('新增方式'),
+          subtitle: Text(
+            _grenadeCreateMode == 0
+                ? '单点地图立即新增道具'
+                : (_isDesktop ? '长按地图新增道具（鼠标左键按住）' : '长按地图新增道具'),
+          ),
+          trailing: SegmentedButton<int>(
+            segments: const [
+              ButtonSegment(value: 0, label: Text('单点新增')),
+              ButtonSegment(value: 1, label: Text('长按新增')),
+            ],
+            selected: {_grenadeCreateMode},
+            onSelectionChanged: (value) async {
+              setState(() => _grenadeCreateMode = value.first);
+              if (widget.settingsService != null) {
+                await widget.settingsService!.setGrenadeCreateMode(value.first);
+              }
+            },
+          ),
         ),
-        const SizedBox(height: 16),
-        _buildSection(
-          title: '🎨 悬浮窗设置',
-          children: [
+        SwitchListTile(
+          title: const Text('地图界面显示道具列表'),
+          subtitle: const Text('显示当前地图全部道具列表，便于管理和删除'),
+          value: _showMapGrenadeList,
+          onChanged: (value) async {
+            setState(() => _showMapGrenadeList = value);
+            if (widget.settingsService != null) {
+              await widget.settingsService!.setShowMapGrenadeList(value);
+            }
+          },
+        ),
+        SwitchListTile(
+          title: const Text('高密度模式（强聚合）'),
+          subtitle: const Text('仅增大地图页聚合范围，帮助大量道具时提升流畅度'),
+          value: _highDensityClusterMode,
+          onChanged: (value) async {
+            setState(() => _highDensityClusterMode = value);
+            if (widget.settingsService != null) {
+              await widget.settingsService!.setHighDensityClusterMode(value);
+            }
+          },
+        ),
+        if (!_isDesktop) ...[
+          ListTile(
+            title: const Text('移动模式'),
+            subtitle: Text(_markerMoveMode == 0 ? '长按选定后点击目标位置' : '长按选定后使用摇杆'),
+            trailing: SegmentedButton<int>(
+              segments: const [
+                ButtonSegment(value: 0, label: Text('长按选定')),
+                ButtonSegment(value: 1, label: Text('摇杆移动')),
+              ],
+              selected: {_markerMoveMode},
+              onSelectionChanged: (value) async {
+                setState(() => _markerMoveMode = value.first);
+                if (widget.settingsService != null) {
+                  await widget.settingsService!.setMarkerMoveMode(value.first);
+                }
+              },
+            ),
+          ),
+          if (_markerMoveMode == 1) ...[
             ListTile(
-              title: const Text('透明度'),
-              subtitle: Text('${(_overlayOpacity * 100).toInt()}%'),
+              title: const Text('摇杆透明度'),
+              subtitle: Text('${(_joystickOpacity * 100).toInt()}%'),
               trailing: SizedBox(
-                width: 200,
+                width: 150,
                 child: Slider(
-                  value: _overlayOpacity,
-                  min: 0.3,
+                  value: _joystickOpacity,
+                  min: 0.1,
                   max: 1.0,
-                  divisions: 14,
+                  divisions: 9,
                   onChanged: (value) async {
-                    setState(() => _overlayOpacity = value);
-                    await widget.settingsService!.setOverlayOpacity(value);
-                    // 刷新透明度
-                    sendOverlayCommand('update_opacity', {'opacity': value});
+                    setState(() => _joystickOpacity = value);
+                    if (widget.settingsService != null) {
+                      await widget.settingsService!.setJoystickOpacity(value);
+                    }
                   },
                 ),
               ),
             ),
             ListTile(
-              title: const Text('窗口尺寸'),
-              subtitle: Text(
-                  ['小 (500×800)', '中 (550×850)', '大 (600×950)'][_overlaySize]),
-              trailing: SegmentedButton<int>(
-                segments: const [
-                  ButtonSegment(value: 0, label: Text('小')),
-                  ButtonSegment(value: 1, label: Text('中')),
-                  ButtonSegment(value: 2, label: Text('大')),
-                ],
-                selected: {_overlaySize},
-                onSelectionChanged: (value) async {
-                  final newSize = value.first;
-                  setState(() => _overlaySize = newSize);
-                  await widget.settingsService!.setOverlaySize(newSize);
-                  // 刷新尺寸
-                  sendOverlayCommand('update_size', {'sizeIndex': newSize});
-                },
-              ),
-            ),
-            ListTile(
-              title: const Text('导航速度'),
-              subtitle: Text('$_overlayNavSpeed 档'),
+              title: const Text('移动速度'),
+              subtitle: Text('$_joystickSpeed 档'),
               trailing: SizedBox(
-                width: 200,
+                width: 150,
                 child: Slider(
-                  value: _overlayNavSpeed.toDouble(),
+                  value: _joystickSpeed.toDouble(),
                   min: 1,
                   max: 5,
                   divisions: 4,
-                  label: '$_overlayNavSpeed 档',
                   onChanged: (value) async {
-                    // 避免精度问题
-                    final speedLevel = value.round();
-                    setState(() => _overlayNavSpeed = speedLevel);
-                    await widget.settingsService!
-                        .setOverlayNavSpeed(speedLevel);
-                    // 刷新速度
-                    sendOverlayCommand(
-                        'update_nav_speed', {'speed': speedLevel});
-                  },
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        _buildSection(
-          title: '🗺️ 地图显示',
-          children: [
-            ListTile(
-              title: const Text('连接线颜色'),
-              subtitle: Padding(
-                padding: const EdgeInsets.only(top: 8.0),
-                child: _buildColorPickerRow(),
-              ),
-            ),
-            ListTile(
-              title: const Text('连接线透明度'),
-              subtitle: Text('${(_mapLineOpacity * 100).toInt()}%'),
-              trailing: SizedBox(
-                width: 200,
-                child: Slider(
-                  value: _mapLineOpacity,
-                  min: 0.1,
-                  max: 1.0,
-                  divisions: 9,
-                  onChanged: (value) async {
-                    setState(() => _mapLineOpacity = value);
-                    ref.read(mapLineOpacityProvider.notifier).state = value;
+                    setState(() => _joystickSpeed = value.toInt());
                     if (widget.settingsService != null) {
-                      await widget.settingsService!.setMapLineOpacity(value);
-                    }
-                  },
-                ),
-              ),
-            ),
-            ListTile(
-              title: const Text('爆点区域透明度'),
-              subtitle: Text('${(_impactAreaOpacity * 100).toInt()}%'),
-              trailing: SizedBox(
-                width: 200,
-                child: Slider(
-                  value: _impactAreaOpacity,
-                  min: 0.1,
-                  max: 1.0,
-                  divisions: 9,
-                  onChanged: (value) async {
-                    setState(() => _impactAreaOpacity = value);
-                    ref.read(impactAreaOpacityProvider.notifier).state = value;
-                    if (widget.settingsService != null) {
-                      await widget.settingsService!.setImpactAreaOpacity(value);
+                      await widget.settingsService!
+                          .setJoystickSpeed(value.toInt());
                     }
                   },
                 ),
               ),
             ),
           ],
-        ),
-        const SizedBox(height: 16),
-        _buildSection(
-          title: '📍 标点操作',
-          children: [
-            ListTile(
-              title: const Text('新增方式'),
-              subtitle: Text(
-                _grenadeCreateMode == 0 ? '单点地图立即新增道具' : '长按地图新增道具（鼠标左键按住）',
-              ),
-              trailing: SegmentedButton<int>(
-                segments: const [
-                  ButtonSegment(value: 0, label: Text('单点新增')),
-                  ButtonSegment(value: 1, label: Text('长按新增')),
-                ],
-                selected: {_grenadeCreateMode},
-                onSelectionChanged: (value) async {
-                  setState(() => _grenadeCreateMode = value.first);
-                  await widget.settingsService!
-                      .setGrenadeCreateMode(value.first);
-                },
-              ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildDesktopDataStorageSection() {
+    return _buildSection(
+      title: '💾 数据存储',
+      subtitle: '更改数据目录需要重启应用',
+      children: [
+        ListTile(
+          title: const Text('当前数据目录'),
+          subtitle: Text(
+            _currentDataPath.isEmpty ? '加载中...' : _currentDataPath,
+            style: TextStyle(
+              fontSize: 12,
+              color: _currentDataPath == _defaultDataPath
+                  ? Colors.grey
+                  : Colors.orange,
             ),
-            SwitchListTile(
-              title: const Text('地图界面显示道具列表'),
-              subtitle: const Text('显示当前地图全部道具列表，便于管理和删除'),
-              value: _showMapGrenadeList,
-              onChanged: (value) async {
-                setState(() => _showMapGrenadeList = value);
-                await widget.settingsService!.setShowMapGrenadeList(value);
-              },
-            ),
-            SwitchListTile(
-              title: const Text('高密度模式（强聚合）'),
-              subtitle: const Text('仅增大地图页聚合范围，帮助大量道具时提升流畅度'),
-              value: _highDensityClusterMode,
-              onChanged: (value) async {
-                setState(() => _highDensityClusterMode = value);
-                await widget.settingsService!.setHighDensityClusterMode(value);
-              },
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        _buildSection(
-          title: '⚙️ 通用设置',
-          children: [
-            ListTile(
-              title: const Text('主题模式'),
-              trailing: SegmentedButton<int>(
-                segments: const [
-                  ButtonSegment(
-                      value: 0,
-                      icon: Icon(Icons.brightness_auto),
-                      label: Text('自动')),
-                  ButtonSegment(
-                      value: 1,
-                      icon: Icon(Icons.light_mode),
-                      label: Text('浅色')),
-                  ButtonSegment(
-                      value: 2, icon: Icon(Icons.dark_mode), label: Text('深色')),
-                ],
-                selected: {ref.watch(themeModeProvider)},
-                onSelectionChanged: (value) async {
-                  ref.read(themeModeProvider.notifier).state = value.first;
-                  await widget.settingsService!.setThemeMode(value.first);
-                },
-              ),
-            ),
-            // 节日主题开关（仅在有激活节日主题时显示）
-            if (SeasonalThemeManager.getActiveTheme() != null)
-              _buildSeasonalThemeToggle(),
-            SwitchListTile(
-              title: const Text('关闭按钮最小化到托盘'),
-              subtitle: const Text('关闭时隐藏到系统托盘，而非退出程序'),
-              value: _closeToTray,
-              onChanged: (value) async {
-                setState(() => _closeToTray = value);
-                await widget.settingsService!.setCloseToTray(value);
-              },
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        _buildSection(
-          title: '💾 数据存储',
-          subtitle: '更改数据目录需要重启应用',
-          children: [
-            ListTile(
-              title: const Text('当前数据目录'),
-              subtitle: Text(
-                _currentDataPath.isEmpty ? '加载中...' : _currentDataPath,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: _currentDataPath == _defaultDataPath
-                      ? Colors.grey
-                      : Colors.orange,
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_currentDataPath != _defaultDataPath &&
+                  _currentDataPath.isNotEmpty)
+                TextButton.icon(
+                  onPressed: _resetToDefaultPath,
+                  icon: const Icon(Icons.restore, size: 18),
+                  label: const Text('恢复默认'),
+                  style: TextButton.styleFrom(foregroundColor: Colors.grey),
+                ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: _changeDataDirectory,
+                icon: const Icon(Icons.folder_open, size: 18),
+                label: const Text('更改目录'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.black,
                 ),
               ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (_currentDataPath != _defaultDataPath &&
-                      _currentDataPath.isNotEmpty)
-                    TextButton.icon(
-                      onPressed: _resetToDefaultPath,
-                      icon: const Icon(Icons.restore, size: 18),
-                      label: const Text('恢复默认'),
-                      style: TextButton.styleFrom(foregroundColor: Colors.grey),
-                    ),
-                  const SizedBox(width: 8),
-                  ElevatedButton.icon(
-                    onPressed: _changeDataDirectory,
-                    icon: const Icon(Icons.folder_open, size: 18),
-                    label: const Text('更改目录'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange,
-                      foregroundColor: Colors.black,
-                    ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.amber.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, color: Colors.amber[700], size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    '更改目录后需要手动重启应用。您可以选择自动将现有数据迁移到新目录。\n\n注意：更改目录后卸载应用需要手动删除更改过后数据目录的所有数据。',
+                    style: TextStyle(fontSize: 12, color: Colors.amber[700]),
                   ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.amber.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border:
-                      Border.all(color: Colors.amber.withValues(alpha: 0.3)),
                 ),
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline,
-                        color: Colors.amber[700], size: 20),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        '更改目录后需要手动重启应用。您可以选择自动将现有数据迁移到新目录。\n\n注意：更改目录后卸载应用需要手动删除更改过后数据目录的所有数据。',
-                        style:
-                            TextStyle(fontSize: 12, color: Colors.amber[700]),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              ],
             ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        _buildSection(
-          title: '🗄️ 数据管理',
-          children: [
-            ListTile(
-              leading: const Icon(Icons.playlist_add_check, color: Colors.teal),
-              title: const Text('重导入默认区域标签/数据'),
-              subtitle: const Text('一键补齐内置默认区域标签与区域几何数据'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _reimportDefaultAreaTagsForAllMaps(),
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete_sweep, color: Colors.redAccent),
-              title: const Text('清空地图道具'),
-              subtitle: const Text('删除选定地图的所有道具数据'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _showDeleteMapGrenadesDialog(),
-            ),
-            ListTile(
-              leading: const Icon(Icons.checklist, color: Colors.orange),
-              title: const Text('批量选择删除'),
-              subtitle: const Text('精确选择要删除的道具，支持预览'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (_) => const GrenadeSelectDeleteScreen()),
-              ),
-            ),
-          ],
+          ),
         ),
       ],
+    );
+  }
+
+  Widget _buildDataManagementSection() {
+    return _buildSection(
+      title: '🗄️ 数据管理',
+      children: [
+        ListTile(
+          leading: const Icon(Icons.playlist_add_check, color: Colors.teal),
+          title: const Text('重导入默认区域标签/数据'),
+          subtitle: const Text('一键补齐内置默认区域标签与区域几何数据'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => _reimportDefaultAreaTagsForAllMaps(),
+        ),
+        ListTile(
+          leading: const Icon(Icons.delete_sweep, color: Colors.redAccent),
+          title: const Text('清空地图道具'),
+          subtitle: const Text('删除选定地图的所有道具数据'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => _showDeleteMapGrenadesDialog(),
+        ),
+        ListTile(
+          leading: const Icon(Icons.checklist, color: Colors.orange),
+          title: const Text('批量选择删除'),
+          subtitle: const Text('精确选择要删除的道具，支持预览'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (_) => const GrenadeSelectDeleteScreen()),
+          ),
+        ),
+        ListTile(
+          leading: const Icon(Icons.cleaning_services,
+              color: Colors.lightBlueAccent),
+          title: const Text('清理孤儿媒体文件'),
+          subtitle: const Text('仅扫描常见图片/视频格式，删除未被任何道具引用的文件'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => _scanAndCleanupOrphanMediaFiles(),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _scanAndCleanupOrphanMediaFiles() async {
+    final isar = ref.read(isarProvider);
+    final dataService = DataService(isar);
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 16),
+            Text('正在扫描孤儿媒体文件...'),
+          ],
+        ),
+      ),
+    );
+
+    late final OrphanMediaScanResult scanResult;
+    try {
+      scanResult = await dataService.scanOrphanMediaFiles();
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('扫描失败: $e'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    Navigator.pop(context);
+
+    if (scanResult.orphanFiles.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('未发现可清理的孤儿媒体文件')),
+      );
+      return;
+    }
+
+    final previewItems = scanResult.orphanFiles.take(8).toList(growable: false);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('发现孤儿媒体文件'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '共发现 ${scanResult.orphanFiles.length} 个未被引用的媒体文件，预计可释放 ${_formatBytes(scanResult.totalSizeBytes)}。',
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  '示例文件：',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                ...previewItems.map(
+                  (item) => Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text(
+                      '${File(item.path).uri.pathSegments.isEmpty ? item.path : File(item.path).uri.pathSegments.last} · ${_formatBytes(item.sizeBytes)}',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ),
+                if (scanResult.orphanFiles.length > previewItems.length)
+                  Text(
+                    '还有 ${scanResult.orphanFiles.length - previewItems.length} 个文件未展开显示。',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.lightBlueAccent,
+              foregroundColor: Colors.black,
+            ),
+            child: const Text('立即清理'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 16),
+            Text('正在清理孤儿媒体文件...'),
+          ],
+        ),
+      ),
+    );
+
+    late final OrphanMediaCleanupResult cleanupResult;
+    try {
+      cleanupResult =
+          await dataService.cleanupOrphanMediaFiles(scanResult.orphanFiles);
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('清理失败: $e'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    Navigator.pop(context);
+    final failedCount = cleanupResult.failedFiles.length;
+    final successCount = cleanupResult.deletedFiles.length;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          failedCount == 0
+              ? '已清理 $successCount 个孤儿媒体文件，释放 ${_formatBytes(cleanupResult.deletedBytes)}'
+              : '已清理 $successCount 个，失败 $failedCount 个，释放 ${_formatBytes(cleanupResult.deletedBytes)}',
+        ),
+        backgroundColor: failedCount == 0 ? Colors.green : Colors.orange,
+      ),
     );
   }
 
@@ -1174,6 +1206,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ],
       ),
     );
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    double size = bytes.toDouble();
+    var unitIndex = -1;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex++;
+    }
+    final fractionDigits = size >= 100 ? 0 : 1;
+    return '${size.toStringAsFixed(fractionDigits)} ${units[unitIndex]}';
   }
 
   Widget _buildHotkeyTile(HotkeyAction action, String label) {

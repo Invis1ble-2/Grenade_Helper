@@ -5,19 +5,22 @@ import 'dart:io';
 class LanDiscoveryDevice {
   final String host;
   final int port;
-  final String deviceId;
-  final String deviceName;
+  final String nodeId;
+  final String displayName;
   final bool requireAuthForUpload;
   final int trustedPeerCount;
 
   const LanDiscoveryDevice({
     required this.host,
     required this.port,
-    required this.deviceId,
-    required this.deviceName,
+    required this.nodeId,
+    required this.displayName,
     required this.requireAuthForUpload,
     required this.trustedPeerCount,
   });
+
+  String get deviceId => nodeId;
+  String get deviceName => displayName;
 }
 
 class LanSyncDiscoveryService {
@@ -95,8 +98,14 @@ class LanSyncDiscoveryService {
       return LanDiscoveryDevice(
         host: host,
         port: (decoded['port'] as int?) ?? port,
-        deviceId: (decoded['deviceId'] as String? ?? '').trim(),
-        deviceName: (decoded['deviceName'] as String? ?? '').trim(),
+        nodeId: (decoded['nodeId'] as String? ??
+                decoded['deviceId'] as String? ??
+                '')
+            .trim(),
+        displayName: (decoded['displayName'] as String? ??
+                decoded['deviceName'] as String? ??
+                '')
+            .trim(),
         requireAuthForUpload: decoded['requireAuthForUpload'] as bool? ?? false,
         trustedPeerCount: decoded['trustedPeerCount'] as int? ?? 0,
       );

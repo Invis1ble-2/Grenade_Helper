@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:archive/archive_io.dart';
+import 'package:crypto/crypto.dart';
 import 'package:isar_community/isar.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
@@ -13,6 +14,7 @@ import '../models.dart';
 import '../models/tag.dart';
 import '../models/map_area.dart';
 import '../models/grenade_tag.dart';
+import 'lan_sync/lan_sync_local_store.dart';
 
 /// 导入状态
 enum ImportStatus { newItem, update, skip }
@@ -52,6 +54,7 @@ class PackagePreviewResult {
   final List<PackageAreaData> areas;
   final List<PackageFavoriteFolderData> favoriteFolders;
   final List<PackageImpactGroupData> impactGroups;
+  final List<PackageGrenadeTombstoneData> grenadeTombstones;
 
   PackagePreviewResult({
     required this.grenadesByMap,
@@ -62,14 +65,56 @@ class PackagePreviewResult {
     this.areas = const [],
     this.favoriteFolders = const [],
     this.impactGroups = const [],
+    this.grenadeTombstones = const [],
   });
 
-  bool get isMultiMap => grenadesByMap.keys.length > 1;
+  bool get isMultiMap => mapNames.length > 1;
 
   int get totalCount =>
       grenadesByMap.values.fold(0, (sum, list) => sum + list.length);
 
-  List<String> get mapNames => grenadesByMap.keys.toList();
+  List<String> get mapNames {
+    final ordered = <String>[];
+    final seen = <String>{};
+    for (final name in grenadesByMap.keys) {
+      final trimmed = name.trim();
+      if (trimmed.isEmpty || !seen.add(trimmed)) continue;
+      ordered.add(trimmed);
+    }
+    for (final tombstone in grenadeTombstones) {
+      final trimmed = tombstone.mapName.trim();
+      if (trimmed.isEmpty || !seen.add(trimmed)) continue;
+      ordered.add(trimmed);
+    }
+    return ordered;
+  }
+}
+
+class PackageGrenadeTombstoneData {
+  final String uniqueId;
+  final String mapName;
+  final int deletedAt;
+
+  const PackageGrenadeTombstoneData({
+    required this.uniqueId,
+    required this.mapName,
+    required this.deletedAt,
+  });
+
+  factory PackageGrenadeTombstoneData.fromJson(Map<String, dynamic> json) {
+    return PackageGrenadeTombstoneData(
+      uniqueId: (json['uniqueId'] as String? ?? '').trim(),
+      mapName: (json['mapName'] as String? ?? '').trim(),
+      deletedAt:
+          json['deletedAt'] as int? ?? DateTime.now().millisecondsSinceEpoch,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'uniqueId': uniqueId,
+        'mapName': mapName,
+        'deletedAt': deletedAt,
+      };
 }
 
 class PackageTagData {
@@ -318,6 +363,40 @@ class _ExportBundle {
       };
 }
 
+class OrphanMediaFileEntry {
+  final String path;
+  final int sizeBytes;
+
+  const OrphanMediaFileEntry({
+    required this.path,
+    required this.sizeBytes,
+  });
+}
+
+class OrphanMediaScanResult {
+  final List<OrphanMediaFileEntry> orphanFiles;
+
+  const OrphanMediaScanResult({
+    required this.orphanFiles,
+  });
+
+  int get totalSizeBytes =>
+      orphanFiles.fold(0, (sum, item) => sum + item.sizeBytes);
+}
+
+class OrphanMediaCleanupResult {
+  final List<OrphanMediaFileEntry> deletedFiles;
+  final List<OrphanMediaFileEntry> failedFiles;
+
+  const OrphanMediaCleanupResult({
+    required this.deletedFiles,
+    required this.failedFiles,
+  });
+
+  int get deletedBytes =>
+      deletedFiles.fold(0, (sum, item) => sum + item.sizeBytes);
+}
+
 class _PackageFavoriteFolderRef {
   final String mapName;
   final String nameKey;
@@ -352,6 +431,7 @@ class _LanSyncExportBundle {
   final List<Map<String, dynamic>> areas;
   final List<Map<String, dynamic>> favoriteFolders;
   final List<Map<String, dynamic>> impactGroups;
+  final List<Map<String, dynamic>> grenadeTombstones;
   final Set<String> filesToZip;
 
   const _LanSyncExportBundle({
@@ -360,16 +440,18 @@ class _LanSyncExportBundle {
     required this.areas,
     required this.favoriteFolders,
     required this.impactGroups,
+    required this.grenadeTombstones,
     required this.filesToZip,
   });
 
   Map<String, dynamic> toJson() => {
-        'schemaVersion': 3,
+        'schemaVersion': 4,
         'grenades': grenades,
         'tags': tags,
         'areas': areas,
         'favoriteFolders': favoriteFolders,
         'impactGroups': impactGroups,
+        'grenadeTombstones': grenadeTombstones,
       };
 }
 
@@ -405,6 +487,30 @@ class DataService {
   final Isar isar;
   DataService(this.isar);
 
+  static const Set<String> _trackedMediaExtensions = {
+    '.jpg',
+    '.jpeg',
+    '.png',
+    '.gif',
+    '.webp',
+    '.bmp',
+    '.heic',
+    '.heif',
+    '.mp4',
+    '.mov',
+    '.m4v',
+    '.avi',
+    '.mkv',
+    '.webm',
+  };
+
+  static String normalizeMediaPath(String rawPath) {
+    final trimmed = rawPath.trim();
+    if (trimmed.isEmpty) return '';
+    final normalized = p.normalize(File(trimmed).absolute.path);
+    return Platform.isWindows ? normalized.toLowerCase() : normalized;
+  }
+
   /// 删除媒体文件（静态方法，可在其他地方调用）
   static Future<void> deleteMediaFile(String localPath) async {
     try {
@@ -424,32 +530,166 @@ class DataService {
     }
   }
 
-  /// 删除某个地图的所有道具
-  Future<int> deleteAllGrenadesForMap(GameMap map) async {
-    int deletedCount = 0;
-    await map.layers.load();
+  Future<bool> deleteMediaFileIfUnused(
+    String localPath, {
+    int? excludingMediaId,
+  }) async {
+    final normalizedPath = localPath.trim();
+    if (normalizedPath.isEmpty) return false;
+
+    final medias = await isar.stepMedias
+        .filter()
+        .localPathEqualTo(normalizedPath)
+        .findAll();
+    final stillReferenced = medias.any((media) => media.id != excludingMediaId);
+    if (stillReferenced) return false;
+
+    await deleteMediaFile(normalizedPath);
+    return true;
+  }
+
+  Future<OrphanMediaScanResult> scanOrphanMediaFiles() async {
+    final dataPath = (isar.directory ?? '').trim();
+    if (dataPath.isEmpty) {
+      return const OrphanMediaScanResult(orphanFiles: []);
+    }
+
+    final dataDir = Directory(dataPath);
+    if (!await dataDir.exists()) {
+      return const OrphanMediaScanResult(orphanFiles: []);
+    }
+
+    final referencedPaths = <String>{};
+    final medias = await isar.stepMedias.where().findAll();
+    for (final media in medias) {
+      final normalized = normalizeMediaPath(media.localPath);
+      if (normalized.isNotEmpty) {
+        referencedPaths.add(normalized);
+      }
+    }
+
+    final orphanFiles = <OrphanMediaFileEntry>[];
+    await for (final entity
+        in dataDir.list(recursive: true, followLinks: false)) {
+      if (entity is! File) continue;
+      final extension = p.extension(entity.path).toLowerCase();
+      if (!_trackedMediaExtensions.contains(extension)) continue;
+
+      final normalized = normalizeMediaPath(entity.path);
+      if (normalized.isEmpty || referencedPaths.contains(normalized)) continue;
+
+      int sizeBytes = 0;
+      try {
+        sizeBytes = await entity.length();
+      } catch (_) {}
+
+      orphanFiles.add(
+        OrphanMediaFileEntry(
+          path: entity.path,
+          sizeBytes: sizeBytes,
+        ),
+      );
+    }
+
+    orphanFiles.sort((a, b) => a.path.compareTo(b.path));
+    return OrphanMediaScanResult(orphanFiles: orphanFiles);
+  }
+
+  Future<OrphanMediaCleanupResult> cleanupOrphanMediaFiles(
+    Iterable<OrphanMediaFileEntry> files,
+  ) async {
+    final deletedFiles = <OrphanMediaFileEntry>[];
+    final failedFiles = <OrphanMediaFileEntry>[];
+
+    for (final item in files) {
+      final file = File(item.path);
+      try {
+        if (await file.exists()) {
+          await file.delete();
+        }
+        deletedFiles.add(item);
+      } catch (_) {
+        failedFiles.add(item);
+      }
+    }
+
+    return OrphanMediaCleanupResult(
+      deletedFiles: deletedFiles,
+      failedFiles: failedFiles,
+    );
+  }
+
+  Future<int> deleteGrenades(
+    List<Grenade> grenades, {
+    bool recordSyncTombstones = true,
+  }) async {
+    if (grenades.isEmpty) return 0;
+
+    final tombstones = <LanSyncGrenadeTombstoneEntry>[];
+    final mediaPathsToCleanup = <String>{};
+    for (final grenade in grenades) {
+      await grenade.layer.load();
+      final layer = grenade.layer.value;
+      if (layer == null) continue;
+      await layer.map.load();
+      final map = layer.map.value;
+      final uniqueId = (grenade.uniqueId ?? '').trim();
+      final mapName = map?.name.trim() ?? '';
+      if (recordSyncTombstones && uniqueId.isNotEmpty && mapName.isNotEmpty) {
+        tombstones.add(LanSyncGrenadeTombstoneEntry(
+          uniqueId: uniqueId,
+          mapName: mapName,
+          deletedAt: DateTime.now().millisecondsSinceEpoch,
+        ));
+      }
+      await grenade.steps.load();
+      for (final step in grenade.steps) {
+        await step.medias.load();
+      }
+    }
+
+    for (final grenade in grenades) {
+      for (final step in grenade.steps) {
+        for (final media in step.medias) {
+          final path = media.localPath.trim();
+          if (path.isNotEmpty) {
+            mediaPathsToCleanup.add(path);
+          }
+        }
+      }
+    }
 
     await isar.writeTxn(() async {
-      for (final layer in map.layers) {
-        await layer.grenades.load();
-        for (final grenade in layer.grenades.toList()) {
-          await grenade.steps.load();
-          for (final step in grenade.steps) {
-            await step.medias.load();
-            for (final media in step.medias) {
-              await deleteMediaFile(media.localPath);
-              await isar.stepMedias.delete(media.id);
-            }
-            await isar.grenadeSteps.delete(step.id);
-          }
-          await isar.grenades.delete(grenade.id);
-          deletedCount++;
+      for (final grenade in grenades) {
+        for (final step in grenade.steps) {
+          await isar.stepMedias
+              .deleteAll(step.medias.map((media) => media.id).toList());
         }
-        layer.grenades.clear();
-        await layer.grenades.save();
+        await isar.grenadeSteps
+            .deleteAll(grenade.steps.map((step) => step.id).toList());
+        await isar.grenades.delete(grenade.id);
       }
     });
-    return deletedCount;
+
+    for (final path in mediaPathsToCleanup) {
+      await deleteMediaFileIfUnused(path);
+    }
+
+    if (recordSyncTombstones && tombstones.isNotEmpty) {
+      await LanSyncLocalStore().upsertGrenadeTombstones(tombstones);
+    }
+    return grenades.length;
+  }
+
+  /// 删除某个地图的所有道具
+  Future<int> deleteAllGrenadesForMap(GameMap map) async {
+    await map.layers.load();
+    final grenades = <Grenade>[];
+    for (final layer in map.layers) {
+      await layer.grenades.load();
+      grenades.addAll(layer.grenades.toList());
+    }
+    return deleteGrenades(grenades);
   }
 
   /// 预览包
@@ -471,6 +711,7 @@ class DataService {
     final areas = <PackageAreaData>[];
     final favoriteFolders = <PackageFavoriteFolderData>[];
     final impactGroups = <PackageImpactGroupData>[];
+    final grenadeTombstones = <PackageGrenadeTombstoneData>[];
     final Map<String, List<int>> memoryImages = {};
 
     for (var archiveFile in archive) {
@@ -524,6 +765,17 @@ class DataService {
               impactGroups.add(group);
             }
           }
+          final grenadeTombstonesRaw = decoded['grenadeTombstones'];
+          if (grenadeTombstonesRaw is List) {
+            for (final raw in grenadeTombstonesRaw) {
+              if (raw is! Map<String, dynamic>) continue;
+              final tombstone = PackageGrenadeTombstoneData.fromJson(raw);
+              if (tombstone.uniqueId.isEmpty || tombstone.mapName.isEmpty) {
+                continue;
+              }
+              grenadeTombstones.add(tombstone);
+            }
+          }
         } else if (decoded is List) {
           grenadesData = decoded;
           schemaVersion = 1;
@@ -535,7 +787,7 @@ class DataService {
       }
     }
 
-    if (grenadesData.isEmpty) return null;
+    if (grenadesData.isEmpty && grenadeTombstones.isEmpty) return null;
 
     // 按地图分组
     final Map<String, List<GrenadePreviewItem>> grenadesByMap = {};
@@ -629,6 +881,7 @@ class DataService {
       areas: areas,
       favoriteFolders: favoriteFolders,
       impactGroups: impactGroups,
+      grenadeTombstones: grenadeTombstones,
     );
   }
 
@@ -882,7 +1135,9 @@ class DataService {
   }
 
   Future<_LanSyncExportBundle> _buildLanSyncBundle(
-      List<Grenade> grenades) async {
+    List<Grenade> grenades, {
+    List<PackageGrenadeTombstoneData> grenadeTombstones = const [],
+  }) async {
     final base = await _buildExportBundle(grenades);
     final grenadeItems = base.grenades
         .map((item) => Map<String, dynamic>.from(item))
@@ -1000,6 +1255,8 @@ class DataService {
       areas: base.areas,
       favoriteFolders: favoriteFoldersData,
       impactGroups: impactGroupsData,
+      grenadeTombstones:
+          grenadeTombstones.map((e) => e.toJson()).toList(growable: false),
       filesToZip: base.filesToZip,
     );
   }
@@ -1011,6 +1268,7 @@ class DataService {
     Grenade? singleGrenade,
     GameMap? singleMap,
     List<Grenade>? explicitGrenades,
+    List<PackageGrenadeTombstoneData> grenadeTombstones = const [],
   }) async {
     final grenades = await _resolveExportGrenades(
       scopeType: scopeType,
@@ -1018,11 +1276,14 @@ class DataService {
       singleMap: singleMap,
       explicitGrenades: explicitGrenades,
     );
-    if (grenades.isEmpty) {
+    if (grenades.isEmpty && grenadeTombstones.isEmpty) {
       throw StateError('没有可同步的道具');
     }
 
-    final syncBundle = await _buildLanSyncBundle(grenades);
+    final syncBundle = await _buildLanSyncBundle(
+      grenades,
+      grenadeTombstones: grenadeTombstones,
+    );
     final tempDir = await getTemporaryDirectory();
     final exportDirPath = p.join(tempDir.path, "lan_sync_export_temp");
     final zipPath = p.join(tempDir.path, "lan_sync_data.cs2pkg");
@@ -1038,6 +1299,182 @@ class DataService {
     );
 
     return zipPath;
+  }
+
+  Future<List<Grenade>> loadGrenadesByUniqueIds(
+    Iterable<String> uniqueIds,
+  ) async {
+    final normalized =
+        uniqueIds.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
+    if (normalized.isEmpty) return const [];
+    final all = await isar.grenades.where().findAll();
+    return all
+        .where((g) => normalized.contains((g.uniqueId ?? '').trim()))
+        .toList(growable: false);
+  }
+
+  Future<Map<String, GrenadePreviewItem>>
+      loadLocalGrenadePreviewItemsByUniqueIds(
+    Iterable<String> uniqueIds,
+  ) async {
+    final normalized =
+        uniqueIds.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
+    if (normalized.isEmpty) return const {};
+
+    final all = await isar.grenades.where().findAll();
+    final matched = all
+        .where((g) => normalized.contains((g.uniqueId ?? '').trim()))
+        .toList(growable: false);
+    if (matched.isEmpty) return const {};
+
+    final result = <String, GrenadePreviewItem>{};
+    for (final grenade in matched) {
+      final uniqueId = (grenade.uniqueId ?? '').trim();
+      if (uniqueId.isEmpty) continue;
+
+      await grenade.layer.load();
+      final layer = grenade.layer.value;
+      await layer?.map.load();
+      final map = layer?.map.value;
+      await grenade.steps.load();
+
+      final stepsData = <Map<String, dynamic>>[];
+      for (final step in grenade.steps) {
+        await step.medias.load();
+        final mediaData = <Map<String, dynamic>>[];
+        for (final media in step.medias) {
+          mediaData.add({
+            'path': media.localPath,
+            'type': media.type,
+          });
+        }
+        stepsData.add({
+          'title': step.title,
+          'description': step.description,
+          'index': step.stepIndex,
+          'medias': mediaData,
+        });
+      }
+
+      final rawData = <String, dynamic>{
+        'uniqueId': uniqueId,
+        'mapName': map?.name ?? '',
+        'layerName': layer?.name ?? '',
+        'title': grenade.title,
+        'type': grenade.type,
+        'team': grenade.team,
+        'author': grenade.author,
+        'hasLocalEdits': grenade.hasLocalEdits,
+        'x': grenade.xRatio,
+        'y': grenade.yRatio,
+        'impactX': grenade.impactXRatio,
+        'impactY': grenade.impactYRatio,
+        'impactAreaStrokes': grenade.impactAreaStrokes,
+        'steps': stepsData,
+        'createdAt': grenade.createdAt.millisecondsSinceEpoch,
+        'updatedAt': grenade.updatedAt.millisecondsSinceEpoch,
+      };
+
+      result[uniqueId] = GrenadePreviewItem(
+        rawData: rawData,
+        uniqueId: uniqueId,
+        title: grenade.title,
+        type: grenade.type,
+        mapName: map?.name ?? '',
+        layerName: layer?.name ?? '',
+        author: grenade.author,
+        status: ImportStatus.skip,
+        updatedAt: grenade.updatedAt,
+      );
+    }
+
+    return result;
+  }
+
+  Future<Map<String, Map<String, String>>> buildGrenadeDigestByMap({
+    required Set<String> mapKeys,
+  }) async {
+    final normalized =
+        mapKeys.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
+    if (normalized.isEmpty) return const {};
+
+    final result = <String, Map<String, String>>{
+      for (final mapKey in normalized) mapKey: <String, String>{},
+    };
+
+    final mapByName = <String, GameMap>{};
+    final allMaps = await isar.gameMaps.where().findAll();
+    for (final map in allMaps) {
+      final name = map.name.trim();
+      if (name.isNotEmpty && normalized.contains(name)) {
+        mapByName[name] = map;
+      }
+    }
+
+    final scopedGrenades = <Grenade>[];
+    for (final mapKey in normalized) {
+      final map = mapByName[mapKey];
+      if (map == null) continue;
+      await map.layers.load();
+      for (final layer in map.layers) {
+        await layer.grenades.load();
+        scopedGrenades.addAll(layer.grenades);
+      }
+    }
+    if (scopedGrenades.isEmpty) return result;
+
+    final exportBundle = await _buildExportBundle(scopedGrenades);
+    for (final raw in exportBundle.grenades) {
+      final item = Map<String, dynamic>.from(raw);
+      final mapName = (item['mapName'] as String? ?? '').trim();
+      if (!normalized.contains(mapName)) continue;
+      final uniqueId = (item['uniqueId'] as String? ?? '').trim();
+      if (uniqueId.isEmpty) continue;
+      result.putIfAbsent(mapName, () => <String, String>{});
+      result[mapName]![uniqueId] = _digestJsonValue(item);
+    }
+
+    return result;
+  }
+
+  String _digestJsonValue(Object? value) {
+    final canonical = _canonicalizeJson(value);
+    final encoded = jsonEncode(canonical);
+    return sha256.convert(utf8.encode(encoded)).toString();
+  }
+
+  Object? _canonicalizeJson(Object? value) {
+    if (value is Map) {
+      final entries = value.entries.toList()
+        ..sort((a, b) => a.key.toString().compareTo(b.key.toString()));
+      final normalized = <String, Object?>{};
+      for (final entry in entries) {
+        normalized[entry.key.toString()] = _canonicalizeJson(entry.value);
+      }
+      return normalized;
+    }
+    if (value is List) {
+      return value.map(_canonicalizeJson).toList(growable: false);
+    }
+    return value;
+  }
+
+  String _normalizeStructuredJsonString(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return trimmed;
+    try {
+      final decoded = jsonDecode(trimmed);
+      return jsonEncode(_canonicalizeJson(decoded));
+    } catch (_) {
+      return trimmed;
+    }
+  }
+
+  bool _isSharedAreaEquivalent(MapArea local, PackageAreaData shared) {
+    return local.name == shared.name &&
+        local.colorValue == shared.colorValue &&
+        _normalizeStructuredJsonString(local.strokes) ==
+            _normalizeStructuredJsonString(shared.strokes);
   }
 
   /// 导出列表
@@ -1391,7 +1828,6 @@ class DataService {
           .mapIdEqualTo(map.id)
           .tagIdEqualTo(localTag.id)
           .findAll();
-      final existingLayerIds = existingAreas.map((a) => a.layerId).toSet();
 
       final tagAreas = preview.areas.where((a) =>
           a.tagUuid == tagUuid &&
@@ -1400,7 +1836,14 @@ class DataService {
       for (final area in tagAreas) {
         final layerId = layerIdByName[area.layerName];
         if (layerId == null) continue;
-        if (!existingLayerIds.contains(layerId)) continue;
+        final sameLayerAreas = existingAreas
+            .where((a) => a.layerId == layerId)
+            .toList(growable: false);
+        if (sameLayerAreas.isEmpty) continue;
+        final hasEquivalent = sameLayerAreas.any(
+          (localArea) => _isSharedAreaEquivalent(localArea, area),
+        );
+        if (hasEquivalent) continue;
 
         final key = '$tagUuid|${sharedTag.name}|${sharedTag.mapName}';
         groupLayers.putIfAbsent(key, () => <String>{}).add(area.layerName);
@@ -1466,7 +1909,9 @@ class DataService {
     Map<String, ImportTagConflictResolution> tagResolutions = const {},
     Map<String, ImportAreaConflictResolution> areaResolutions = const {},
   }) async {
-    if (selectedUniqueIds.isEmpty) {
+    final hasGrenadeSelection = selectedUniqueIds.isNotEmpty;
+    final hasTombstones = preview.grenadeTombstones.isNotEmpty;
+    if (!hasGrenadeSelection && !hasTombstones) {
       return "未选择任何道具";
     }
 
@@ -1474,8 +1919,11 @@ class DataService {
     final dataPath = isar.directory ?? '';
     final memoryImages = preview.memoryImages;
 
-    final selectedTagUuids =
-        _collectSelectedTagUuids(preview, selectedUniqueIds);
+    final tombstoneResult = await _applyGrenadeTombstones(preview);
+
+    final selectedTagUuids = hasGrenadeSelection
+        ? _collectSelectedTagUuids(preview, selectedUniqueIds)
+        : <String>{};
     final tagIdByUuid = await _upsertTagsForImport(
       preview,
       selectedTagUuids,
@@ -1501,111 +1949,153 @@ class DataService {
     int skippedCount = 0;
     final importedGrenades = <Grenade>[];
 
-    await isar.writeTxn(() async {
-      for (final mapGrenades in preview.grenadesByMap.values) {
-        for (final previewItem in mapGrenades) {
-          if (!selectedUniqueIds.contains(previewItem.uniqueId)) continue;
+    if (hasGrenadeSelection) {
+      await isar.writeTxn(() async {
+        for (final mapGrenades in preview.grenadesByMap.values) {
+          for (final previewItem in mapGrenades) {
+            if (!selectedUniqueIds.contains(previewItem.uniqueId)) continue;
 
-          final item = previewItem.rawData;
-          final mapName = item['mapName'];
-          final layerName = item['layerName'];
+            final item = previewItem.rawData;
+            final mapName = item['mapName'];
+            final layerName = item['layerName'];
 
-          final map =
-              await isar.gameMaps.filter().nameEqualTo(mapName).findFirst();
-          if (map == null) continue;
+            final map =
+                await isar.gameMaps.filter().nameEqualTo(mapName).findFirst();
+            if (map == null) continue;
 
-          await map.layers.load();
-          MapLayer? layer;
-          for (final l in map.layers) {
-            if (l.name == layerName) {
-              layer = l;
-              break;
+            await map.layers.load();
+            MapLayer? layer;
+            for (final l in map.layers) {
+              if (l.name == layerName) {
+                layer = l;
+                break;
+              }
             }
-          }
-          layer ??= map.layers.isNotEmpty ? map.layers.first : null;
-          if (layer == null) continue;
+            layer ??= map.layers.isNotEmpty ? map.layers.first : null;
+            if (layer == null) continue;
 
-          final importedUniqueId = item['uniqueId'] as String?;
-          final title = item['title'] as String;
-          final xRatio = (item['x'] as num).toDouble();
-          final yRatio = (item['y'] as num).toDouble();
-          final importedUpdatedAt = item['updatedAt'] != null
-              ? DateTime.fromMillisecondsSinceEpoch(item['updatedAt'])
-              : DateTime.now();
-          final tagUuids = _readTagUuids(item);
+            final importedUniqueId = item['uniqueId'] as String?;
+            final title = item['title'] as String;
+            final xRatio = (item['x'] as num).toDouble();
+            final yRatio = (item['y'] as num).toDouble();
+            final importedUpdatedAt = item['updatedAt'] != null
+                ? DateTime.fromMillisecondsSinceEpoch(item['updatedAt'])
+                : DateTime.now();
+            final tagUuids = _readTagUuids(item);
 
-          Grenade? existing;
-          if (importedUniqueId != null && importedUniqueId.isNotEmpty) {
-            final allGrenades = await isar.grenades.where().findAll();
-            existing = allGrenades
-                .where((g) => g.uniqueId == importedUniqueId)
-                .firstOrNull;
-          }
-          if (existing == null && importedUniqueId == null) {
-            await layer.grenades.load();
-            existing = layer.grenades
-                .where((g) =>
-                    g.title == title &&
-                    (g.xRatio - xRatio).abs() < 0.01 &&
-                    (g.yRatio - yRatio).abs() < 0.01)
-                .firstOrNull;
-          }
+            Grenade? existing;
+            if (importedUniqueId != null && importedUniqueId.isNotEmpty) {
+              final allGrenades = await isar.grenades.where().findAll();
+              existing = allGrenades
+                  .where((g) => g.uniqueId == importedUniqueId)
+                  .firstOrNull;
+            }
+            if (existing == null && importedUniqueId == null) {
+              await layer.grenades.load();
+              existing = layer.grenades
+                  .where((g) =>
+                      g.title == title &&
+                      (g.xRatio - xRatio).abs() < 0.01 &&
+                      (g.yRatio - yRatio).abs() < 0.01)
+                  .firstOrNull;
+            }
 
-          if (existing != null) {
-            if (importedUpdatedAt.isAfter(existing.updatedAt)) {
-              await _updateExistingGrenade(
-                  existing, item, memoryImages, dataPath);
-              await _replaceGrenadeTags(existing.id, tagUuids, tagIdByUuid);
+            if (existing != null) {
+              if (importedUpdatedAt.isAfter(existing.updatedAt)) {
+                await _updateExistingGrenade(
+                    existing, item, memoryImages, dataPath);
+                await _replaceGrenadeTags(existing.id, tagUuids, tagIdByUuid);
+                await _applyLanSyncRefsToGrenade(
+                  existing,
+                  item,
+                  favoriteFolderIdByRef: favoriteFolderIdByRef,
+                  impactGroupIdByRef: impactGroupIdByRef,
+                );
+                importedGrenades.add(existing);
+                updatedCount++;
+              } else {
+                skippedCount++;
+              }
+            } else {
+              final newGrenade = await _createNewGrenade(
+                  item, memoryImages, dataPath, layer, importedUniqueId);
+              await _replaceGrenadeTags(newGrenade.id, tagUuids, tagIdByUuid);
               await _applyLanSyncRefsToGrenade(
-                existing,
+                newGrenade,
                 item,
                 favoriteFolderIdByRef: favoriteFolderIdByRef,
                 impactGroupIdByRef: impactGroupIdByRef,
               );
-              importedGrenades.add(existing);
-              updatedCount++;
-            } else {
-              skippedCount++;
+              importedGrenades.add(newGrenade);
+              newCount++;
             }
-          } else {
-            final newGrenade = await _createNewGrenade(
-                item, memoryImages, dataPath, layer, importedUniqueId);
-            await _replaceGrenadeTags(newGrenade.id, tagUuids, tagIdByUuid);
-            await _applyLanSyncRefsToGrenade(
-              newGrenade,
-              item,
-              favoriteFolderIdByRef: favoriteFolderIdByRef,
-              impactGroupIdByRef: impactGroupIdByRef,
-            );
-            importedGrenades.add(newGrenade);
-            newCount++;
           }
         }
-      }
-
-      if (importedGrenades.isNotEmpty) {
-        final history = ImportHistory(
-          fileName: importFileName,
-          importedAt: DateTime.now(),
-          newCount: newCount,
-          updatedCount: updatedCount,
-          skippedCount: skippedCount,
-        );
-        await isar.importHistorys.put(history);
-        history.grenades.addAll(importedGrenades);
-        await history.grenades.save();
-      }
-    });
+        if (importedGrenades.isNotEmpty) {
+          final history = ImportHistory(
+            fileName: importFileName,
+            importedAt: DateTime.now(),
+            newCount: newCount,
+            updatedCount: updatedCount,
+            skippedCount: skippedCount,
+          );
+          await isar.importHistorys.put(history);
+          history.grenades.addAll(importedGrenades);
+          await history.grenades.save();
+        }
+      });
+    }
 
     final List<String> messages = [];
     if (newCount > 0) messages.add("新增 $newCount 个");
     if (updatedCount > 0) messages.add("更新 $updatedCount 个");
     if (skippedCount > 0) messages.add("跳过 $skippedCount 个较旧版本");
+    if (tombstoneResult.deletedCount > 0) {
+      messages.add("删除 ${tombstoneResult.deletedCount} 个");
+    }
+    if (tombstoneResult.skippedCount > 0) {
+      messages.add("忽略 ${tombstoneResult.skippedCount} 条较新的本地版本");
+    }
 
     if (messages.isEmpty) {
       return "没有可导入的道具";
     }
     return "成功导入：${messages.join('，')}";
+  }
+
+  Future<({int deletedCount, int skippedCount})> _applyGrenadeTombstones(
+    PackagePreviewResult preview,
+  ) async {
+    if (preview.grenadeTombstones.isEmpty) {
+      return (deletedCount: 0, skippedCount: 0);
+    }
+
+    final allGrenades = await isar.grenades.where().findAll();
+    final grenadeByUniqueId = <String, Grenade>{};
+    for (final grenade in allGrenades) {
+      final uniqueId = (grenade.uniqueId ?? '').trim();
+      if (uniqueId.isNotEmpty) {
+        grenadeByUniqueId[uniqueId] = grenade;
+      }
+    }
+
+    final toDelete = <Grenade>[];
+    var skippedCount = 0;
+    for (final tombstone in preview.grenadeTombstones) {
+      final grenade = grenadeByUniqueId[tombstone.uniqueId];
+      if (grenade == null) continue;
+      final deletedAt =
+          DateTime.fromMillisecondsSinceEpoch(tombstone.deletedAt);
+      if (grenade.updatedAt.isAfter(deletedAt)) {
+        skippedCount++;
+        continue;
+      }
+      toDelete.add(grenade);
+    }
+
+    final deletedCount =
+        await deleteGrenades(toDelete, recordSyncTombstones: false);
+    return (deletedCount: deletedCount, skippedCount: skippedCount);
   }
 
   List<String> _readTagUuids(Map<String, dynamic> item) {
@@ -2224,13 +2714,13 @@ class DataService {
 
     // 删旧数据
     await existing.steps.load();
+    final oldMediaPaths = <String>{};
     for (final step in existing.steps) {
       await step.medias.load();
-      // 删旧文件
       for (final media in step.medias) {
-        final file = File(media.localPath);
-        if (await file.exists()) {
-          await file.delete();
+        final path = media.localPath.trim();
+        if (path.isNotEmpty) {
+          oldMediaPaths.add(path);
         }
         await isar.stepMedias.delete(media.id);
       }
@@ -2238,6 +2728,9 @@ class DataService {
     }
     existing.steps.clear();
     await existing.steps.save();
+    for (final path in oldMediaPaths) {
+      await deleteMediaFileIfUnused(path);
+    }
 
     // 创建新的 Steps 和 Medias
     final stepsList = item['steps'] as List;

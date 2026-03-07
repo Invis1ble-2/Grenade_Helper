@@ -1644,38 +1644,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   Future<void> _deleteGrenadesInBatch(List<Grenade> grenades) async {
     if (grenades.isEmpty) return;
     final isar = ref.read(isarProvider);
-
-    // 加载数据
-    for (final g in grenades) {
-      g.steps.loadSync();
-      for (final step in g.steps) {
-        step.medias.loadSync();
-      }
-    }
-
-    // 删文件
-    for (final g in grenades) {
-      for (final step in g.steps) {
-        for (final media in step.medias) {
-          await DataService.deleteMediaFile(media.localPath);
-        }
-      }
-    }
-
-    // 在单个事务中执行所有删除操作
-    await isar.writeTxn(() async {
-      for (final g in grenades) {
-        // 删除所有媒体记录
-        for (final step in g.steps) {
-          await isar.stepMedias
-              .deleteAll(step.medias.map((m) => m.id).toList());
-        }
-        // 删除所有步骤
-        await isar.grenadeSteps.deleteAll(g.steps.map((s) => s.id).toList());
-        // 删除道具
-        await isar.grenades.delete(g.id);
-      }
-    });
+    final dataService = DataService(isar);
+    await dataService.deleteGrenades(grenades);
   }
 
   void _startMoveCluster(GrenadeCluster cluster) {

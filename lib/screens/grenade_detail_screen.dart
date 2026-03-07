@@ -492,26 +492,8 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                 TextButton(
                   onPressed: () async {
                     final isar = ref.read(isarProvider);
-
-                    // 删媒体文件
-                    await grenade!.steps.load();
-                    for (final step in grenade!.steps) {
-                      await step.medias.load();
-                      for (final media in step.medias) {
-                        await DataService.deleteMediaFile(media.localPath);
-                      }
-                    }
-
-                    // 删数据库
-                    await isar.writeTxn(() async {
-                      for (final step in grenade!.steps) {
-                        await isar.stepMedias
-                            .deleteAll(step.medias.map((m) => m.id).toList());
-                      }
-                      await isar.grenadeSteps
-                          .deleteAll(grenade!.steps.map((s) => s.id).toList());
-                      await isar.grenades.delete(grenade!.id);
-                    });
+                    final dataService = DataService(isar);
+                    await dataService.deleteGrenades([grenade!]);
                     Navigator.pop(ctx);
                     if (context.mounted) Navigator.pop(context);
                   },
@@ -1278,6 +1260,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
 
     // 使用当前 isar 实例的目录作为数据存储目录
     final isar = ref.read(isarProvider);
+    final dataService = DataService(isar);
     final dataPath = isar.directory ?? '';
 
     final file = File(media.localPath);
@@ -1292,6 +1275,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
           file,
           callbacks: ProImageEditorCallbacks(
             onImageEditingComplete: (Uint8List bytes) async {
+              final previousPath = media.localPath;
               // 保存编辑后的新文件（覆盖原文件或创建新文件）
               final fileName = "${DateTime.now().millisecondsSinceEpoch}.jpg";
               final savePath = p.join(dataPath, fileName);
@@ -1305,6 +1289,12 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                 grenade!.updatedAt = DateTime.now();
                 await isar.grenades.put(grenade!);
               });
+              if (previousPath != savePath) {
+                await dataService.deleteMediaFileIfUnused(
+                  previousPath,
+                  excludingMediaId: media.id,
+                );
+              }
 
               if (mounted) {
                 await _markAsLocallyEdited(); // 编辑图片算实质性编辑
@@ -2195,13 +2185,13 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
           TextButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              // 先删除实际文件
-              await DataService.deleteMediaFile(media.localPath);
-              // 再删除数据库记录
               final isar = ref.read(isarProvider);
+              final dataService = DataService(isar);
+              final oldPath = media.localPath;
               await isar.writeTxn(() async {
                 await isar.stepMedias.delete(media.id);
               });
+              await dataService.deleteMediaFileIfUnused(oldPath);
               await _markAsLocallyEdited();
               _loadData(resetTitle: false);
               sendOverlayCommand('reload_data');

@@ -21,6 +21,7 @@ class ImportPreviewScreen extends ConsumerStatefulWidget {
 
 class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
   PackagePreviewResult? _preview;
+  Map<String, GrenadePreviewItem> _localTombstoneItems = const {};
   bool _isLoading = true;
   String? _error;
 
@@ -71,8 +72,15 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
         }
       }
 
+      final localTombstoneItems = preview.grenadeTombstones.isEmpty
+          ? const <String, GrenadePreviewItem>{}
+          : await dataService.loadLocalGrenadePreviewItemsByUniqueIds(
+              preview.grenadeTombstones.map((e) => e.uniqueId),
+            );
+
       setState(() {
         _preview = preview;
+        _localTombstoneItems = localTombstoneItems;
         _selectedIds = allIds;
         _isLoading = false;
       });
@@ -97,6 +105,17 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
     return grenades;
   }
 
+  List<PackageGrenadeTombstoneData> _getCurrentTombstones() {
+    if (_preview == null) return const [];
+    final selectedMap = _selectedMap;
+    final tombstones = _preview!.grenadeTombstones.where((item) {
+      if (selectedMap == null) return true;
+      return item.mapName.trim() == selectedMap.trim();
+    }).toList(growable: false)
+      ..sort((a, b) => b.deletedAt.compareTo(a.deletedAt));
+    return tombstones;
+  }
+
   /// 切换全选
   void _toggleSelectAll() {
     final currentGrenades = _getCurrentGrenades();
@@ -114,7 +133,8 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
 
   /// 执行导入
   Future<void> _doImport() async {
-    if (_preview == null || _selectedIds.isEmpty) return;
+    if (_preview == null) return;
+    if (_selectedIds.isEmpty && _preview!.grenadeTombstones.isEmpty) return;
 
     setState(() => _isImporting = true);
 
@@ -314,48 +334,102 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
       );
     }
 
+    if (_preview!.totalCount == 0 && _preview!.grenadeTombstones.isNotEmpty) {
+      return _buildTombstoneOnlyScreen();
+    }
+
     // 多地图列表
     if (_preview!.isMultiMap && _selectedMap == null) {
-      final isar = ref.read(isarProvider);
-      return Scaffold(
-        appBar: AppBar(title: const Text("选择地图")),
-        body: ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: _preview!.mapNames.length,
-          itemBuilder: (context, index) {
-            final mapName = _preview!.mapNames[index];
-            final count = _preview!.grenadesByMap[mapName]?.length ?? 0;
-            // 地图图标
-            final gameMap =
-                isar.gameMaps.filter().nameEqualTo(mapName).findFirstSync();
-
-            return Card(
-              margin: const EdgeInsets.only(bottom: 12),
-              child: ListTile(
-                leading: gameMap != null
-                    ? SvgPicture.asset(gameMap.iconPath, width: 40, height: 40)
-                    : const Icon(Icons.map, color: Colors.orange, size: 40),
-                title: Text(mapName,
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text("$count 个道具"),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => setState(() => _selectedMap = mapName),
-              ),
-            );
-          },
-        ),
-      );
+      return _buildMapSelectionScreen();
     }
 
     // 道具列表
     return _buildGrenadeListScreen();
   }
 
+  Widget _buildTombstoneOnlyScreen() {
+    final tombstones = _getCurrentTombstones();
+    return Scaffold(
+      appBar: AppBar(title: const Text("删除同步预览")),
+      body: Column(
+        children: [
+          _buildPackageMetaBar(),
+          Expanded(
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: tombstones.length,
+              itemBuilder: (context, index) =>
+                  _buildTombstoneItem(tombstones[index]),
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
+            ),
+          ),
+          _buildImportButton(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMapSelectionScreen() {
+    final isar = ref.read(isarProvider);
+    final preview = _preview!;
+    return Scaffold(
+      appBar: AppBar(title: const Text("选择地图")),
+      body: Column(
+        children: [
+          _buildPackageMetaBar(),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: preview.mapNames.length,
+              itemBuilder: (context, index) {
+                final mapName = preview.mapNames[index];
+                final count = preview.grenadesByMap[mapName]?.length ?? 0;
+                final tombstoneCount = preview.grenadeTombstones
+                    .where((item) => item.mapName.trim() == mapName.trim())
+                    .length;
+                final gameMap =
+                    isar.gameMaps.filter().nameEqualTo(mapName).findFirstSync();
+
+                final subtitleParts = <String>['$count 个道具'];
+                if (tombstoneCount > 0) {
+                  subtitleParts.add('删除 $tombstoneCount 条');
+                }
+
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: ListTile(
+                    leading: gameMap != null
+                        ? SvgPicture.asset(
+                            gameMap.iconPath,
+                            width: 40,
+                            height: 40,
+                          )
+                        : const Icon(Icons.map, color: Colors.orange, size: 40),
+                    title: Text(
+                      mapName,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: Text(subtitleParts.join(' · ')),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => setState(() => _selectedMap = mapName),
+                  ),
+                );
+              },
+            ),
+          ),
+          _buildImportButton(),
+        ],
+      ),
+    );
+  }
+
   Widget _buildGrenadeListScreen() {
     final grenades = _getCurrentGrenades();
+    final tombstones = _getCurrentTombstones();
     final currentIds = grenades.map((g) => g.uniqueId).toSet();
     final selectedInCurrent =
         currentIds.where((id) => _selectedIds.contains(id)).length;
+    final hasVisibleItems = grenades.isNotEmpty || tombstones.isNotEmpty;
 
     return Scaffold(
       appBar: AppBar(
@@ -369,27 +443,80 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
       ),
       body: Column(
         children: [
-          // 类型筛选
-          _buildTypeFilter(),
-          // 全选栏
-          _buildSelectAllBar(selectedInCurrent, grenades.length),
           if (_preview != null && _preview!.schemaVersion >= 2)
             _buildPackageMetaBar(),
+          // 类型筛选
+          if (grenades.isNotEmpty) _buildTypeFilter(),
+          // 全选栏
+          if (grenades.isNotEmpty)
+            _buildSelectAllBar(selectedInCurrent, grenades.length),
           // 列表
           Expanded(
-            child: grenades.isEmpty
+            child: !hasVisibleItems
                 ? const Center(
                     child: Text("无匹配的道具", style: TextStyle(color: Colors.grey)))
-                : ListView.builder(
+                : ListView(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: grenades.length,
-                    itemBuilder: (context, index) =>
-                        _buildGrenadeItem(grenades[index]),
+                    children: [
+                      ...grenades.map(_buildGrenadeItem),
+                      if (tombstones.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          '删除记录',
+                          style:
+                              Theme.of(context).textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                        ),
+                        const SizedBox(height: 8),
+                        ...tombstones.map(_buildTombstoneItem),
+                      ],
+                    ],
                   ),
           ),
           // 底部按钮
           _buildImportButton(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildTombstoneItem(PackageGrenadeTombstoneData item) {
+    final localGrenade = _localTombstoneItems[item.uniqueId];
+    final deletedAt = DateTime.fromMillisecondsSinceEpoch(item.deletedAt);
+    final deletedAtText =
+        '${deletedAt.year}-${deletedAt.month.toString().padLeft(2, '0')}-${deletedAt.day.toString().padLeft(2, '0')} '
+        '${deletedAt.hour.toString().padLeft(2, '0')}:${deletedAt.minute.toString().padLeft(2, '0')}';
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: Text(
+          localGrenade != null ? _getTypeIcon(localGrenade.type) : '🗑️',
+          style: const TextStyle(fontSize: 18),
+        ),
+        title: Text(localGrenade?.title ?? item.uniqueId),
+        subtitle: Text(
+          localGrenade != null
+              ? '${localGrenade.mapName} - ${localGrenade.layerName} · $deletedAtText'
+              : '${item.mapName} · $deletedAtText',
+        ),
+        trailing: localGrenade == null
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.visibility, color: Colors.blueAccent),
+                tooltip: '预览本地道具',
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => GrenadePreviewScreen(
+                        grenade: localGrenade,
+                        memoryImages: const {},
+                      ),
+                    ),
+                  );
+                },
+              ),
       ),
     );
   }
@@ -468,6 +595,7 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
     final preview = _preview!;
     final chips = <String>[
       '协议 v${preview.schemaVersion}',
+      '删除 ${preview.grenadeTombstones.length}',
       '标签 ${preview.tagsByUuid.length}',
       '区域 ${preview.areas.length}',
     ];
@@ -624,6 +752,14 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
   }
 
   Widget _buildImportButton() {
+    final grenadeCount = _selectedIds.length;
+    final tombstoneCount = _preview?.grenadeTombstones.length ?? 0;
+    final canImport = grenadeCount > 0 || tombstoneCount > 0;
+    final label = grenadeCount > 0 && tombstoneCount > 0
+        ? "确认导入 ($grenadeCount 个道具 + 删除 $tombstoneCount 条)"
+        : grenadeCount > 0
+            ? "确认导入 ($grenadeCount 个道具)"
+            : "确认导入删除记录 ($tombstoneCount 条)";
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -639,7 +775,7 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
       child: SizedBox(
         width: double.infinity,
         child: ElevatedButton(
-          onPressed: _selectedIds.isEmpty || _isImporting ? null : _doImport,
+          onPressed: !canImport || _isImporting ? null : _doImport,
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.green,
             foregroundColor: Colors.white,
@@ -653,11 +789,9 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
                   child: CircularProgressIndicator(
                       color: Colors.white, strokeWidth: 2),
                 )
-              : Text(
-                  "确认导入 (${_selectedIds.length} 个道具)",
+              : Text(label,
                   style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.bold),
-                ),
+                      fontSize: 16, fontWeight: FontWeight.bold)),
         ),
       ),
     );

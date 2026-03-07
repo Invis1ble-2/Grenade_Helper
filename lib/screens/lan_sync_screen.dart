@@ -12,12 +12,13 @@ import '../providers.dart';
 import '../services/data_service.dart';
 import '../services/lan_sync/lan_sync_discovery_service.dart';
 import '../services/lan_sync/lan_sync_local_store.dart';
-import '../services/lan_sync/lan_sync_mdns_service.dart';
 import '../services/lan_sync/lan_sync_receive_controller.dart';
 import '../services/lan_sync/lan_sync_transfer_client.dart';
 import 'import_preview_screen.dart';
 
 enum _LanSendScope { all, map, grenades }
+
+enum _LanSyncMode { full, incremental }
 
 class LanSyncScreen extends ConsumerStatefulWidget {
   const LanSyncScreen({super.key});
@@ -29,7 +30,6 @@ class LanSyncScreen extends ConsumerStatefulWidget {
 class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
   late final LanSyncReceiveController _receiveController;
   late final LanSyncDiscoveryService _discoveryService;
-  late final LanSyncMdnsService _mdnsService;
   late final LanSyncLocalStore _localStore;
   late final TextEditingController _targetHostController;
   late final TextEditingController _targetPortController;
@@ -39,13 +39,15 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
   bool _isWaitingForApproval = false;
   double? _sendProgress;
   String _sendProgressLabel = '';
+  _LanSyncMode _sendMode = _LanSyncMode.full;
   _LanSendScope _sendScope = _LanSendScope.all;
   GameMap? _selectedMapForSend;
   List<Grenade> _selectedGrenadesForSend = const [];
   List<LanDiscoveryDevice> _discoveredDevices = const [];
-  List<LanSyncMdnsDevice> _mdnsDiscoveredDevices = const [];
   final Set<String> _seenReceivedTaskIds = <String>{};
   final Set<String> _handledIncomingRequestDialogs = <String>{};
+  final Set<String> _autoOpenedImportTaskIds = <String>{};
+  bool _isAutoOpeningImportPreview = false;
 
   @override
   void initState() {
@@ -54,12 +56,15 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
     _receiveController.setLocalDeviceName(_buildEphemeralDeviceName());
     _receiveController.addListener(_onReceiveControllerChanged);
     _discoveryService = LanSyncDiscoveryService();
-    _mdnsService = LanSyncMdnsService();
     _localStore = LanSyncLocalStore();
     _targetHostController = TextEditingController();
     _targetPortController = TextEditingController(text: '39527');
     unawaited(_receiveController.refreshLocalIps());
     unawaited(_loadLocalState());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_scanDevices());
+    });
   }
 
   @override
@@ -68,7 +73,6 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
     _targetHostController.dispose();
     _targetPortController.dispose();
     _receiveController.dispose();
-    unawaited(_mdnsService.dispose());
     super.dispose();
   }
 
@@ -92,6 +96,41 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
     }
     if (!mounted) return;
     setState(() {});
+    _maybeAutoOpenImportPreview();
+  }
+
+  void _maybeAutoOpenImportPreview() {
+    if (!mounted || _isAutoOpeningImportPreview) return;
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) return;
+
+    LanReceivedPackageTask? task;
+    for (final item in _receiveController.tasks) {
+      if (item.status != LanReceiveTaskStatus.pending) continue;
+      if (_autoOpenedImportTaskIds.contains(item.id)) continue;
+      task = item;
+      break;
+    }
+    if (task == null) return;
+
+    _autoOpenedImportTaskIds.add(task.id);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _isAutoOpeningImportPreview) return;
+      final currentRoute = ModalRoute.of(context);
+      if (currentRoute != null && !currentRoute.isCurrent) return;
+
+      _isAutoOpeningImportPreview = true;
+      unawaited(() async {
+        try {
+          await _openImportPreview(task!);
+        } finally {
+          _isAutoOpeningImportPreview = false;
+          if (mounted) {
+            _maybeAutoOpenImportPreview();
+          }
+        }
+      }());
+    });
   }
 
   Future<void> _showIncomingTransferApprovalDialog(String requestId) async {
@@ -116,7 +155,10 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
             Text('文件：${req.fileName}'),
             Text('大小：${_formatBytes(req.sizeBytes)}'),
             if (req.senderName.isNotEmpty) Text('发送方：${req.senderName}'),
+            Text('模式：${req.syncMode == "delta" ? "增量" : "全量"}'),
             if (req.scopeSummary.isNotEmpty) Text('范围：${req.scopeSummary}'),
+            if (req.scopeMapKeys.isNotEmpty)
+              Text('地图：${req.scopeMapKeys.join("、")}'),
             if (req.remoteAddress != null) Text('来源IP：${req.remoteAddress}'),
             const SizedBox(height: 8),
             const Text('是否允许对方开始传输？'),
@@ -156,6 +198,8 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
   }
 
   Future<void> _loadLocalState() async {
+    final nodeId = await _localStore.loadOrCreateStableNodeId();
+    _receiveController.setLocalNodeId(nodeId);
     if (!mounted) return;
     setState(() {
       _isLoadingLocal = false;
@@ -180,50 +224,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
   }
 
   Future<void> _scanDevices() async {
-    if (_isScanningDevices) return;
-    setState(() => _isScanningDevices = true);
-    try {
-      if (_receiveController.localIps.isEmpty) {
-        await _receiveController.refreshLocalIps();
-      }
-      final localIps = _receiveController.localIps;
-      final mdnsResults = (await _mdnsService.discoverOnce())
-          .where((d) => !_isSelfDiscoveredDevice(
-                host: d.host,
-                deviceId: d.deviceId,
-                localIps: localIps,
-              ))
-          .toList(growable: false);
-      if (!mounted) return;
-      setState(() {
-        _mdnsDiscoveredDevices = mdnsResults;
-      });
-      await _appendHistory(
-        category: 'system',
-        title: 'mDNS 扫描完成',
-        detail: '发现 ${mdnsResults.length} 台设备',
-        success: true,
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('mDNS 扫描完成：发现 ${mdnsResults.length} 台设备')),
-      );
-    } catch (e) {
-      await _appendHistory(
-        category: 'system',
-        title: 'mDNS 扫描失败',
-        detail: '$e',
-        success: false,
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('mDNS 扫描失败: $e'), backgroundColor: Colors.red),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isScanningDevices = false);
-      }
-    }
+    await _scanDevicesBySubnet();
   }
 
   Future<void> _scanDevicesBySubnet() async {
@@ -534,10 +535,77 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
     }
   }
 
+  Set<String> _resolveScopeMapKeys(Isar isar) {
+    switch (_sendScope) {
+      case _LanSendScope.all:
+        return isar.gameMaps
+            .where()
+            .findAllSync()
+            .map((e) => e.name.trim())
+            .where((e) => e.isNotEmpty)
+            .toSet();
+      case _LanSendScope.map:
+        final name = _selectedMapForSend?.name.trim() ?? '';
+        return name.isEmpty ? <String>{} : {name};
+      case _LanSendScope.grenades:
+        final mapKeys = <String>{};
+        for (final grenade in _selectedGrenadesForSend) {
+          grenade.layer.loadSync();
+          final layer = grenade.layer.value;
+          if (layer == null) continue;
+          layer.map.loadSync();
+          final map = layer.map.value;
+          if (map == null) continue;
+          final mapName = map.name.trim();
+          if (mapName.isNotEmpty) {
+            mapKeys.add(mapName);
+          }
+        }
+        return mapKeys;
+    }
+  }
+
+  String _resolvePeerNodeId(String host, int port) {
+    for (final d in _discoveredDevices) {
+      if (d.host.trim() == host.trim() && d.port == port) {
+        final nodeId = d.nodeId.trim();
+        if (nodeId.isNotEmpty) return nodeId;
+      }
+    }
+    return '$host:$port';
+  }
+
+  Future<String> _resolveConnectableHost(String host, int port) async {
+    final trimmedHost = host.trim();
+    if (trimmedHost.isEmpty) {
+      throw const SocketException('目标地址为空');
+    }
+    if (InternetAddress.tryParse(trimmedHost) != null) {
+      return trimmedHost;
+    }
+
+    try {
+      final resolved = await InternetAddress.lookup(trimmedHost);
+      for (final address in resolved) {
+        if (address.type == InternetAddressType.IPv4) {
+          return address.address;
+        }
+      }
+      if (resolved.isNotEmpty) {
+        return resolved.first.address;
+      }
+    } catch (_) {}
+
+    if (_receiveController.localIps.isEmpty) {
+      await _receiveController.refreshLocalIps();
+    }
+    throw SocketException('无法解析设备地址：$trimmedHost');
+  }
+
   Future<void> _sendAllToTarget() async {
-    final host = _targetHostController.text.trim();
+    final originalHost = _targetHostController.text.trim();
     final port = _parsedTargetPort;
-    if (host.isEmpty || port == null || port <= 0 || port > 65535) {
+    if (originalHost.isEmpty || port == null || port <= 0 || port > 65535) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('请输入有效的目标 IP/主机和端口'),
@@ -561,6 +629,130 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       return;
     }
 
+    final isar = ref.read(isarProvider);
+    final dataService = DataService(isar);
+    final scopeMapKeys = _resolveScopeMapKeys(isar);
+    final scopeMapList = scopeMapKeys.toList(growable: false);
+    final peerNodeId = _resolvePeerNodeId(originalHost, port);
+    Map<String, String> baseMapBaselineIds = const {};
+    Map<String, Map<String, String>> currentMapDigests = const {};
+    List<Grenade>? incrementalGrenades;
+    List<PackageGrenadeTombstoneData> incrementalTombstones = const [];
+    if (_sendMode == _LanSyncMode.incremental) {
+      if (_sendScope == _LanSendScope.grenades) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('增量模式第一版暂不支持按道具发送'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+      if (scopeMapList.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('无法识别当前范围对应的地图，请先检查范围选择'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+      baseMapBaselineIds = await _localStore.loadAckedMapBaselineIds(
+        peerNodeId: peerNodeId,
+        mapKeys: scopeMapList,
+      );
+      if (baseMapBaselineIds.length != scopeMapList.length) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('该设备尚未建立完整增量基线，请先完成一次全量同步'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      final baselineSnapshots = await _localStore.loadMapBaselineSnapshots(
+        peerNodeId: peerNodeId,
+        mapKeys: scopeMapList,
+        expectedBaselineIds: baseMapBaselineIds,
+      );
+      if (baselineSnapshots.length != scopeMapList.length) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('增量快照缺失或过期，请先完成一次全量同步'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      currentMapDigests =
+          await dataService.buildGrenadeDigestByMap(mapKeys: scopeMapKeys);
+      final changedUniqueIds = <String>{};
+      final deletedUniqueIds = <String>{};
+      for (final mapKey in scopeMapList) {
+        final baselineDigest = baselineSnapshots[mapKey] ?? const {};
+        final currentDigest = currentMapDigests[mapKey] ?? const {};
+        for (final entry in currentDigest.entries) {
+          if (baselineDigest[entry.key] != entry.value) {
+            changedUniqueIds.add(entry.key);
+          }
+        }
+        for (final uniqueId in baselineDigest.keys) {
+          if (!currentDigest.containsKey(uniqueId)) {
+            deletedUniqueIds.add(uniqueId);
+          }
+        }
+      }
+      final tombstonesByUniqueId = await _localStore.loadGrenadeTombstones(
+        uniqueIds: deletedUniqueIds,
+        mapKeys: scopeMapList,
+      );
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      incrementalTombstones = deletedUniqueIds
+          .map((uniqueId) {
+            final existing = tombstonesByUniqueId[uniqueId];
+            if (existing != null) {
+              return PackageGrenadeTombstoneData(
+                uniqueId: existing.uniqueId,
+                mapName: existing.mapName,
+                deletedAt: existing.deletedAt,
+              );
+            }
+            final mapName = scopeMapList.firstWhere(
+              (mapKey) =>
+                  (baselineSnapshots[mapKey] ?? const {}).containsKey(uniqueId),
+              orElse: () => '',
+            );
+            if (mapName.isEmpty) return null;
+            return PackageGrenadeTombstoneData(
+              uniqueId: uniqueId,
+              mapName: mapName,
+              deletedAt: nowMs,
+            );
+          })
+          .whereType<PackageGrenadeTombstoneData>()
+          .toList(growable: false);
+      if (changedUniqueIds.isEmpty && incrementalTombstones.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('当前范围没有可同步的增量变更')),
+        );
+        return;
+      }
+      incrementalGrenades =
+          await dataService.loadGrenadesByUniqueIds(changedUniqueIds);
+      if (changedUniqueIds.isNotEmpty && incrementalGrenades.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('未找到可发送的增量道具，请重试')),
+        );
+        return;
+      }
+    }
+
     setState(() {
       _isSendingAll = true;
       _isWaitingForApproval = false;
@@ -569,23 +761,34 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
     });
     String? packagePath;
     try {
-      final isar = ref.read(isarProvider);
-      final dataService = DataService(isar);
+      final host = await _resolveConnectableHost(originalHost, port);
       switch (_sendScope) {
         case _LanSendScope.all:
-          packagePath =
-              await dataService.buildLanSyncPackageToTemp(scopeType: 2);
+          packagePath = await dataService.buildLanSyncPackageToTemp(
+            scopeType: 2,
+            explicitGrenades: _sendMode == _LanSyncMode.incremental
+                ? incrementalGrenades
+                : null,
+            grenadeTombstones: incrementalTombstones,
+          );
           break;
         case _LanSendScope.map:
           packagePath = await dataService.buildLanSyncPackageToTemp(
-            scopeType: 1,
-            singleMap: _selectedMapForSend!,
+            scopeType: _sendMode == _LanSyncMode.incremental ? 2 : 1,
+            singleMap: _sendMode == _LanSyncMode.incremental
+                ? null
+                : _selectedMapForSend!,
+            explicitGrenades: _sendMode == _LanSyncMode.incremental
+                ? incrementalGrenades
+                : null,
+            grenadeTombstones: incrementalTombstones,
           );
           break;
         case _LanSendScope.grenades:
           packagePath = await dataService.buildLanSyncPackageToTemp(
             scopeType: 2,
             explicitGrenades: _selectedGrenadesForSend,
+            grenadeTombstones: const [],
           );
           break;
       }
@@ -595,6 +798,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
           ? 'lan_sync_data.cs2pkg'
           : pkgFile.uri.pathSegments.last;
       final fileSize = await pkgFile.length();
+      final syncEnvelopeId = 'env_${DateTime.now().microsecondsSinceEpoch}';
       if (mounted) {
         setState(() {
           _isWaitingForApproval = true;
@@ -610,6 +814,18 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
         sizeBytes: fileSize,
         senderName: _receiveController.localDeviceName,
         scopeSummary: _currentScopeSummary(),
+        syncMode: _sendMode == _LanSyncMode.incremental ? 'delta' : 'full',
+        scopeType: switch (_sendScope) {
+          _LanSendScope.map => 'map',
+          _LanSendScope.grenades => 'grenades',
+          _LanSendScope.all => 'all',
+        },
+        scopeMapKeys: scopeMapList,
+        syncEnvelopeId: syncEnvelopeId,
+        senderNodeId: _receiveController.localNodeId,
+        receiverNodeId: peerNodeId.contains(':') ? '' : peerNodeId,
+        packageSchemaVersion: 4,
+        baseMapBaselineIds: baseMapBaselineIds,
       );
       if (!reqResp.ok || reqResp.requestId.trim().isEmpty) {
         throw StateError(
@@ -670,28 +886,103 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
         },
       );
 
+      if (!response.isSuccess) {
+        throw StateError(
+          '发送失败（HTTP ${response.statusCode}）: ${_friendlySendErrorBody(response.body)}',
+        );
+      }
+
+      if (mounted) {
+        setState(() {
+          _sendProgress = 1;
+          _sendProgressLabel = '上传完成，等待对方导入...';
+        });
+      }
+
+      final importDeadline = DateTime.now().add(const Duration(minutes: 5));
+      var importSucceeded = false;
+      String? importFailedMessage;
+      LanSyncTransferRequestResponse? finalImportStatus;
+      while (DateTime.now().isBefore(importDeadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 700));
+        final statusResp = await LanSyncTransferClient.getTransferRequestStatus(
+          host: host,
+          port: port,
+          requestId: requestId,
+        );
+        if (!statusResp.ok) continue;
+        finalImportStatus = statusResp;
+        if (statusResp.status ==
+            LanIncomingTransferRequestStatus.imported.name) {
+          importSucceeded = true;
+          break;
+        }
+        if (statusResp.status ==
+                LanIncomingTransferRequestStatus.importFailed.name ||
+            statusResp.status ==
+                LanIncomingTransferRequestStatus.importCancelled.name ||
+            statusResp.status ==
+                LanIncomingTransferRequestStatus.rejected.name ||
+            statusResp.status ==
+                LanIncomingTransferRequestStatus.expired.name) {
+          importFailedMessage = (statusResp.message ?? '').trim();
+          break;
+        }
+      }
+      if (!importSucceeded) {
+        throw StateError(importFailedMessage?.isNotEmpty == true
+            ? importFailedMessage!
+            : '对方尚未完成导入确认，请稍后重试');
+      }
+
+      if (scopeMapList.isNotEmpty) {
+        final nextBaselineId =
+            finalImportStatus?.syncEnvelopeId.trim().isNotEmpty == true
+                ? finalImportStatus!.syncEnvelopeId
+                : syncEnvelopeId;
+        await _localStore.upsertAckedMapBaselines(
+          peerNodeId: peerNodeId,
+          mapKeys: scopeMapList,
+          baselineId: nextBaselineId,
+        );
+        final mapDigestsForStore = _sendMode == _LanSyncMode.incremental
+            ? currentMapDigests
+            : await dataService.buildGrenadeDigestByMap(mapKeys: scopeMapKeys);
+        final scopedDigests = <String, Map<String, String>>{
+          for (final mapKey in scopeMapList)
+            mapKey: mapDigestsForStore[mapKey] ?? const {},
+        };
+        await _localStore.upsertMapBaselineSnapshots(
+          peerNodeId: peerNodeId,
+          mapDigests: scopedDigests,
+          baselineId: nextBaselineId,
+        );
+      }
+
       await _appendHistory(
         category: 'send',
-        title: response.isSuccess ? '发送成功' : '发送失败',
+        title: '发送成功',
         detail:
-            '$host:$port · ${_currentScopeSummary()} · HTTP ${response.statusCode}',
-        success: response.isSuccess,
+            '$originalHost -> $host:$port · ${_currentScopeSummary()} · ${_sendMode == _LanSyncMode.incremental ? "增量" : "全量"}',
+        success: true,
       );
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(response.isSuccess
-              ? '发送成功（HTTP ${response.statusCode}）'
-              : '发送失败（HTTP ${response.statusCode}）: ${_friendlySendErrorBody(response.body)}'),
-          backgroundColor: response.isSuccess ? Colors.green : Colors.red,
+          content: Text(
+            _sendMode == _LanSyncMode.incremental
+                ? '增量同步完成（已收到导入确认）'
+                : '全量同步完成（已收到导入确认）',
+          ),
+          backgroundColor: Colors.green,
         ),
       );
     } catch (e) {
       await _appendHistory(
         category: 'send',
         title: '发送失败',
-        detail: '$host:$port · ${_currentScopeSummary()} · $e',
+        detail: '$originalHost:$port · ${_currentScopeSummary()} · $e',
         success: false,
       );
       if (!mounted) return;
@@ -733,23 +1024,6 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
           SnackBar(content: Text(error), backgroundColor: Colors.red),
         );
       } else if (_receiveController.isRunning) {
-        final p = _receiveController.port;
-        if (p != null) {
-          try {
-            await _mdnsService.startBroadcast(
-              deviceName: _receiveController.localDeviceName,
-              port: p,
-              deviceId: _receiveController.localDeviceId,
-            );
-          } catch (e) {
-            await _appendHistory(
-              category: 'system',
-              title: 'mDNS 广播启动失败',
-              detail: '$e',
-              success: false,
-            );
-          }
-        }
         await _appendHistory(
           category: 'system',
           title: '接收模式已开启',
@@ -768,7 +1042,6 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
     }
 
     await _receiveController.stop();
-    await _mdnsService.stopBroadcast();
     await _appendHistory(
       category: 'system',
       title: '接收模式已关闭',
@@ -782,6 +1055,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
   }
 
   Future<void> _openImportPreview(LanReceivedPackageTask task) async {
+    final transferRequestId = (task.transferRequestId ?? '').trim();
     final file = File(task.filePath);
     if (!await file.exists()) {
       await _receiveController.markTaskStatus(
@@ -789,6 +1063,13 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
         LanReceiveTaskStatus.failed,
         message: '文件不存在，可能已被系统清理',
       );
+      if (transferRequestId.isNotEmpty) {
+        await _receiveController.markIncomingRequestStatus(
+          transferRequestId,
+          LanIncomingTransferRequestStatus.importFailed,
+          message: '导入失败：接收文件不存在',
+        );
+      }
       await _appendHistory(
         category: 'import',
         title: '导入失败',
@@ -808,6 +1089,13 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       LanReceiveTaskStatus.importing,
       clearMessage: true,
     );
+    if (transferRequestId.isNotEmpty) {
+      await _receiveController.markIncomingRequestStatus(
+        transferRequestId,
+        LanIncomingTransferRequestStatus.importing,
+        clearMessage: true,
+      );
+    }
 
     try {
       if (!mounted) return;
@@ -824,6 +1112,13 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
           LanReceiveTaskStatus.pending,
           message: '未导入（用户返回）',
         );
+        if (transferRequestId.isNotEmpty) {
+          await _receiveController.markIncomingRequestStatus(
+            transferRequestId,
+            LanIncomingTransferRequestStatus.importCancelled,
+            message: '接收方取消导入',
+          );
+        }
         await _appendHistory(
           category: 'import',
           title: '取消导入',
@@ -838,6 +1133,18 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
         LanReceiveTaskStatus.imported,
         message: importResult,
       );
+      if (transferRequestId.isNotEmpty) {
+        await _receiveController.markIncomingRequestStatus(
+          transferRequestId,
+          LanIncomingTransferRequestStatus.imported,
+          message: importResult,
+          importSummary: {
+            'result': importResult,
+            'taskId': task.id,
+            'importedAtMs': DateTime.now().millisecondsSinceEpoch,
+          },
+        );
+      }
       await _appendHistory(
         category: 'import',
         title: '导入完成',
@@ -858,6 +1165,13 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
         LanReceiveTaskStatus.failed,
         message: '导入预览失败: $e',
       );
+      if (transferRequestId.isNotEmpty) {
+        await _receiveController.markIncomingRequestStatus(
+          transferRequestId,
+          LanIncomingTransferRequestStatus.importFailed,
+          message: '导入预览失败: $e',
+        );
+      }
       await _appendHistory(
         category: 'import',
         title: '导入失败',
@@ -922,6 +1236,13 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
           if (running && port != null) ...[
             Text(
               '本机名称：${_receiveController.localDeviceName}',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '本机节点ID：${_receiveController.localNodeId}',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                   ),
@@ -1145,11 +1466,6 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
                   label: Text(_isScanningDevices ? '扫描中' : '扫描'),
                 ),
                 TextButton.icon(
-                  onPressed: _isScanningDevices ? null : _scanDevicesBySubnet,
-                  icon: const Icon(Icons.wifi_find),
-                  label: const Text('备用扫描方式'),
-                ),
-                TextButton.icon(
                   onPressed: _isSendingAll ? null : _showManualSendDialog,
                   icon: const Icon(Icons.link),
                   label: const Text('手动输入'),
@@ -1161,6 +1477,29 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          ChoiceChip(
+                            label: const Text('全量'),
+                            selected: _sendMode == _LanSyncMode.full,
+                            onSelected: (_) =>
+                                setState(() => _sendMode = _LanSyncMode.full),
+                          ),
+                          ChoiceChip(
+                            label: const Text('增量'),
+                            selected: _sendMode == _LanSyncMode.incremental,
+                            onSelected: (_) => setState(() {
+                              _sendMode = _LanSyncMode.incremental;
+                              if (_sendScope == _LanSendScope.grenades) {
+                                _sendScope = _LanSendScope.all;
+                              }
+                            }),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
                       Wrap(
                         spacing: 8,
                         runSpacing: 8,
@@ -1180,8 +1519,10 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
                           ChoiceChip(
                             label: const Text('按道具'),
                             selected: _sendScope == _LanSendScope.grenades,
-                            onSelected: (_) => setState(
-                                () => _sendScope = _LanSendScope.grenades),
+                            onSelected: _sendMode == _LanSyncMode.incremental
+                                ? null
+                                : (_) => setState(
+                                    () => _sendScope = _LanSendScope.grenades),
                           ),
                         ],
                       ),
@@ -1237,50 +1578,6 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
                         style: Theme.of(context).textTheme.titleSmall,
                       ),
                       const SizedBox(height: 8),
-                      if (_mdnsDiscoveredDevices.isEmpty)
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: colorScheme.surfaceContainerHighest,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Text('暂无 mDNS 结果，点击“mDNS扫描”开始发现。'),
-                        )
-                      else
-                        ..._mdnsDiscoveredDevices.map((d) {
-                          return Card(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            child: ListTile(
-                              leading: const Icon(Icons.travel_explore),
-                              title: Text(
-                                d.deviceName.isEmpty ? d.host : d.deviceName,
-                              ),
-                              subtitle: Text('${d.host}:${d.port}'),
-                              onTap: _isSendingAll
-                                  ? null
-                                  : () => _sendToHostPort(d.host, d.port),
-                              trailing: Wrap(
-                                spacing: 4,
-                                children: [
-                                  IconButton(
-                                    tooltip: '发送到此设备',
-                                    onPressed: _isSendingAll
-                                        ? null
-                                        : () => _sendToHostPort(d.host, d.port),
-                                    icon: const Icon(Icons.send),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }),
-                      const SizedBox(height: 8),
-                      Text(
-                        '备用扫描结果',
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
-                      const SizedBox(height: 8),
                       if (_discoveredDevices.isEmpty)
                         Container(
                           width: double.infinity,
@@ -1289,7 +1586,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
                             color: colorScheme.surfaceContainerHighest,
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: const Text('暂无结果。需要时点击“网段备用”进行探测。'),
+                          child: const Text('暂无结果，点击“扫描”开始探测。'),
                         )
                       else
                         ..._discoveredDevices.map((d) {
@@ -1367,6 +1664,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
                                 const SizedBox(height: 4),
                                 Text(
                                   '${_formatBytes(req.sizeBytes)}'
+                                  ' · ${req.syncMode == "delta" ? "增量" : "全量"}'
                                   '${req.scopeSummary.isEmpty ? '' : ' · ${req.scopeSummary}'}'
                                   '${req.senderName.isEmpty ? '' : ' · ${req.senderName}'}',
                                   style: Theme.of(context)

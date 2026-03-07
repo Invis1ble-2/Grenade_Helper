@@ -10,7 +10,18 @@ import 'lan_sync_auth.dart';
 
 enum LanReceiveTaskStatus { receiving, pending, importing, imported, failed }
 
-enum LanIncomingTransferRequestStatus { pending, approved, rejected, expired }
+enum LanIncomingTransferRequestStatus {
+  pending,
+  approved,
+  rejected,
+  uploading,
+  uploadedWaitImport,
+  importing,
+  imported,
+  importFailed,
+  importCancelled,
+  expired
+}
 
 class LanIncomingTransferRequest {
   final String id;
@@ -20,8 +31,17 @@ class LanIncomingTransferRequest {
   final String? remoteAddress;
   final String senderName;
   final String scopeSummary;
+  final String syncMode;
+  final String scopeType;
+  final List<String> scopeMapKeys;
+  final String syncEnvelopeId;
+  final String senderNodeId;
+  final String receiverNodeId;
+  final int packageSchemaVersion;
+  final Map<String, String> baseMapBaselineIds;
   final LanIncomingTransferRequestStatus status;
   final String? message;
+  final Map<String, dynamic>? importSummary;
 
   const LanIncomingTransferRequest({
     required this.id,
@@ -32,13 +52,24 @@ class LanIncomingTransferRequest {
     this.remoteAddress,
     this.senderName = '',
     this.scopeSummary = '',
+    this.syncMode = 'full',
+    this.scopeType = 'all',
+    this.scopeMapKeys = const [],
+    this.syncEnvelopeId = '',
+    this.senderNodeId = '',
+    this.receiverNodeId = '',
+    this.packageSchemaVersion = 3,
+    this.baseMapBaselineIds = const {},
     this.message,
+    this.importSummary,
   });
 
   LanIncomingTransferRequest copyWith({
     LanIncomingTransferRequestStatus? status,
     String? message,
     bool clearMessage = false,
+    Map<String, dynamic>? importSummary,
+    bool clearImportSummary = false,
   }) {
     return LanIncomingTransferRequest(
       id: id,
@@ -48,8 +79,18 @@ class LanIncomingTransferRequest {
       remoteAddress: remoteAddress,
       senderName: senderName,
       scopeSummary: scopeSummary,
+      syncMode: syncMode,
+      scopeType: scopeType,
+      scopeMapKeys: scopeMapKeys,
+      syncEnvelopeId: syncEnvelopeId,
+      senderNodeId: senderNodeId,
+      receiverNodeId: receiverNodeId,
+      packageSchemaVersion: packageSchemaVersion,
+      baseMapBaselineIds: baseMapBaselineIds,
       status: status ?? this.status,
       message: clearMessage ? null : (message ?? this.message),
+      importSummary:
+          clearImportSummary ? null : (importSummary ?? this.importSummary),
     );
   }
 }
@@ -61,6 +102,8 @@ class LanReceivedPackageTask {
   final int sizeBytes;
   final int bytesReceived;
   final int? expectedBytes;
+  final String? transferRequestId;
+  final String? syncEnvelopeId;
   final DateTime receivedAt;
   final String? remoteAddress;
   final LanReceiveTaskStatus status;
@@ -73,6 +116,8 @@ class LanReceivedPackageTask {
     required this.sizeBytes,
     this.bytesReceived = 0,
     this.expectedBytes,
+    this.transferRequestId,
+    this.syncEnvelopeId,
     required this.receivedAt,
     required this.status,
     this.remoteAddress,
@@ -87,6 +132,8 @@ class LanReceivedPackageTask {
     int? bytesReceived,
     int? expectedBytes,
     bool clearExpectedBytes = false,
+    String? transferRequestId,
+    String? syncEnvelopeId,
   }) {
     return LanReceivedPackageTask(
       id: id,
@@ -96,6 +143,8 @@ class LanReceivedPackageTask {
       bytesReceived: bytesReceived ?? this.bytesReceived,
       expectedBytes:
           clearExpectedBytes ? null : (expectedBytes ?? this.expectedBytes),
+      transferRequestId: transferRequestId ?? this.transferRequestId,
+      syncEnvelopeId: syncEnvelopeId ?? this.syncEnvelopeId,
       receivedAt: receivedAt,
       remoteAddress: remoteAddress,
       status: status ?? this.status,
@@ -113,7 +162,7 @@ class LanReceivedPackageTask {
 }
 
 class LanSyncReceiveController extends ChangeNotifier {
-  final String _localDeviceId = 'dev_${LanSyncAuth.generateSecret(bytes: 9)}';
+  String _localNodeId;
   HttpServer? _server;
   bool _disposed = false;
   bool _isStarting = false;
@@ -128,11 +177,17 @@ class LanSyncReceiveController extends ChangeNotifier {
   String? _activePairCode;
   int? _activePairCodeExpireAtMs;
 
+  LanSyncReceiveController({String? stableNodeId})
+      : _localNodeId = (stableNodeId ?? '').trim().isEmpty
+            ? 'node_${LanSyncAuth.generateSecret(bytes: 9)}'
+            : stableNodeId!.trim();
+
   bool get isStarting => _isStarting;
   bool get isRunning => _server != null;
   int? get port => _server?.port;
   String? get lastError => _lastError;
-  String get localDeviceId => _localDeviceId;
+  String get localNodeId => _localNodeId;
+  String get localDeviceId => _localNodeId;
   String get localDeviceName => _localDeviceName;
   bool get requireAuthForUpload => _requireAuthForUpload;
   String? get activePairCode => _activePairCode;
@@ -150,6 +205,13 @@ class LanSyncReceiveController extends ChangeNotifier {
   String get transferRequestPath => '/v1/transfer/request';
   String get transferRequestStatusPath => '/v1/transfer/request_status';
   String get uploadPath => '/v1/transfer/package';
+
+  void setLocalNodeId(String nodeId) {
+    final next = nodeId.trim();
+    if (next.isEmpty || next == _localNodeId) return;
+    _localNodeId = next;
+    notifyListeners();
+  }
 
   void setLocalDeviceName(String name) {
     final next = name.trim();
@@ -268,10 +330,17 @@ class LanSyncReceiveController extends ChangeNotifier {
           'ok': true,
           'service': 'grenade_helper_lan_sync_receiver',
           'port': port,
-          'deviceId': _localDeviceId,
-          'deviceName': _localDeviceName,
+          'nodeId': _localNodeId,
+          'displayName': _localDeviceName,
+          'deviceId': _localNodeId, // legacy compatibility
+          'deviceName': _localDeviceName, // legacy compatibility
           'requireAuthForUpload': _requireAuthForUpload,
           'trustedPeerCount': _trustedPeerSecrets.length,
+          'capabilities': {
+            'fullSyncV3': true,
+            'deltaSyncV4': true,
+            'requestStatusImportAck': true,
+          },
           'time': DateTime.now().toIso8601String(),
         });
         return;
@@ -374,7 +443,7 @@ class LanSyncReceiveController extends ChangeNotifier {
       'ok': true,
       'peerId': peerId,
       'sharedSecret': secret,
-      'remoteDeviceId': _localDeviceId,
+      'remoteDeviceId': _localNodeId,
       'remoteDeviceName': _localDeviceName,
       'acceptedAt': DateTime.now().toIso8601String(),
       'clientDeviceName': deviceName,
@@ -496,6 +565,28 @@ class LanSyncReceiveController extends ChangeNotifier {
     final sizeBytes = body['sizeBytes'] as int? ?? 0;
     final senderName = (body['senderName'] as String? ?? '').trim();
     final scopeSummary = (body['scopeSummary'] as String? ?? '').trim();
+    final syncMode = (body['syncMode'] as String? ?? 'full').trim();
+    final scopeType = (body['scopeType'] as String? ?? 'all').trim();
+    final scopeMapKeys = ((body['scopeMapKeys'] as List?) ?? const [])
+        .map((e) => '$e'.trim())
+        .where((e) => e.isNotEmpty)
+        .toList(growable: false);
+    final syncEnvelopeId = (body['syncEnvelopeId'] as String? ?? '').trim();
+    final senderNodeId = (body['senderNodeId'] as String? ?? '').trim();
+    final receiverNodeId = (body['receiverNodeId'] as String? ?? '').trim();
+    final packageSchemaVersion =
+        body['packageSchemaVersion'] as int? ?? (syncMode == 'delta' ? 4 : 3);
+    final baseMapBaselineIds = <String, String>{};
+    if (body['baseMapBaselineIds'] is Map) {
+      final map = Map<String, dynamic>.from(body['baseMapBaselineIds'] as Map);
+      for (final entry in map.entries) {
+        final key = entry.key.trim();
+        final value = '${entry.value}'.trim();
+        if (key.isNotEmpty && value.isNotEmpty) {
+          baseMapBaselineIds[key] = value;
+        }
+      }
+    }
     if (sizeBytes <= 0) {
       _writeJson(request.response, HttpStatus.badRequest, {
         'ok': false,
@@ -513,6 +604,16 @@ class LanSyncReceiveController extends ChangeNotifier {
       remoteAddress: request.connectionInfo?.remoteAddress.address,
       senderName: senderName,
       scopeSummary: scopeSummary,
+      syncMode: syncMode,
+      scopeType: scopeType,
+      scopeMapKeys: scopeMapKeys,
+      syncEnvelopeId: syncEnvelopeId.isEmpty
+          ? 'env_${DateTime.now().microsecondsSinceEpoch}'
+          : syncEnvelopeId,
+      senderNodeId: senderNodeId,
+      receiverNodeId: receiverNodeId,
+      packageSchemaVersion: packageSchemaVersion,
+      baseMapBaselineIds: baseMapBaselineIds,
       status: LanIncomingTransferRequestStatus.pending,
     );
     _incomingRequests.insert(0, incoming);
@@ -525,6 +626,10 @@ class LanSyncReceiveController extends ChangeNotifier {
       'ok': true,
       'requestId': id,
       'status': 'pending',
+      'syncMode': incoming.syncMode,
+      'scopeType': incoming.scopeType,
+      'scopeMapKeys': incoming.scopeMapKeys,
+      'syncEnvelopeId': incoming.syncEnvelopeId,
     });
   }
 
@@ -550,6 +655,11 @@ class LanSyncReceiveController extends ChangeNotifier {
       'requestId': incoming.id,
       'status': incoming.status.name,
       'message': incoming.message,
+      'syncMode': incoming.syncMode,
+      'scopeType': incoming.scopeType,
+      'scopeMapKeys': incoming.scopeMapKeys,
+      'syncEnvelopeId': incoming.syncEnvelopeId,
+      'importSummary': incoming.importSummary,
     });
   }
 
@@ -586,6 +696,16 @@ class LanSyncReceiveController extends ChangeNotifier {
       });
       return;
     }
+    final requestIndex =
+        _incomingRequests.indexWhere((e) => e.id == incoming.id);
+    if (requestIndex >= 0) {
+      _incomingRequests[requestIndex] =
+          _incomingRequests[requestIndex].copyWith(
+        status: LanIncomingTransferRequestStatus.uploading,
+        clearMessage: true,
+      );
+      notifyListeners();
+    }
 
     final fileNameParam = request.uri.queryParameters['filename'] ??
         request.headers.value('x-file-name');
@@ -608,6 +728,8 @@ class LanSyncReceiveController extends ChangeNotifier {
       sizeBytes: 0,
       bytesReceived: 0,
       expectedBytes: expectedBytes,
+      transferRequestId: incomingRequestId,
+      syncEnvelopeId: incoming.syncEnvelopeId,
       receivedAt: DateTime.now(),
       remoteAddress: request.connectionInfo?.remoteAddress.address,
       status: LanReceiveTaskStatus.receiving,
@@ -662,6 +784,16 @@ class LanSyncReceiveController extends ChangeNotifier {
           );
           notifyListeners();
         }
+        final incomingIndex =
+            _incomingRequests.indexWhere((e) => e.id == incoming.id);
+        if (incomingIndex >= 0) {
+          _incomingRequests[incomingIndex] =
+              _incomingRequests[incomingIndex].copyWith(
+            status: LanIncomingTransferRequestStatus.importFailed,
+            message: verifyError,
+          );
+          notifyListeners();
+        }
         _writeJson(request.response, HttpStatus.unauthorized, {
           'ok': false,
           'error': verifyError,
@@ -683,6 +815,16 @@ class LanSyncReceiveController extends ChangeNotifier {
         );
         notifyListeners();
       }
+      final incomingIndex =
+          _incomingRequests.indexWhere((e) => e.id == incoming.id);
+      if (incomingIndex >= 0) {
+        _incomingRequests[incomingIndex] =
+            _incomingRequests[incomingIndex].copyWith(
+          status: LanIncomingTransferRequestStatus.importFailed,
+          message: '空文件',
+        );
+        notifyListeners();
+      }
       _writeJson(request.response, HttpStatus.badRequest, {
         'ok': false,
         'error': 'empty_file',
@@ -700,11 +842,23 @@ class LanSyncReceiveController extends ChangeNotifier {
       );
       notifyListeners();
     }
+    final incomingIndex =
+        _incomingRequests.indexWhere((e) => e.id == incoming.id);
+    if (incomingIndex >= 0) {
+      _incomingRequests[incomingIndex] =
+          _incomingRequests[incomingIndex].copyWith(
+        status: LanIncomingTransferRequestStatus.uploadedWaitImport,
+        message: '等待导入',
+        clearImportSummary: true,
+      );
+      notifyListeners();
+    }
 
     _writeJson(request.response, HttpStatus.ok, {
       'ok': true,
       'transferRequestId': incomingRequestId,
       'taskId': taskId,
+      'syncEnvelopeId': incoming.syncEnvelopeId,
       'fileName': fileName,
       'sizeBytes': size,
       'signed': signedBodyMode,
@@ -743,6 +897,26 @@ class LanSyncReceiveController extends ChangeNotifier {
       status: status,
       message: message,
       clearMessage: clearMessage,
+    );
+    notifyListeners();
+  }
+
+  Future<void> markIncomingRequestStatus(
+    String requestId,
+    LanIncomingTransferRequestStatus status, {
+    String? message,
+    Map<String, dynamic>? importSummary,
+    bool clearMessage = false,
+    bool clearImportSummary = false,
+  }) async {
+    final index = _incomingRequests.indexWhere((e) => e.id == requestId);
+    if (index < 0) return;
+    _incomingRequests[index] = _incomingRequests[index].copyWith(
+      status: status,
+      message: message,
+      clearMessage: clearMessage,
+      importSummary: importSummary,
+      clearImportSummary: clearImportSummary,
     );
     notifyListeners();
   }

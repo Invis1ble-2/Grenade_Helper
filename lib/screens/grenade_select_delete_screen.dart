@@ -119,26 +119,11 @@ class _GrenadeSelectDeleteScreenState
 
     try {
       final isar = ref.read(isarProvider);
-      int deletedCount = 0;
-
-      await isar.writeTxn(() async {
-        for (final id in _selectedIds) {
-          final grenade = await isar.grenades.get(id);
-          if (grenade == null) continue;
-
-          await grenade.steps.load();
-          for (final step in grenade.steps) {
-            await step.medias.load();
-            for (final media in step.medias) {
-              await DataService.deleteMediaFile(media.localPath);
-              await isar.stepMedias.delete(media.id);
-            }
-            await isar.grenadeSteps.delete(step.id);
-          }
-          await isar.grenades.delete(id);
-          deletedCount++;
-        }
-      });
+      final dataService = DataService(isar);
+      final grenades = _grenades
+          .where((grenade) => _selectedIds.contains(grenade.id))
+          .toList(growable: false);
+      final deletedCount = await dataService.deleteGrenades(grenades);
 
       if (mounted) {
         Navigator.pop(context);

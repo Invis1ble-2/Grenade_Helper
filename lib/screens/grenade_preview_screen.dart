@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../models.dart';
 import '../services/data_service.dart';
@@ -152,6 +153,32 @@ class GrenadePreviewScreen extends StatelessWidget {
     final imageBytes = memoryImages[path];
 
     if (imageBytes == null) {
+      if (type != MediaType.video && path.isNotEmpty) {
+        final file = File(path);
+        if (file.existsSync()) {
+          return Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.file(
+                file,
+                fit: BoxFit.contain,
+                width: double.infinity,
+                errorBuilder: (context, error, stackTrace) {
+                  return Container(
+                    height: 200,
+                    color: Colors.grey[800],
+                    child: const Center(
+                      child: Icon(Icons.broken_image,
+                          size: 48, color: Colors.grey),
+                    ),
+                  );
+                },
+              ),
+            ),
+          );
+        }
+      }
       return Container(
         height: 200,
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
