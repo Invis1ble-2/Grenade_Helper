@@ -48,7 +48,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
   List<LanDiscoveryDevice> _discoveredDevices = const [];
   final Set<String> _seenReceivedTaskIds = <String>{};
   final Set<String> _handledIncomingRequestDialogs = <String>{};
-  final Set<String> _autoOpenedImportTaskIds = <String>{};
+  final Set<String> _handledImportTaskIds = <String>{};
   bool _isAutoOpeningImportPreview = false;
   bool _isLoadingSyncDebug = false;
 
@@ -99,10 +99,10 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
     }
     if (!mounted) return;
     setState(() {});
-    _maybeAutoOpenImportPreview();
+    _maybeOpenImportPreviewDirectly();
   }
 
-  void _maybeAutoOpenImportPreview() {
+  void _maybeOpenImportPreviewDirectly() {
     if (!mounted || _isAutoOpeningImportPreview) return;
     final route = ModalRoute.of(context);
     if (route != null && !route.isCurrent) return;
@@ -110,13 +110,13 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
     LanReceivedPackageTask? task;
     for (final item in _receiveController.tasks) {
       if (item.status != LanReceiveTaskStatus.pending) continue;
-      if (_autoOpenedImportTaskIds.contains(item.id)) continue;
+      if (_handledImportTaskIds.contains(item.id)) continue;
       task = item;
       break;
     }
     if (task == null) return;
 
-    _autoOpenedImportTaskIds.add(task.id);
+    _handledImportTaskIds.add(task.id);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _isAutoOpeningImportPreview) return;
       final currentRoute = ModalRoute.of(context);
@@ -129,7 +129,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
         } finally {
           _isAutoOpeningImportPreview = false;
           if (mounted) {
-            _maybeAutoOpenImportPreview();
+            _maybeOpenImportPreviewDirectly();
           }
         }
       }());
@@ -1124,11 +1124,6 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       );
 
       if (importResult == null) {
-        await _receiveController.markTaskStatus(
-          task.id,
-          LanReceiveTaskStatus.pending,
-          message: '未导入（用户返回）',
-        );
         if (transferRequestId.isNotEmpty) {
           await _receiveController.markIncomingRequestStatus(
             transferRequestId,
@@ -1142,6 +1137,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
           detail: task.fileName,
           success: true,
         );
+        await _receiveController.removeTask(task.id);
         return;
       }
 
@@ -1168,6 +1164,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
         detail: '${task.fileName} · $importResult',
         success: importResult.contains('成功'),
       );
+      await _receiveController.removeTask(task.id, deleteFile: false);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1195,6 +1192,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
         detail: '${task.fileName} · $e',
         success: false,
       );
+      await _receiveController.removeTask(task.id, deleteFile: false);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('打开导入预览失败: $e'), backgroundColor: Colors.red),
@@ -1208,11 +1206,6 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
     if (kb < 1024) return '${kb.toStringAsFixed(kb >= 100 ? 0 : 1)} KB';
     final mb = kb / 1024;
     return '${mb.toStringAsFixed(mb >= 100 ? 0 : 1)} MB';
-  }
-
-  String _formatTime(DateTime dt) {
-    String two(int v) => v.toString().padLeft(2, '0');
-    return '${dt.year}-${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}';
   }
 
   String _friendlySendErrorBody(String body) {
@@ -1292,127 +1285,6 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
           ],
         ],
       ),
-    );
-  }
-
-  Widget _buildReceiveTasks(ColorScheme colorScheme) {
-    final tasks = _receiveController.tasks;
-    if (tasks.isEmpty) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: const Text('暂无待导入任务。'),
-      );
-    }
-
-    return Column(
-      children: [
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton.icon(
-            onPressed: () => _receiveController.clearImportedTasks(),
-            icon: const Icon(Icons.cleaning_services_outlined),
-            label: const Text('清理已导入'),
-          ),
-        ),
-        ...tasks.map((task) {
-          final canImport = task.status != LanReceiveTaskStatus.importing;
-          return Card(
-            margin: const EdgeInsets.only(bottom: 8),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          task.fileName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      _TaskStatusChip(status: task.status),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '时间：${_formatTime(task.receivedAt)}  大小：${_formatBytes(task.sizeBytes)}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                  ),
-                  if (task.status == LanReceiveTaskStatus.receiving ||
-                      task.progress != null) ...[
-                    const SizedBox(height: 6),
-                    LinearProgressIndicator(value: task.progress),
-                    const SizedBox(height: 4),
-                    Text(
-                      task.expectedBytes != null && task.expectedBytes! > 0
-                          ? '接收进度：${_formatBytes(task.bytesReceived)} / ${_formatBytes(task.expectedBytes!)}'
-                          : '接收进度：${_formatBytes(task.bytesReceived)}',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
-                          ),
-                    ),
-                  ],
-                  if (task.remoteAddress != null)
-                    Text(
-                      '来源：${task.remoteAddress}',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
-                          ),
-                    ),
-                  if (task.message != null &&
-                      task.message!.trim().isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      task.message!,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: task.status == LanReceiveTaskStatus.failed
-                            ? Colors.red
-                            : colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      FilledButton.tonalIcon(
-                        onPressed:
-                            canImport ? () => _openImportPreview(task) : null,
-                        icon: const Icon(Icons.visibility),
-                        label: const Text('预览导入'),
-                      ),
-                      const SizedBox(width: 8),
-                      OutlinedButton.icon(
-                        onPressed: () => _receiveController.removeTask(task.id),
-                        icon: const Icon(Icons.delete_outline),
-                        label: const Text('移除'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    task.filePath,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }),
-      ],
     );
   }
 
@@ -1720,13 +1592,6 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
                   const SizedBox(height: 8),
                 ],
                 _buildReceiveEndpointPanel(colorScheme),
-                const SizedBox(height: 10),
-                Text(
-                  '待导入任务',
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-                const SizedBox(height: 8),
-                _buildReceiveTasks(colorScheme),
               ],
             ),
           ),
@@ -1951,56 +1816,6 @@ class _LanSyncGrenadePickerScreenState
             style: TextStyle(color: Colors.grey[600], fontSize: 12),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _TaskStatusChip extends StatelessWidget {
-  final LanReceiveTaskStatus status;
-
-  const _TaskStatusChip({required this.status});
-
-  @override
-  Widget build(BuildContext context) {
-    late final String text;
-    late final Color color;
-    switch (status) {
-      case LanReceiveTaskStatus.receiving:
-        text = '接收中';
-        color = Colors.cyan;
-        break;
-      case LanReceiveTaskStatus.pending:
-        text = '待导入';
-        color = Colors.orange;
-        break;
-      case LanReceiveTaskStatus.importing:
-        text = '导入中';
-        color = Colors.blue;
-        break;
-      case LanReceiveTaskStatus.imported:
-        text = '已导入';
-        color = Colors.green;
-        break;
-      case LanReceiveTaskStatus.failed:
-        text = '失败';
-        color = Colors.red;
-        break;
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          color: color,
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-        ),
       ),
     );
   }
