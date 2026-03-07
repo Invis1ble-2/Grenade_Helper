@@ -283,7 +283,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('网段探测完成：发现 ${results.length} 台设备')),
+        SnackBar(content: Text('发现 ${results.length} 台设备')),
       );
     } catch (e) {
       await _appendHistory(
@@ -442,6 +442,42 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       _selectedMapForSend = selected;
       _sendScope = _LanSendScope.map;
     });
+  }
+
+  Future<void> _showSendModeHelpDialog() {
+    return showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('同步模式说明'),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '全量模式',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 4),
+            Text('发送当前范围内的完整数据，适合首次同步、补齐基线或大范围更新。'),
+            SizedBox(height: 12),
+            Text(
+              '增量模式',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 4),
+            Text('只发送相对于上次同步后发生变化的内容，传输更小、更快。'),
+            SizedBox(height: 12),
+            Text('注意：增量同步依赖双方已先完成过一次全量同步，且不支持按道具发送。'),
+          ],
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('我知道了'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _pickGrenadesForSend() async {
@@ -1412,7 +1448,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '该功能仅支持同一网络环境（同一 Wi-Fi / 同一局域网）下的设备互传。',
+                    '该功能仅支持同一网络环境（同一 Wi-Fi / 同一局域网）下的设备互传。请确保双方设备已连接到同一网络，并且网络环境允许设备间通信（部分公共 Wi-Fi 可能有限制）。',
                     style: TextStyle(
                       color: colorScheme.onPrimaryContainer,
                     ),
@@ -1451,25 +1487,37 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
+                      Row(
                         children: [
-                          ChoiceChip(
-                            label: const Text('全量'),
-                            selected: _sendMode == _LanSyncMode.full,
-                            onSelected: (_) =>
-                                setState(() => _sendMode = _LanSyncMode.full),
+                          Expanded(
+                            child: Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                ChoiceChip(
+                                  label: const Text('全量'),
+                                  selected: _sendMode == _LanSyncMode.full,
+                                  onSelected: (_) => setState(
+                                      () => _sendMode = _LanSyncMode.full),
+                                ),
+                                ChoiceChip(
+                                  label: const Text('增量'),
+                                  selected:
+                                      _sendMode == _LanSyncMode.incremental,
+                                  onSelected: (_) => setState(() {
+                                    _sendMode = _LanSyncMode.incremental;
+                                    if (_sendScope == _LanSendScope.grenades) {
+                                      _sendScope = _LanSendScope.all;
+                                    }
+                                  }),
+                                ),
+                              ],
+                            ),
                           ),
-                          ChoiceChip(
-                            label: const Text('增量'),
-                            selected: _sendMode == _LanSyncMode.incremental,
-                            onSelected: (_) => setState(() {
-                              _sendMode = _LanSyncMode.incremental;
-                              if (_sendScope == _LanSendScope.grenades) {
-                                _sendScope = _LanSendScope.all;
-                              }
-                            }),
+                          IconButton(
+                            onPressed: _showSendModeHelpDialog,
+                            tooltip: '同步模式说明',
+                            icon: const Icon(Icons.help_outline),
                           ),
                         ],
                       ),

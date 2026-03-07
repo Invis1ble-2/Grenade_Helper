@@ -2310,7 +2310,13 @@ class DataService {
             }
           }
         }
-        if (importedGrenades.isNotEmpty) {
+      });
+      if (importedGrenades.isNotEmpty) {
+        final importedIds = importedGrenades
+            .map((e) => e.id)
+            .where((id) => id > 0)
+            .toList(growable: false);
+        await isar.writeTxn(() async {
           final history = ImportHistory(
             fileName: importFileName,
             importedAt: DateTime.now(),
@@ -2319,10 +2325,11 @@ class DataService {
             skippedCount: skippedCount,
           );
           await isar.importHistorys.put(history);
-          history.grenades.addAll(importedGrenades);
+          final savedGrenades = await isar.grenades.getAll(importedIds);
+          history.grenades.addAll(savedGrenades.whereType<Grenade>());
           await history.grenades.save();
-        }
-      });
+        });
+      }
     }
 
     final List<String> messages = [];
