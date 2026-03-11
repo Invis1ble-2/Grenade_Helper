@@ -273,6 +273,8 @@ class LanSyncLocalStore {
   static const _peersKey = 'lan_sync_peers_v1';
   static const _historyKey = 'lan_sync_history_v1';
   static const _stableNodeIdKey = 'lan_sync_stable_node_id_v1';
+  static const _receiveSilentImportEnabledKey =
+      'lan_sync_receive_silent_import_enabled_v1';
   static const _ackedMapBaselinesKey = 'lan_sync_acked_map_baselines_v1';
   static const _mapBaselineSnapshotsKey = 'lan_sync_map_baseline_snapshots_v1';
   static const _grenadeTombstonesKey = 'lan_sync_grenade_tombstones_v1';
@@ -874,5 +876,15 @@ class LanSyncLocalStore {
   Future<void> clearHistory() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_historyKey);
+  }
+
+  Future<bool> loadReceiveSilentImportEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_receiveSilentImportEnabledKey) ?? false;
+  }
+
+  Future<void> saveReceiveSilentImportEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_receiveSilentImportEnabledKey, enabled);
   }
 }

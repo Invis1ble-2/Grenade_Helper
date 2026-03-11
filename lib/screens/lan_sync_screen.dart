@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:isar_community/isar.dart';
 
 import '../models.dart';
+import '../models/tag.dart';
 import '../providers.dart';
 import '../services/data_service.dart';
 import '../services/lan_sync/lan_sync_discovery_service.dart';
@@ -21,6 +22,16 @@ import 'import_preview_screen.dart';
 enum _LanSendScope { all, map, grenades }
 
 enum _LanSyncMode { full, incremental }
+
+class _LanImportConflictDialogResult<T> {
+  final T resolution;
+  final bool applyToRemaining;
+
+  const _LanImportConflictDialogResult({
+    required this.resolution,
+    required this.applyToRemaining,
+  });
+}
 
 class LanSyncScreen extends ConsumerStatefulWidget {
   const LanSyncScreen({super.key});
@@ -51,6 +62,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
   final Set<String> _handledImportTaskIds = <String>{};
   bool _isAutoOpeningImportPreview = false;
   bool _isLoadingSyncDebug = false;
+  bool _silentImportEnabled = false;
 
   @override
   void initState() {
@@ -125,7 +137,11 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       _isAutoOpeningImportPreview = true;
       unawaited(() async {
         try {
-          await _openImportPreview(task!);
+          if (_silentImportEnabled) {
+            await _importTaskSilently(task!);
+          } else {
+            await _openImportPreview(task!);
+          }
         } finally {
           _isAutoOpeningImportPreview = false;
           if (mounted) {
@@ -202,10 +218,13 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
 
   Future<void> _loadLocalState() async {
     final nodeId = await _localStore.loadOrCreateStableNodeId();
+    final silentImportEnabled =
+        await _localStore.loadReceiveSilentImportEnabled();
     _receiveController.setLocalNodeId(nodeId);
     await _refreshSyncDebugInfo();
     if (!mounted) return;
     setState(() {
+      _silentImportEnabled = silentImportEnabled;
       _isLoadingLocal = false;
     });
   }
@@ -239,6 +258,23 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       createdAt: DateTime.now(),
     );
     await _localStore.appendHistory(entry);
+  }
+
+  Future<void> _setSilentImportEnabled(bool enabled) async {
+    if (_silentImportEnabled == enabled) return;
+    setState(() {
+      _silentImportEnabled = enabled;
+    });
+    await _localStore.saveReceiveSilentImportEnabled(enabled);
+    await _appendHistory(
+      category: 'system',
+      title: enabled ? '已开启静默导入' : '已关闭静默导入',
+      detail: enabled ? '接收后自动后台导入' : '接收后打开导入预览',
+      success: true,
+    );
+    if (enabled) {
+      _maybeOpenImportPreviewDirectly();
+    }
   }
 
   Future<void> _scanDevices() async {
@@ -1071,6 +1107,448 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
     );
   }
 
+  Set<String> _buildSilentImportSelectedIds(PackagePreviewResult preview) {
+    final selected = <String>{};
+    for (final mapGrenades in preview.grenadesByMap.values) {
+      for (final item in mapGrenades) {
+        if (item.status != ImportStatus.skip) {
+          selected.add(item.uniqueId);
+        }
+      }
+    }
+    return selected;
+  }
+
+  Future<bool?> _showImportConflictNoticeDialog(ImportConflictNotice notice) {
+    final lines = <String>[];
+    for (final item in notice.newerLocalGrenades.take(6)) {
+      lines.add('本地较新，将跳过更新：${item.mapName} / ${item.title}');
+    }
+    for (final item in notice.newerLocalDeleteConflicts.take(6)) {
+      lines.add('本地较新，将跳过删除：${item.mapName} / ${item.title}');
+    }
+    for (final item in notice.newerLocalFavoriteFolderDeletes.take(6)) {
+      lines.add('本地较新，将跳过收藏夹删除：$item');
+    }
+    final hiddenCount = notice.newerLocalGrenades.length +
+        notice.newerLocalDeleteConflicts.length +
+        notice.newerLocalFavoriteFolderDeletes.length -
+        lines.length;
+    if (hiddenCount > 0) {
+      lines.add('还有 $hiddenCount 条冲突未展开');
+    }
+
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('发现同步冲突'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('以下内容会在导入时被保留为本地版本，不会被对端覆盖或删除：'),
+            const SizedBox(height: 8),
+            ...lines.map((line) => Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(line),
+                )),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('继续导入'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<_LanImportConflictDialogResult<ImportTagConflictResolution>?>
+      _showTagConflictDialog(
+    TagConflictItem conflict, {
+    required int index,
+    required int total,
+  }) async {
+    final reason = conflict.type == TagConflictType.uuidMismatch
+        ? '同 UUID 标签属性不一致'
+        : '本地已存在同地图同维度同名标签（UUID 不同）';
+    final shared = conflict.sharedTag;
+    final local = conflict.localTag;
+    var applyToRemaining = false;
+
+    return showDialog<
+        _LanImportConflictDialogResult<ImportTagConflictResolution>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: Text('标签冲突 $index/$total'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(reason),
+              const SizedBox(height: 8),
+              Text('地图：${shared.mapName}'),
+              Text('维度：${TagDimension.getName(shared.dimension)}'),
+              const SizedBox(height: 8),
+              Text(
+                  '本地：${local.name} | 颜色: 0x${local.colorValue.toRadixString(16).toUpperCase()}'),
+              Text(
+                  '分享：${shared.name} | 颜色: 0x${shared.colorValue.toRadixString(16).toUpperCase()}'),
+              const SizedBox(height: 8),
+              const Text('请选择保留哪一侧标签数据：'),
+              const SizedBox(height: 4),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                controlAffinity: ListTileControlAffinity.leading,
+                value: applyToRemaining,
+                onChanged: (value) {
+                  setDialogState(() {
+                    applyToRemaining = value ?? false;
+                  });
+                },
+                title: const Text('接下来的冲突也一样操作'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消导入'),
+            ),
+            OutlinedButton(
+              onPressed: () => Navigator.pop(
+                ctx,
+                _LanImportConflictDialogResult<ImportTagConflictResolution>(
+                  resolution: ImportTagConflictResolution.local,
+                  applyToRemaining: applyToRemaining,
+                ),
+              ),
+              child: const Text('用本地'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(
+                ctx,
+                _LanImportConflictDialogResult<ImportTagConflictResolution>(
+                  resolution: ImportTagConflictResolution.shared,
+                  applyToRemaining: applyToRemaining,
+                ),
+              ),
+              child: const Text('用分享'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<_LanImportConflictDialogResult<ImportAreaConflictResolution>?>
+      _showAreaConflictDialog(
+    AreaConflictGroup conflict, {
+    required int index,
+    required int total,
+  }) async {
+    final layersText = conflict.layers.join('、');
+    var applyToRemaining = false;
+    return showDialog<
+        _LanImportConflictDialogResult<ImportAreaConflictResolution>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: Text('区域冲突 $index/$total'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('标签：${conflict.tagName}'),
+              Text('地图：${conflict.mapName}'),
+              Text('冲突楼层：$layersText'),
+              const SizedBox(height: 8),
+              const Text('请选择该标签的区域导入策略：'),
+              const SizedBox(height: 4),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                controlAffinity: ListTileControlAffinity.leading,
+                value: applyToRemaining,
+                onChanged: (value) {
+                  setDialogState(() {
+                    applyToRemaining = value ?? false;
+                  });
+                },
+                title: const Text('接下来的冲突也一样操作'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消导入'),
+            ),
+            OutlinedButton(
+              onPressed: () => Navigator.pop(
+                ctx,
+                _LanImportConflictDialogResult<ImportAreaConflictResolution>(
+                  resolution: ImportAreaConflictResolution.keepLocal,
+                  applyToRemaining: applyToRemaining,
+                ),
+              ),
+              child: const Text('本地保留'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(
+                ctx,
+                _LanImportConflictDialogResult<ImportAreaConflictResolution>(
+                  resolution: ImportAreaConflictResolution.overwriteShared,
+                  applyToRemaining: applyToRemaining,
+                ),
+              ),
+              child: const Text('分享覆盖'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _importTaskSilently(LanReceivedPackageTask task) async {
+    final transferRequestId = (task.transferRequestId ?? '').trim();
+    final file = File(task.filePath);
+    if (!await file.exists()) {
+      await _receiveController.markTaskStatus(
+        task.id,
+        LanReceiveTaskStatus.failed,
+        message: '文件不存在，可能已被系统清理',
+      );
+      if (transferRequestId.isNotEmpty) {
+        await _receiveController.markIncomingRequestStatus(
+          transferRequestId,
+          LanIncomingTransferRequestStatus.importFailed,
+          message: '导入失败：接收文件不存在',
+        );
+      }
+      await _appendHistory(
+        category: 'import',
+        title: '静默导入失败',
+        detail: '${task.fileName} · 文件不存在',
+        success: false,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('文件不存在，无法导入'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    await _receiveController.markTaskStatus(
+      task.id,
+      LanReceiveTaskStatus.importing,
+      clearMessage: true,
+    );
+    if (transferRequestId.isNotEmpty) {
+      await _receiveController.markIncomingRequestStatus(
+        transferRequestId,
+        LanIncomingTransferRequestStatus.importing,
+        clearMessage: true,
+      );
+    }
+
+    try {
+      final isar = ref.read(isarProvider);
+      final dataService = DataService(isar);
+      final preview = await dataService.previewPackage(task.filePath);
+      if (preview == null) {
+        throw StateError('文件格式错误或无数据');
+      }
+
+      final selectedIds = _buildSilentImportSelectedIds(preview);
+      final conflictNotice =
+          await dataService.collectImportConflictNotice(preview, selectedIds);
+      if (conflictNotice.hasConflicts) {
+        if (!mounted) return;
+        final continueImport =
+            await _showImportConflictNoticeDialog(conflictNotice);
+        if (continueImport != true) {
+          if (transferRequestId.isNotEmpty) {
+            await _receiveController.markIncomingRequestStatus(
+              transferRequestId,
+              LanIncomingTransferRequestStatus.importCancelled,
+              message: '接收方取消导入',
+            );
+          }
+          await _appendHistory(
+            category: 'import',
+            title: '取消导入',
+            detail: '${task.fileName} · 冲突处理已取消',
+            success: true,
+          );
+          await _receiveController.removeTask(task.id);
+          return;
+        }
+      }
+
+      final tagResolutions = <String, ImportTagConflictResolution>{};
+      final areaResolutions = <String, ImportAreaConflictResolution>{};
+      ImportTagConflictResolution? tagResolutionForRemaining;
+      ImportAreaConflictResolution? areaResolutionForRemaining;
+
+      final tagConflictBundle =
+          await dataService.collectTagConflicts(preview, selectedIds);
+      final tagConflicts = tagConflictBundle.tagConflicts;
+      for (var i = 0; i < tagConflicts.length; i++) {
+        if (!mounted) return;
+        final conflict = tagConflicts[i];
+        final dialogResult = tagResolutionForRemaining != null
+            ? _LanImportConflictDialogResult<ImportTagConflictResolution>(
+                resolution: tagResolutionForRemaining,
+                applyToRemaining: true,
+              )
+            : await _showTagConflictDialog(
+                conflict,
+                index: i + 1,
+                total: tagConflicts.length,
+              );
+        if (dialogResult == null) {
+          if (transferRequestId.isNotEmpty) {
+            await _receiveController.markIncomingRequestStatus(
+              transferRequestId,
+              LanIncomingTransferRequestStatus.importCancelled,
+              message: '接收方取消导入',
+            );
+          }
+          await _appendHistory(
+            category: 'import',
+            title: '取消导入',
+            detail: '${task.fileName} · 标签冲突处理已取消',
+            success: true,
+          );
+          await _receiveController.removeTask(task.id);
+          return;
+        }
+        tagResolutions[conflict.sharedTag.tagUuid] = dialogResult.resolution;
+        if (dialogResult.applyToRemaining) {
+          tagResolutionForRemaining = dialogResult.resolution;
+        }
+      }
+
+      final areaConflicts = await dataService.collectAreaConflicts(
+        preview,
+        selectedIds,
+        tagResolutions: tagResolutions,
+      );
+      for (var i = 0; i < areaConflicts.length; i++) {
+        if (!mounted) return;
+        final conflict = areaConflicts[i];
+        final dialogResult = areaResolutionForRemaining != null
+            ? _LanImportConflictDialogResult<ImportAreaConflictResolution>(
+                resolution: areaResolutionForRemaining,
+                applyToRemaining: true,
+              )
+            : await _showAreaConflictDialog(
+                conflict,
+                index: i + 1,
+                total: areaConflicts.length,
+              );
+        if (dialogResult == null) {
+          if (transferRequestId.isNotEmpty) {
+            await _receiveController.markIncomingRequestStatus(
+              transferRequestId,
+              LanIncomingTransferRequestStatus.importCancelled,
+              message: '接收方取消导入',
+            );
+          }
+          await _appendHistory(
+            category: 'import',
+            title: '取消导入',
+            detail: '${task.fileName} · 区域冲突处理已取消',
+            success: true,
+          );
+          await _receiveController.removeTask(task.id);
+          return;
+        }
+        areaResolutions[conflict.tagUuid] = dialogResult.resolution;
+        if (dialogResult.applyToRemaining) {
+          areaResolutionForRemaining = dialogResult.resolution;
+        }
+      }
+
+      final importResult = await dataService.importFromPreview(
+        preview,
+        selectedIds,
+        tagResolutions: tagResolutions,
+        areaResolutions: areaResolutions,
+      );
+
+      await _receiveController.markTaskStatus(
+        task.id,
+        LanReceiveTaskStatus.imported,
+        message: importResult,
+      );
+      if (transferRequestId.isNotEmpty) {
+        await _receiveController.markIncomingRequestStatus(
+          transferRequestId,
+          LanIncomingTransferRequestStatus.imported,
+          message: importResult,
+          importSummary: {
+            'result': importResult,
+            'taskId': task.id,
+            'importedAtMs': DateTime.now().millisecondsSinceEpoch,
+            'silentImport': true,
+          },
+        );
+      }
+      await _appendHistory(
+        category: 'import',
+        title: '静默导入完成',
+        detail: '${task.fileName} · $importResult',
+        success: importResult.contains('成功'),
+      );
+      await _receiveController.removeTask(task.id, deleteFile: false);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('静默导入完成：$importResult'),
+          backgroundColor:
+              importResult.contains('成功') ? Colors.green : Colors.orange,
+        ),
+      );
+    } catch (e) {
+      await _receiveController.markTaskStatus(
+        task.id,
+        LanReceiveTaskStatus.failed,
+        message: '静默导入失败: $e',
+      );
+      if (transferRequestId.isNotEmpty) {
+        await _receiveController.markIncomingRequestStatus(
+          transferRequestId,
+          LanIncomingTransferRequestStatus.importFailed,
+          message: '静默导入失败: $e',
+        );
+      }
+      await _appendHistory(
+        category: 'import',
+        title: '静默导入失败',
+        detail: '${task.fileName} · $e',
+        success: false,
+      );
+      await _receiveController.removeTask(task.id, deleteFile: false);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('静默导入失败: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
   Future<void> _openImportPreview(LanReceivedPackageTask task) async {
     final transferRequestId = (task.transferRequestId ?? '').trim();
     final file = File(task.filePath);
@@ -1533,6 +2011,13 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
                       : null,
                   onChanged:
                       _receiveController.isStarting ? null : _toggleReceiveMode,
+                ),
+                SwitchListTile(
+                  value: _silentImportEnabled,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('静默导入'),
+                  subtitle: const Text('接收后跳过预览自动导入，发生冲突时会弹窗确认'),
+                  onChanged: _setSilentImportEnabled,
                 ),
                 if (pendingIncomingRequests.isNotEmpty) ...[
                   Text(

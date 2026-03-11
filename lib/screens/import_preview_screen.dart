@@ -20,6 +20,16 @@ class ImportPreviewScreen extends ConsumerStatefulWidget {
       _ImportPreviewScreenState();
 }
 
+class _ConflictDialogResult<T> {
+  final T resolution;
+  final bool applyToRemaining;
+
+  const _ConflictDialogResult({
+    required this.resolution,
+    required this.applyToRemaining,
+  });
+}
+
 class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
   PackagePreviewResult? _preview;
   Map<String, GrenadePreviewItem> _localTombstoneItems = const {};
@@ -171,6 +181,8 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
       }
       final tagResolutions = <String, ImportTagConflictResolution>{};
       final areaResolutions = <String, ImportAreaConflictResolution>{};
+      ImportTagConflictResolution? tagResolutionForRemaining;
+      ImportAreaConflictResolution? areaResolutionForRemaining;
 
       final tagConflictBundle =
           await dataService.collectTagConflicts(_preview!, _selectedIds);
@@ -178,18 +190,26 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
       for (var i = 0; i < tagConflicts.length; i++) {
         if (!mounted) return;
         final conflict = tagConflicts[i];
-        final resolution = await _showTagConflictDialog(
-          conflict,
-          index: i + 1,
-          total: tagConflicts.length,
-        );
-        if (resolution == null) {
+        final dialogResult = tagResolutionForRemaining != null
+            ? _ConflictDialogResult<ImportTagConflictResolution>(
+                resolution: tagResolutionForRemaining,
+                applyToRemaining: true,
+              )
+            : await _showTagConflictDialog(
+                conflict,
+                index: i + 1,
+                total: tagConflicts.length,
+              );
+        if (dialogResult == null) {
           if (mounted) {
             setState(() => _isImporting = false);
           }
           return;
         }
-        tagResolutions[conflict.sharedTag.tagUuid] = resolution;
+        tagResolutions[conflict.sharedTag.tagUuid] = dialogResult.resolution;
+        if (dialogResult.applyToRemaining) {
+          tagResolutionForRemaining = dialogResult.resolution;
+        }
       }
 
       final areaConflicts = await dataService.collectAreaConflicts(
@@ -200,18 +220,26 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
       for (var i = 0; i < areaConflicts.length; i++) {
         if (!mounted) return;
         final conflict = areaConflicts[i];
-        final resolution = await _showAreaConflictDialog(
-          conflict,
-          index: i + 1,
-          total: areaConflicts.length,
-        );
-        if (resolution == null) {
+        final dialogResult = areaResolutionForRemaining != null
+            ? _ConflictDialogResult<ImportAreaConflictResolution>(
+                resolution: areaResolutionForRemaining,
+                applyToRemaining: true,
+              )
+            : await _showAreaConflictDialog(
+                conflict,
+                index: i + 1,
+                total: areaConflicts.length,
+              );
+        if (dialogResult == null) {
           if (mounted) {
             setState(() => _isImporting = false);
           }
           return;
         }
-        areaResolutions[conflict.tagUuid] = resolution;
+        areaResolutions[conflict.tagUuid] = dialogResult.resolution;
+        if (dialogResult.applyToRemaining) {
+          areaResolutionForRemaining = dialogResult.resolution;
+        }
       }
 
       final result = await dataService.importFromPreview(
@@ -287,7 +315,8 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
     );
   }
 
-  Future<ImportTagConflictResolution?> _showTagConflictDialog(
+  Future<_ConflictDialogResult<ImportTagConflictResolution>?>
+      _showTagConflictDialog(
     TagConflictItem conflict, {
     required int index,
     required int total,
@@ -297,87 +326,140 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
         : '本地已存在同地图同维度同名标签（UUID 不同）';
     final shared = conflict.sharedTag;
     final local = conflict.localTag;
+    var applyToRemaining = false;
 
-    return showDialog<ImportTagConflictResolution>(
+    return showDialog<_ConflictDialogResult<ImportTagConflictResolution>>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: Text('标签冲突 $index/$total'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(reason),
-            const SizedBox(height: 8),
-            Text('地图：${shared.mapName}'),
-            Text('维度：${TagDimension.getName(shared.dimension)}'),
-            const SizedBox(height: 8),
-            Text(
-                '本地：${local.name} | 颜色: 0x${local.colorValue.toRadixString(16).toUpperCase()}'),
-            Text(
-                '分享：${shared.name} | 颜色: 0x${shared.colorValue.toRadixString(16).toUpperCase()}'),
-            const SizedBox(height: 8),
-            const Text('请选择保留哪一侧标签数据：'),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: Text('标签冲突 $index/$total'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(reason),
+              const SizedBox(height: 8),
+              Text('地图：${shared.mapName}'),
+              Text('维度：${TagDimension.getName(shared.dimension)}'),
+              const SizedBox(height: 8),
+              Text(
+                  '本地：${local.name} | 颜色: 0x${local.colorValue.toRadixString(16).toUpperCase()}'),
+              Text(
+                  '分享：${shared.name} | 颜色: 0x${shared.colorValue.toRadixString(16).toUpperCase()}'),
+              const SizedBox(height: 8),
+              const Text('请选择保留哪一侧标签数据：'),
+              const SizedBox(height: 4),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                controlAffinity: ListTileControlAffinity.leading,
+                value: applyToRemaining,
+                onChanged: (value) {
+                  setDialogState(() {
+                    applyToRemaining = value ?? false;
+                  });
+                },
+                title: const Text('接下来的冲突也一样操作'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消导入'),
+            ),
+            OutlinedButton(
+              onPressed: () => Navigator.pop(
+                ctx,
+                _ConflictDialogResult<ImportTagConflictResolution>(
+                  resolution: ImportTagConflictResolution.local,
+                  applyToRemaining: applyToRemaining,
+                ),
+              ),
+              child: const Text('用本地'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(
+                ctx,
+                _ConflictDialogResult<ImportTagConflictResolution>(
+                  resolution: ImportTagConflictResolution.shared,
+                  applyToRemaining: applyToRemaining,
+                ),
+              ),
+              child: const Text('用分享'),
+            ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消导入'),
-          ),
-          OutlinedButton(
-            onPressed: () =>
-                Navigator.pop(ctx, ImportTagConflictResolution.local),
-            child: const Text('用本地'),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.pop(ctx, ImportTagConflictResolution.shared),
-            child: const Text('用分享'),
-          ),
-        ],
       ),
     );
   }
 
-  Future<ImportAreaConflictResolution?> _showAreaConflictDialog(
+  Future<_ConflictDialogResult<ImportAreaConflictResolution>?>
+      _showAreaConflictDialog(
     AreaConflictGroup conflict, {
     required int index,
     required int total,
   }) async {
     final layersText = conflict.layers.join('、');
-    return showDialog<ImportAreaConflictResolution>(
+    var applyToRemaining = false;
+    return showDialog<_ConflictDialogResult<ImportAreaConflictResolution>>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: Text('区域冲突 $index/$total'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('标签：${conflict.tagName}'),
-            Text('地图：${conflict.mapName}'),
-            Text('冲突楼层：$layersText'),
-            const SizedBox(height: 8),
-            const Text('请选择该标签的区域导入策略：'),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: Text('区域冲突 $index/$total'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('标签：${conflict.tagName}'),
+              Text('地图：${conflict.mapName}'),
+              Text('冲突楼层：$layersText'),
+              const SizedBox(height: 8),
+              const Text('请选择该标签的区域导入策略：'),
+              const SizedBox(height: 4),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                controlAffinity: ListTileControlAffinity.leading,
+                value: applyToRemaining,
+                onChanged: (value) {
+                  setDialogState(() {
+                    applyToRemaining = value ?? false;
+                  });
+                },
+                title: const Text('接下来的冲突也一样操作'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消导入'),
+            ),
+            OutlinedButton(
+              onPressed: () => Navigator.pop(
+                ctx,
+                _ConflictDialogResult<ImportAreaConflictResolution>(
+                  resolution: ImportAreaConflictResolution.keepLocal,
+                  applyToRemaining: applyToRemaining,
+                ),
+              ),
+              child: const Text('本地保留'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(
+                ctx,
+                _ConflictDialogResult<ImportAreaConflictResolution>(
+                  resolution: ImportAreaConflictResolution.overwriteShared,
+                  applyToRemaining: applyToRemaining,
+                ),
+              ),
+              child: const Text('分享覆盖'),
+            ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消导入'),
-          ),
-          OutlinedButton(
-            onPressed: () =>
-                Navigator.pop(ctx, ImportAreaConflictResolution.keepLocal),
-            child: const Text('本地保留'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(
-                ctx, ImportAreaConflictResolution.overwriteShared),
-            child: const Text('分享覆盖'),
-          ),
-        ],
       ),
     );
   }
