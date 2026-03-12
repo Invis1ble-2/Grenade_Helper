@@ -38,6 +38,9 @@ class OverlayStateService extends ChangeNotifier {
   // 吸附确认状态
   bool _isSnapConfirmed = false;
   Timer? _snapConfirmTimer;
+  int? _suppressedSnapGrenadeId;
+  Timer? _suppressedSnapTimer;
+  DateTime? _lastNavigationActivityAt;
 
   // 移动常量
   static const int _moveIntervalMs = 16; // 约60fps
@@ -53,12 +56,13 @@ class OverlayStateService extends ChangeNotifier {
 
   // 吸附阈值配置
   static const List<double> _snapThresholdLevels = [
-    0.015,
-    0.018,
-    0.02, // 3档 - 默认
+    0.02,
     0.022,
-    0.025,
+    0.024, // 3档 - 默认
+    0.027,
+    0.03,
   ];
+  static const double _snapReleaseMultiplier = 1.18;
 
   // 当前档位
   int _navSpeedLevel = 3;
@@ -186,6 +190,7 @@ class OverlayStateService extends ChangeNotifier {
   void dispose() {
     _moveTimer?.cancel();
     _snapConfirmTimer?.cancel();
+    _suppressedSnapTimer?.cancel();
     _grenadeSubscription?.cancel();
     super.dispose();
   }
@@ -291,6 +296,9 @@ class OverlayStateService extends ChangeNotifier {
     _filteredGrenades.clear();
     _currentGrenadeIndex = 0;
     _currentStepIndex = 0;
+    _suppressedSnapGrenadeId = null;
+    _suppressedSnapTimer?.cancel();
+    _lastNavigationActivityAt = null;
     notifyListeners();
   }
 
@@ -492,21 +500,25 @@ class OverlayStateService extends ChangeNotifier {
   void _checkAndSnapToPointEx({bool ignoreCurrent = false}) {
     if (_filteredGrenades.isEmpty) {
       _isSnapped = false;
+      _suppressedSnapGrenadeId = null;
+      _suppressedSnapTimer?.cancel();
       return;
     }
 
     final clusters = _clusterGrenades();
     if (clusters.isEmpty) {
       _isSnapped = false;
+      _suppressedSnapGrenadeId = null;
+      _suppressedSnapTimer?.cancel();
       return;
     }
 
     // 获取当前 cluster 的中心坐标（用于忽略判断）
     final currentX = currentGrenade?.xRatio;
     final currentY = currentGrenade?.yRatio;
-
     List<Grenade>? nearestCluster;
     double minDist = double.infinity;
+    double nearestSnapThresholdSq = _snapThreshold * _snapThreshold;
 
     for (final cluster in clusters) {
       // 使用 cluster 第一个元素作为中心（与 _clusterGrenades 的构建逻辑和 RadarMiniMap 的显示逻辑保持一致）
@@ -514,14 +526,40 @@ class OverlayStateService extends ChangeNotifier {
       final centerPoint = cluster.first;
       final centerX = centerPoint.xRatio;
       final centerY = centerPoint.yRatio;
+      final isCurrentCluster = currentX != null &&
+          currentY != null &&
+          (() {
+            final dx = centerX - currentX;
+            final dy = centerY - currentY;
+            return dx * dx + dy * dy < _snapThreshold * _snapThreshold;
+          })();
+      final clusterSnapThreshold =
+          isCurrentCluster && _suppressedSnapGrenadeId == null
+              ? _snapThreshold * _snapReleaseMultiplier
+              : _snapThreshold;
+      final clusterSnapThresholdSq =
+          clusterSnapThreshold * clusterSnapThreshold;
+
+      if (_suppressedSnapGrenadeId != null &&
+          centerPoint.id == _suppressedSnapGrenadeId) {
+        final dx = centerX - _crosshairX;
+        final dy = centerY - _crosshairY;
+        final dist = dx * dx + dy * dy;
+        if (dist < clusterSnapThresholdSq) {
+          continue;
+        }
+      }
 
       // 如果要求忽略当前 cluster，检查是否是当前所在的 cluster
       // 使用 _snapThreshold（动态阈值）而不是 _clusterThreshold（显示阈值）
-      if (ignoreCurrent && currentX != null && currentY != null) {
+      if (ignoreCurrent &&
+          _suppressedSnapGrenadeId == null &&
+          currentX != null &&
+          currentY != null) {
         final clusterDx = (centerX - currentX).abs();
         final clusterDy = (centerY - currentY).abs();
         if (clusterDx * clusterDx + clusterDy * clusterDy <
-            _snapThreshold * _snapThreshold) {
+            clusterSnapThresholdSq) {
           continue; // 跳过当前 cluster
         }
       }
@@ -534,11 +572,34 @@ class OverlayStateService extends ChangeNotifier {
       if (dist < minDist) {
         minDist = dist;
         nearestCluster = cluster;
+        nearestSnapThresholdSq = clusterSnapThresholdSq;
+      }
+    }
+
+    if (_suppressedSnapGrenadeId != null) {
+      final suppressedGrenade = _filteredGrenades
+          .where((g) => g.id == _suppressedSnapGrenadeId)
+          .cast<Grenade?>()
+          .firstWhere(
+            (_) => true,
+            orElse: () => null,
+          );
+      if (suppressedGrenade == null) {
+        _suppressedSnapGrenadeId = null;
+        _suppressedSnapTimer?.cancel();
+      } else {
+        final dx = suppressedGrenade.xRatio - _crosshairX;
+        final dy = suppressedGrenade.yRatio - _crosshairY;
+        final releaseThreshold = _snapThreshold * _snapReleaseMultiplier;
+        if (dx * dx + dy * dy > releaseThreshold * releaseThreshold) {
+          _suppressedSnapGrenadeId = null;
+          _suppressedSnapTimer?.cancel();
+        }
       }
     }
 
     // 检查是否在吸附范围内
-    if (nearestCluster != null && minDist < _snapThreshold * _snapThreshold) {
+    if (nearestCluster != null && minDist < nearestSnapThresholdSq) {
       // 吸附到 cluster 的第一个道具（作为代表）
       final nearest = nearestCluster.first;
       final wasSnapped = _isSnapped;
@@ -549,6 +610,8 @@ class OverlayStateService extends ChangeNotifier {
       _currentGrenadeIndex = _filteredGrenades.indexOf(nearest);
       _currentStepIndex = 0;
       _isSnapped = true;
+      _suppressedSnapGrenadeId = null;
+      _suppressedSnapTimer?.cancel();
 
       // 如果是新吸附到不同的道具，重置确认状态并启动延迟确认定时器
       if (!wasSnapped || previousGrenadeId != nearest.id) {
@@ -693,6 +756,7 @@ class OverlayStateService extends ChangeNotifier {
   /// 更新位置
   void _updateCrosshairPosition() {
     if (_activeDirections.isEmpty) return;
+    _recordNavigationActivity();
 
     double dx = 0;
     double dy = 0;
@@ -724,7 +788,8 @@ class OverlayStateService extends ChangeNotifier {
 
     // 如果当前已吸附，开始逃离时减速（增加吸附粘性）
     // 减速因子 0.8 意味着刚开始移动时只有 80% 的速度
-    if (_isSnapped) {
+    final wasSnapped = _isSnapped;
+    if (wasSnapped) {
       dx *= 0.5;
       dy *= 0.5;
       _isSnapped = false;
@@ -734,14 +799,21 @@ class OverlayStateService extends ChangeNotifier {
     _crosshairX = (_crosshairX + dx).clamp(0.0, 1.0);
     _crosshairY = (_crosshairY + dy).clamp(0.0, 1.0);
 
-    // 检查并吸附到最近点位（移动时忽略当前已吸附的点位，以便能顺利移开）
-    _checkAndSnapToPointEx(ignoreCurrent: true);
+    final shouldSuppressCurrent =
+        wasSnapped && _hasMovedBeyondSnapReleaseThreshold();
+    if (shouldSuppressCurrent) {
+      _markCurrentSnapAsSuppressed();
+    }
+
+    // 只有明确进入逃离区间后，才忽略当前点位。
+    _checkAndSnapToPointEx(ignoreCurrent: shouldSuppressCurrent);
     notifyListeners();
   }
 
   /// 单次移动
   void navigateDirection(NavigationDirection direction) {
     if (_navigationLocked) return;
+    _recordNavigationActivity();
     // 记录移动前是否处于吸附状态
     final wasSnapped = _isSnapped;
 
@@ -777,10 +849,71 @@ class OverlayStateService extends ChangeNotifier {
         break;
     }
 
-    // 如果之前是吸附状态，忽略当前 cluster 以便能逃离
-    // 如果之前不是吸附状态，则正常检测所有点位
-    _checkAndSnapToPointEx(ignoreCurrent: wasSnapped);
+    final shouldSuppressCurrent =
+        wasSnapped && _hasMovedBeyondSnapReleaseThreshold();
+    if (shouldSuppressCurrent) {
+      _markCurrentSnapAsSuppressed();
+    }
+
+    // 如果确实越过释放阈值，再忽略当前 cluster 以便能逃离。
+    _checkAndSnapToPointEx(ignoreCurrent: shouldSuppressCurrent);
     notifyListeners();
+  }
+
+  void _markCurrentSnapAsSuppressed() {
+    final grenade = currentGrenade;
+    if (grenade == null) return;
+    _suppressedSnapGrenadeId = grenade.id;
+    _scheduleSuppressedSnapReset();
+  }
+
+  void _recordNavigationActivity() {
+    _lastNavigationActivityAt = DateTime.now();
+    if (_suppressedSnapGrenadeId != null) {
+      _scheduleSuppressedSnapReset();
+    }
+  }
+
+  void _scheduleSuppressedSnapReset() {
+    _suppressedSnapTimer?.cancel();
+    _suppressedSnapTimer = Timer(const Duration(milliseconds: 1500), () {
+      final lastActivityAt = _lastNavigationActivityAt;
+      if (lastActivityAt == null) {
+        _clearSuppressedSnapAndResnap();
+        return;
+      }
+
+      final idleFor = DateTime.now().difference(lastActivityAt);
+      if (idleFor < const Duration(milliseconds: 1500)) {
+        _scheduleSuppressedSnapReset();
+        return;
+      }
+
+      if (_activeDirections.isNotEmpty) {
+        _scheduleSuppressedSnapReset();
+        return;
+      }
+
+      _clearSuppressedSnapAndResnap();
+    });
+  }
+
+  void _clearSuppressedSnapAndResnap() {
+    if (_suppressedSnapGrenadeId == null) return;
+    _suppressedSnapGrenadeId = null;
+    _suppressedSnapTimer?.cancel();
+    _checkAndSnapToPointEx(ignoreCurrent: false);
+    notifyListeners();
+  }
+
+  bool _hasMovedBeyondSnapReleaseThreshold() {
+    final grenade = currentGrenade;
+    if (grenade == null) return false;
+
+    final dx = grenade.xRatio - _crosshairX;
+    final dy = grenade.yRatio - _crosshairY;
+    final releaseThreshold = _snapThreshold * _snapReleaseMultiplier;
+    return dx * dx + dy * dy > releaseThreshold * releaseThreshold;
   }
 
   /// 设置索引
