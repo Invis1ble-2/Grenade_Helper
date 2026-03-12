@@ -41,7 +41,7 @@ class MigrationService {
     return grenadesNeedingUuid.length;
   }
 
-  Future<int> migrateTagUuids() async {
+  Future<TagUuidMigrationSummary> migrateTagUuids() async {
     final tagService = TagService(isar);
     return tagService.ensureTagUuids();
   }

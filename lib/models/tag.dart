@@ -79,6 +79,8 @@ class Tag {
   @Index()
   int mapId;
 
+  DateTime updatedAt;
+
   Tag({
     this.tagUuid = '',
     required this.name,
@@ -88,5 +90,6 @@ class Tag {
     this.isSystem = false,
     this.sortOrder = 0,
     required this.mapId,
-  });
+    DateTime? updated,
+  }) : updatedAt = updated ?? DateTime.now();
 }

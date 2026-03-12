@@ -138,6 +138,15 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
     return tombstones;
   }
 
+  int _metadataChangeCount() {
+    final preview = _preview;
+    if (preview == null) return 0;
+    return preview.tagsByUuid.length +
+        preview.areas.length +
+        preview.favoriteFolders.length +
+        preview.impactGroups.length;
+  }
+
   /// 切换全选
   void _toggleSelectAll() {
     final currentGrenades = _getCurrentGrenades();
@@ -157,6 +166,7 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
   Future<void> _doImport() async {
     if (_preview == null) return;
     if (_selectedIds.isEmpty &&
+        _metadataChangeCount() == 0 &&
         _preview!.grenadeTombstones.isEmpty &&
         _preview!.entityTombstones.isEmpty) {
       return;
@@ -600,6 +610,7 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
     final selectedInCurrent =
         currentIds.where((id) => _selectedIds.contains(id)).length;
     final hasVisibleItems = grenades.isNotEmpty ||
+        _metadataChangeCount() > 0 ||
         tombstones.isNotEmpty ||
         entityTombstones.isNotEmpty;
 
@@ -630,6 +641,17 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
                 : ListView(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     children: [
+                      if (grenades.isEmpty && _metadataChangeCount() > 0)
+                        Card(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          child: ListTile(
+                            leading: const Icon(Icons.sync_alt),
+                            title: const Text('元数据变更'),
+                            subtitle: Text(
+                              '标签 ${_preview!.tagsByUuid.length} · 区域 ${_preview!.areas.length} · 收藏夹 ${_preview!.favoriteFolders.length} · 爆点分组 ${_preview!.impactGroups.length}',
+                            ),
+                          ),
+                        ),
                       ...grenades.map(_buildGrenadeItem),
                       if (tombstones.isNotEmpty) ...[
                         const SizedBox(height: 8),
@@ -999,14 +1021,18 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
 
   Widget _buildImportButton() {
     final grenadeCount = _selectedIds.length;
+    final metadataCount = _metadataChangeCount();
     final tombstoneCount = (_preview?.grenadeTombstones.length ?? 0) +
         (_preview?.entityTombstones.length ?? 0);
-    final canImport = grenadeCount > 0 || tombstoneCount > 0;
-    final label = grenadeCount > 0 && tombstoneCount > 0
-        ? "确认导入 ($grenadeCount 个道具 + 删除 $tombstoneCount 条)"
-        : grenadeCount > 0
-            ? "确认导入 ($grenadeCount 个道具)"
-            : "确认导入删除记录 ($tombstoneCount 条)";
+    final canImport =
+        grenadeCount > 0 || metadataCount > 0 || tombstoneCount > 0;
+    final labelParts = <String>[
+      if (grenadeCount > 0) '$grenadeCount 个道具',
+      if (metadataCount > 0) '元数据 $metadataCount 项',
+      if (tombstoneCount > 0) '删除 $tombstoneCount 条',
+    ];
+    final label =
+        labelParts.isEmpty ? '确认导入' : '确认导入 (${labelParts.join(' + ')})';
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(

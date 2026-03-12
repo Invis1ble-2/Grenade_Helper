@@ -39,6 +39,8 @@ class _DefaultAreaTagDevEditorScreenState
   String _indexKey(int tagId, int layerId) => '$tagId:$layerId';
 
   bool _isAreaNewer(MapArea a, MapArea b) {
+    if (a.updatedAt.isAfter(b.updatedAt)) return true;
+    if (a.updatedAt.isBefore(b.updatedAt)) return false;
     if (a.createdAt.isAfter(b.createdAt)) return true;
     if (a.createdAt.isBefore(b.createdAt)) return false;
     return a.id > b.id;

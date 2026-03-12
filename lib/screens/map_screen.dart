@@ -1769,14 +1769,20 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
     if (result != null && result['strokes'] != null) {
       final isar = ref.read(isarProvider);
+      final newStrokes = result['strokes'] as String;
       await isar.writeTxn(() async {
         final g = await isar.grenades.get(grenade.id);
         if (g != null) {
-          g.impactAreaStrokes = result['strokes'] as String;
+          g.impactAreaStrokes = newStrokes;
           g.updatedAt = DateTime.now();
           await isar.grenades.put(g);
         }
       });
+      grenade.impactAreaStrokes = newStrokes;
+      grenade.updatedAt = DateTime.now();
+      if (mounted) {
+        setState(() {});
+      }
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -5855,6 +5861,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   impactXRatio: cluster.xRatio,
                   impactYRatio: cluster.yRatio,
                   layerId: layerId,
+                  updated: DateTime.now(),
                 );
                 final isar = ref.read(isarProvider);
                 await isar.writeTxn(() async {
@@ -6367,6 +6374,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               await isar.writeTxn(() async {
                 if (isGroup) {
                   group.name = newName;
+                  group.updatedAt = DateTime.now();
                   await isar.impactGroups.put(group);
                 } else if (grenade != null) {
                   grenade.description = newName;

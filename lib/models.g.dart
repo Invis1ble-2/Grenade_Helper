@@ -7270,6 +7270,11 @@ const ImpactGroupSchema = CollectionSchema(
       id: 5,
       name: r'type',
       type: IsarType.long,
+    ),
+    r'updatedAt': PropertySchema(
+      id: 6,
+      name: r'updatedAt',
+      type: IsarType.dateTime,
     )
   },
   estimateSize: _impactGroupEstimateSize,
@@ -7335,6 +7340,7 @@ void _impactGroupSerialize(
   writer.writeLong(offsets[3], object.layerId);
   writer.writeString(offsets[4], object.name);
   writer.writeLong(offsets[5], object.type);
+  writer.writeDateTime(offsets[6], object.updatedAt);
 }
 
 ImpactGroup _impactGroupDeserialize(
@@ -7352,6 +7358,7 @@ ImpactGroup _impactGroupDeserialize(
   );
   object.createdAt = reader.readDateTime(offsets[0]);
   object.id = id;
+  object.updatedAt = reader.readDateTime(offsets[6]);
   return object;
 }
 
@@ -7374,6 +7381,8 @@ P _impactGroupDeserializeProp<P>(
       return (reader.readString(offset)) as P;
     case 5:
       return (reader.readLong(offset)) as P;
+    case 6:
+      return (reader.readDateTime(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
   }
@@ -8093,6 +8102,62 @@ extension ImpactGroupQueryFilter
       ));
     });
   }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition>
+      updatedAtEqualTo(DateTime value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'updatedAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition>
+      updatedAtGreaterThan(
+    DateTime value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'updatedAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition>
+      updatedAtLessThan(
+    DateTime value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'updatedAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterFilterCondition>
+      updatedAtBetween(
+    DateTime lower,
+    DateTime upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'updatedAt',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
 }
 
 extension ImpactGroupQueryObject
@@ -8174,6 +8239,18 @@ extension ImpactGroupQuerySortBy
   QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> sortByTypeDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'type', Sort.desc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> sortByUpdatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'updatedAt', Sort.asc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> sortByUpdatedAtDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'updatedAt', Sort.desc);
     });
   }
 }
@@ -8265,6 +8342,18 @@ extension ImpactGroupQuerySortThenBy
       return query.addSortBy(r'type', Sort.desc);
     });
   }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> thenByUpdatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'updatedAt', Sort.asc);
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QAfterSortBy> thenByUpdatedAtDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'updatedAt', Sort.desc);
+    });
+  }
 }
 
 extension ImpactGroupQueryWhereDistinct
@@ -8303,6 +8392,12 @@ extension ImpactGroupQueryWhereDistinct
   QueryBuilder<ImpactGroup, ImpactGroup, QDistinct> distinctByType() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'type');
+    });
+  }
+
+  QueryBuilder<ImpactGroup, ImpactGroup, QDistinct> distinctByUpdatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'updatedAt');
     });
   }
 }
@@ -8348,6 +8443,12 @@ extension ImpactGroupQueryProperty
   QueryBuilder<ImpactGroup, int, QQueryOperations> typeProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'type');
+    });
+  }
+
+  QueryBuilder<ImpactGroup, DateTime, QQueryOperations> updatedAtProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'updatedAt');
     });
   }
 }

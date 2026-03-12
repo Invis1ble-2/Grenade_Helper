@@ -66,10 +66,49 @@ class LanSyncTransferRequestResponse {
   });
 }
 
+class LanSyncRemoteManifestItem {
+  final String digest;
+  final int updatedAtMs;
+  final String mapName;
+
+  const LanSyncRemoteManifestItem({
+    required this.digest,
+    required this.updatedAtMs,
+    required this.mapName,
+  });
+}
+
+class LanSyncRemoteManifestResponse {
+  final bool ok;
+  final int statusCode;
+  final String body;
+  final int manifestSchemaVersion;
+  final int generatedAtMs;
+  final Map<String, LanSyncRemoteManifestItem> grenades;
+  final Map<String, LanSyncRemoteManifestItem> tags;
+  final Map<String, LanSyncRemoteManifestItem> areas;
+  final Map<String, LanSyncRemoteManifestItem> favoriteFolders;
+  final Map<String, LanSyncRemoteManifestItem> impactGroups;
+
+  const LanSyncRemoteManifestResponse({
+    required this.ok,
+    required this.statusCode,
+    required this.body,
+    this.manifestSchemaVersion = 0,
+    this.generatedAtMs = 0,
+    this.grenades = const {},
+    this.tags = const {},
+    this.areas = const {},
+    this.favoriteFolders = const {},
+    this.impactGroups = const {},
+  });
+}
+
 class LanSyncTransferClient {
   static const String pairPath = '/v1/pair/request';
   static const String transferRequestPath = '/v1/transfer/request';
   static const String transferRequestStatusPath = '/v1/transfer/request_status';
+  static const String transferManifestPath = '/v1/transfer/manifest';
 
   static Future<LanSyncPairResponse> pairRequest({
     required String host,
@@ -222,7 +261,6 @@ class LanSyncTransferClient {
     String? senderNodeId,
     String? receiverNodeId,
     int packageSchemaVersion = 3,
-    Map<String, String> baseMapBaselineIds = const {},
     String path = transferRequestPath,
   }) async {
     final uri = Uri(scheme: 'http', host: host, port: port, path: path);
@@ -235,11 +273,6 @@ class LanSyncTransferClient {
           .map((e) => e.trim())
           .where((e) => e.isNotEmpty)
           .toList(growable: false);
-      final normalizedBaseMapBaselineIds = <String, String>{
-        for (final entry in baseMapBaselineIds.entries)
-          if (entry.key.trim().isNotEmpty && entry.value.trim().isNotEmpty)
-            entry.key.trim(): entry.value.trim(),
-      };
       request.write(jsonEncode({
         'fileName': fileName,
         'sizeBytes': sizeBytes,
@@ -252,7 +285,6 @@ class LanSyncTransferClient {
         'senderNodeId': (senderNodeId ?? '').trim(),
         'receiverNodeId': (receiverNodeId ?? '').trim(),
         'packageSchemaVersion': packageSchemaVersion,
-        'baseMapBaselineIds': normalizedBaseMapBaselineIds,
       }));
       final response = await request.close();
       final body = await utf8.decoder.bind(response).join();
@@ -283,6 +315,111 @@ class LanSyncTransferClient {
         }
       } catch (_) {}
       return LanSyncTransferRequestResponse(
+        ok: false,
+        statusCode: response.statusCode,
+        body: body,
+      );
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  static Map<String, LanSyncRemoteManifestItem> _decodeManifestItemMap(
+    Object? raw, {
+    String? defaultMapName,
+  }) {
+    if (raw is! Map) return const {};
+    final result = <String, LanSyncRemoteManifestItem>{};
+    for (final entry in Map<String, dynamic>.from(raw).entries) {
+      final key = entry.key.trim();
+      if (key.isEmpty || entry.value is! Map) continue;
+      final value = Map<String, dynamic>.from(entry.value as Map);
+      final digest = (value['digest'] as String? ?? '').trim();
+      final updatedAtMs = value['updatedAtMs'] as int? ?? 0;
+      final mapName =
+          (value['mapName'] as String? ?? defaultMapName ?? '').trim();
+      if (digest.isEmpty) continue;
+      result[key] = LanSyncRemoteManifestItem(
+        digest: digest,
+        updatedAtMs: updatedAtMs,
+        mapName: mapName,
+      );
+    }
+    return result;
+  }
+
+  static Future<LanSyncRemoteManifestResponse> fetchRemoteManifest({
+    required String host,
+    required int port,
+    required String scopeType,
+    List<String> scopeMapKeys = const [],
+    String? senderNodeId,
+    String? receiverNodeId,
+    int manifestSchemaVersion = 1,
+    String path = transferManifestPath,
+  }) async {
+    final uri = Uri(scheme: 'http', host: host, port: port, path: path);
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 10);
+    try {
+      final request = await client.postUrl(uri);
+      request.headers.contentType = ContentType.json;
+      request.write(jsonEncode({
+        'scopeType': scopeType.trim(),
+        'scopeMapKeys': scopeMapKeys
+            .map((e) => e.trim())
+            .where((e) => e.isNotEmpty)
+            .toList(growable: false),
+        'senderNodeId': (senderNodeId ?? '').trim(),
+        'receiverNodeId': (receiverNodeId ?? '').trim(),
+        'manifestSchemaVersion': manifestSchemaVersion,
+      }));
+      final response = await request.close();
+      final body = await utf8.decoder.bind(response).join();
+      final isOk = response.statusCode >= 200 && response.statusCode < 300;
+      try {
+        final decoded = jsonDecode(body);
+        if (decoded is Map) {
+          final grenades = <String, LanSyncRemoteManifestItem>{};
+          final grenadesByMap = decoded['grenadesByMap'];
+          if (grenadesByMap is Map) {
+            for (final mapEntry
+                in Map<String, dynamic>.from(grenadesByMap).entries) {
+              final mapName = mapEntry.key.trim();
+              grenades.addAll(_decodeManifestItemMap(
+                mapEntry.value,
+                defaultMapName: mapName,
+              ));
+            }
+          }
+          final entitiesByType = decoded['entitiesByType'];
+          final entities = entitiesByType is Map
+              ? Map<String, dynamic>.from(entitiesByType)
+              : const <String, dynamic>{};
+          return LanSyncRemoteManifestResponse(
+            ok: (decoded['ok'] == true) && isOk,
+            statusCode: response.statusCode,
+            body: body,
+            manifestSchemaVersion:
+                decoded['manifestSchemaVersion'] as int? ?? 0,
+            generatedAtMs: decoded['generatedAtMs'] as int? ?? 0,
+            grenades: grenades,
+            tags: _decodeManifestItemMap(
+              entities['tag'],
+            ),
+            areas: _decodeManifestItemMap(
+              entities['area'],
+            ),
+            favoriteFolders: _decodeManifestItemMap(
+              entities['favoriteFolder'],
+            ),
+            impactGroups: _decodeManifestItemMap(
+              entities['impactGroup'],
+            ),
+          );
+        }
+      } catch (_) {}
+      return LanSyncRemoteManifestResponse(
         ok: false,
         statusCode: response.statusCode,
         body: body,

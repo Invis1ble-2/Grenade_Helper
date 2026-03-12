@@ -21,6 +21,8 @@ class DefaultAreaTagReimportSummary {
   final int addedAreas;
   final int updatedAreas;
   final int removedDuplicateAreas;
+  final List<AreaTagSyncDetail> addedTagDetails;
+  final List<AreaTagSyncDetail> updatedTagDetails;
 
   const DefaultAreaTagReimportSummary({
     required this.processedMaps,
@@ -31,7 +33,38 @@ class DefaultAreaTagReimportSummary {
     required this.addedAreas,
     required this.updatedAreas,
     required this.removedDuplicateAreas,
+    this.addedTagDetails = const <AreaTagSyncDetail>[],
+    this.updatedTagDetails = const <AreaTagSyncDetail>[],
   });
+}
+
+class AreaTagSyncDetail {
+  final int mapId;
+  final String mapName;
+  final int? tagId;
+  final String tagName;
+  final String oldTagUuid;
+  final String newTagUuid;
+  final int oldColorValue;
+  final int newColorValue;
+
+  const AreaTagSyncDetail({
+    required this.mapId,
+    required this.mapName,
+    required this.tagId,
+    required this.tagName,
+    required this.oldTagUuid,
+    required this.newTagUuid,
+    required this.oldColorValue,
+    required this.newColorValue,
+  });
+
+  String get reasonSummary {
+    final reasons = <String>[];
+    if (oldTagUuid != newTagUuid) reasons.add('UUID变化');
+    if (oldColorValue != newColorValue) reasons.add('颜色变化');
+    return reasons.isEmpty ? '无变化' : reasons.join('、');
+  }
 }
 
 class EnsureSystemTagSummary {
@@ -40,6 +73,7 @@ class EnsureSystemTagSummary {
   final int updatedTags;
   final int removedObsoleteTags;
   final int keptObsoleteTagsInUse;
+  final List<ObsoleteSystemTagUsageInfo> keptObsoleteTagDetails;
 
   const EnsureSystemTagSummary({
     required this.processedMaps,
@@ -47,7 +81,68 @@ class EnsureSystemTagSummary {
     required this.updatedTags,
     required this.removedObsoleteTags,
     required this.keptObsoleteTagsInUse,
+    this.keptObsoleteTagDetails = const <ObsoleteSystemTagUsageInfo>[],
   });
+}
+
+class ObsoleteSystemTagUsageInfo {
+  final int mapId;
+  final String mapName;
+  final int tagId;
+  final String tagName;
+  final String tagUuid;
+  final int dimension;
+  final List<String> grenadeRefs;
+  final List<String> areaRefs;
+
+  const ObsoleteSystemTagUsageInfo({
+    required this.mapId,
+    required this.mapName,
+    required this.tagId,
+    required this.tagName,
+    required this.tagUuid,
+    required this.dimension,
+    this.grenadeRefs = const <String>[],
+    this.areaRefs = const <String>[],
+  });
+
+  String get dimensionName => TagDimension.getName(dimension);
+}
+
+class TagUuidMigrationSummary {
+  final int migratedCount;
+  final List<TagUuidMigrationDetail> details;
+
+  const TagUuidMigrationSummary({
+    required this.migratedCount,
+    this.details = const <TagUuidMigrationDetail>[],
+  });
+}
+
+class TagUuidMigrationDetail {
+  final int tagId;
+  final int mapId;
+  final String mapName;
+  final String tagName;
+  final int dimension;
+  final bool isSystem;
+  final String oldUuid;
+  final String newUuid;
+  final String reason;
+
+  const TagUuidMigrationDetail({
+    required this.tagId,
+    required this.mapId,
+    required this.mapName,
+    required this.tagName,
+    required this.dimension,
+    required this.isSystem,
+    required this.oldUuid,
+    required this.newUuid,
+    required this.reason,
+  });
+
+  String get dimensionName => TagDimension.getName(dimension);
 }
 
 class TagService {
@@ -147,6 +242,7 @@ class TagService {
         updatedTags: 0,
         removedObsoleteTags: 0,
         keptObsoleteTagsInUse: 0,
+        keptObsoleteTagDetails: <ObsoleteSystemTagUsageInfo>[],
       );
     }
 
@@ -154,6 +250,7 @@ class TagService {
     int updated = 0;
     int removed = 0;
     int keptInUse = 0;
+    final keptDetails = <ObsoleteSystemTagUsageInfo>[];
     for (final map in maps) {
       final result = await _ensureSystemTagsForMap(
         map,
@@ -163,6 +260,7 @@ class TagService {
       updated += result.updatedTags;
       removed += result.removedObsoleteTags;
       keptInUse += result.keptObsoleteTagsInUse;
+      keptDetails.addAll(result.keptObsoleteTagDetails);
     }
     return EnsureSystemTagSummary(
       processedMaps: maps.length,
@@ -170,6 +268,7 @@ class TagService {
       updatedTags: updated,
       removedObsoleteTags: removed,
       keptObsoleteTagsInUse: keptInUse,
+      keptObsoleteTagDetails: keptDetails,
     );
   }
 
@@ -192,6 +291,7 @@ class TagService {
         updatedTags: 0,
         removedObsoleteTags: 0,
         keptObsoleteTagsInUse: 0,
+        keptObsoleteTagDetails: <ObsoleteSystemTagUsageInfo>[],
       );
     }
 
@@ -274,6 +374,7 @@ class TagService {
         changed = true;
       }
       if (changed) {
+        existing.updatedAt = DateTime.now();
         toUpdate.add(existing);
       }
 
@@ -282,6 +383,7 @@ class TagService {
 
     final staleDeleteIds = <int>{};
     int keptStaleInUse = 0;
+    final keptStaleDetails = <ObsoleteSystemTagUsageInfo>[];
     if (cleanupObsoleteSystemTags) {
       final staleSystemTags = existingTags.where((tag) {
         if (!tag.isSystem) return false;
@@ -291,13 +393,29 @@ class TagService {
             !requiredUuids.contains(normalizedUuid);
       });
 
+      Map<int, String>? layerNameById;
       for (final stale in staleSystemTags) {
-        final hasGrenadeBindings =
-            await isar.grenadeTags.filter().tagIdEqualTo(stale.id).count() > 0;
-        final hasAreaBindings =
-            await isar.mapAreas.filter().tagIdEqualTo(stale.id).count() > 0;
-        if (hasGrenadeBindings || hasAreaBindings) {
+        final grenadeBindings =
+            await isar.grenadeTags.filter().tagIdEqualTo(stale.id).findAll();
+        final areas =
+            await isar.mapAreas.filter().tagIdEqualTo(stale.id).findAll();
+        if (grenadeBindings.isNotEmpty || areas.isNotEmpty) {
           keptStaleInUse++;
+          if (areas.isNotEmpty && layerNameById == null) {
+            await map.layers.load();
+            layerNameById = {
+              for (final layer in map.layers) layer.id: layer.name,
+            };
+          }
+          keptStaleDetails.add(
+            await _buildObsoleteSystemTagUsageInfo(
+              map: map,
+              tag: stale,
+              grenadeBindings: grenadeBindings,
+              areas: areas,
+              layerNameById: layerNameById ?? const <int, String>{},
+            ),
+          );
           continue;
         }
         staleDeleteIds.add(stale.id);
@@ -310,6 +428,7 @@ class TagService {
         updatedTags: 0,
         removedObsoleteTags: 0,
         keptObsoleteTagsInUse: keptStaleInUse,
+        keptObsoleteTagDetails: keptStaleDetails,
       );
     }
 
@@ -330,6 +449,42 @@ class TagService {
       updatedTags: toUpdate.length,
       removedObsoleteTags: staleDeleteIds.length,
       keptObsoleteTagsInUse: keptStaleInUse,
+      keptObsoleteTagDetails: keptStaleDetails,
+    );
+  }
+
+  Future<ObsoleteSystemTagUsageInfo> _buildObsoleteSystemTagUsageInfo({
+    required GameMap map,
+    required Tag tag,
+    required List<GrenadeTag> grenadeBindings,
+    required List<MapArea> areas,
+    required Map<int, String> layerNameById,
+  }) async {
+    final grenadeRefs = <String>[];
+    for (final binding in grenadeBindings) {
+      final grenade = await isar.grenades.get(binding.grenadeId);
+      if (grenade == null) continue;
+      grenadeRefs.add('${grenade.title}#${grenade.id}');
+    }
+    grenadeRefs.sort();
+
+    final areaRefs = areas.map((area) {
+      final layerName = area.layerId == null
+          ? 'Default'
+          : (layerNameById[area.layerId!] ?? '未知楼层');
+      return '${area.name}@$layerName#${area.id}';
+    }).toList()
+      ..sort();
+
+    return ObsoleteSystemTagUsageInfo(
+      mapId: map.id,
+      mapName: map.name,
+      tagId: tag.id,
+      tagName: tag.name,
+      tagUuid: tag.tagUuid,
+      dimension: tag.dimension,
+      grenadeRefs: grenadeRefs,
+      areaRefs: areaRefs,
     );
   }
 
@@ -382,9 +537,9 @@ class TagService {
     return '$dimension|${name.trim().toLowerCase()}';
   }
 
-  /// 为所有地图补齐默认区域标签（非破坏性，不删除现有标签）
+  /// 为所有地图补齐内置区域标签与区域几何数据（非破坏性）。
   Future<DefaultAreaTagReimportSummary>
-      reimportDefaultAreaTagsForAllMaps() async {
+      initializeBuiltinAreaMetadataForAllMaps() async {
     final maps = await isar.gameMaps.where().findAll();
     if (maps.isEmpty) {
       return const DefaultAreaTagReimportSummary(
@@ -396,6 +551,8 @@ class TagService {
         addedAreas: 0,
         updatedAreas: 0,
         removedDuplicateAreas: 0,
+        addedTagDetails: <AreaTagSyncDetail>[],
+        updatedTagDetails: <AreaTagSyncDetail>[],
       );
     }
 
@@ -407,6 +564,8 @@ class TagService {
     int addedAreas = 0;
     int updatedAreas = 0;
     int removedDuplicateAreas = 0;
+    final addedTagDetails = <AreaTagSyncDetail>[];
+    final updatedTagDetails = <AreaTagSyncDetail>[];
 
     for (final map in maps) {
       final presetNames = _resolveAreaPresetNames(map) ?? const <String>[];
@@ -426,14 +585,11 @@ class TagService {
         mapsWithAreaData++;
       }
 
-      final existingAreaTags = await isar.tags
-          .filter()
-          .mapIdEqualTo(map.id)
-          .dimensionEqualTo(TagDimension.area)
-          .findAll();
-      final existingByName = {
-        for (final tag in existingAreaTags) tag.name: tag
-      };
+      final allMapTags =
+          await isar.tags.filter().mapIdEqualTo(map.id).findAll();
+      final existingAreaTags = allMapTags
+          .where((tag) => tag.dimension == TagDimension.area)
+          .toList();
 
       final maxOrderTag = await isar.tags
           .filter()
@@ -446,38 +602,75 @@ class TagService {
       final toUpdate = <Tag>[];
 
       for (final name in requiredNames) {
-        final existing = existingByName[name];
+        final expectedUuid = TagUuidService.buildSystemTagUuid(
+          mapName: map.name,
+          mapIconPath: map.iconPath,
+          dimension: TagDimension.area,
+          tagName: name,
+        );
+        final sameNameTags = existingAreaTags.where((tag) => tag.name == name);
+        final existing = sameNameTags
+                .where((tag) => tag.tagUuid == expectedUuid)
+                .cast<Tag?>()
+                .firstOrNull ??
+            sameNameTags
+                .where((tag) => tag.isSystem)
+                .cast<Tag?>()
+                .firstOrNull ??
+            sameNameTags.cast<Tag?>().firstOrNull;
         if (existing == null) {
-          toCreate.add(Tag(
-            tagUuid: TagUuidService.buildSystemTagUuid(
-              mapName: map.name,
-              mapIconPath: map.iconPath,
-              dimension: TagDimension.area,
-              tagName: name,
-            ),
+          final created = Tag(
+            tagUuid: expectedUuid,
             name: name,
             colorValue: areaColor,
             dimension: TagDimension.area,
             isSystem: true,
             sortOrder: nextOrder++,
             mapId: map.id,
-          ));
+          );
+          toCreate.add(created);
+          addedTagDetails.add(
+            AreaTagSyncDetail(
+              mapId: map.id,
+              mapName: map.name,
+              tagId: null,
+              tagName: name,
+              oldTagUuid: '',
+              newTagUuid: created.tagUuid,
+              oldColorValue: 0,
+              newColorValue: created.colorValue,
+            ),
+          );
           continue;
         }
 
         if (existing.isSystem) {
-          final expectedUuid = TagUuidService.buildSystemTagUuid(
-            mapName: map.name,
-            mapIconPath: map.iconPath,
-            dimension: TagDimension.area,
-            tagName: existing.name,
+          final uuidOccupiedByOther = allMapTags.any(
+            (tag) => tag.id != existing.id && tag.tagUuid == expectedUuid,
           );
           final changed = existing.colorValue != areaColor ||
-              existing.tagUuid != expectedUuid;
+              (!uuidOccupiedByOther && existing.tagUuid != expectedUuid);
           if (changed) {
+            final oldTagUuid = existing.tagUuid;
+            final oldColorValue = existing.colorValue;
             existing.colorValue = areaColor;
-            existing.tagUuid = expectedUuid;
+            if (!uuidOccupiedByOther) {
+              existing.tagUuid = expectedUuid;
+            }
+            existing.updatedAt = DateTime.now();
             toUpdate.add(existing);
+            updatedTagDetails.add(
+              AreaTagSyncDetail(
+                mapId: map.id,
+                mapName: map.name,
+                tagId: existing.id,
+                tagName: existing.name,
+                oldTagUuid: oldTagUuid,
+                newTagUuid: expectedUuid,
+                oldColorValue: oldColorValue,
+                newColorValue: areaColor,
+              ),
+            );
           }
         }
       }
@@ -514,6 +707,8 @@ class TagService {
       addedAreas: addedAreas,
       updatedAreas: updatedAreas,
       removedDuplicateAreas: removedDuplicateAreas,
+      addedTagDetails: addedTagDetails,
+      updatedTagDetails: updatedTagDetails,
     );
   }
 
@@ -644,6 +839,7 @@ class TagService {
           layerId: layer.id,
           tagId: tag.id,
           createdAt: DateTime.now(),
+          updated: DateTime.now(),
         ));
         addedAreas++;
         return;
@@ -663,6 +859,7 @@ class TagService {
         newest.strokes = strokesJson;
         newest.layerId = layer.id;
         newest.tagId = tag.id;
+        newest.updatedAt = DateTime.now();
         toPut.add(newest);
         updatedAreas++;
       }
@@ -738,6 +935,8 @@ class TagService {
   }
 
   bool _isAreaNewer(MapArea a, MapArea b) {
+    if (a.updatedAt.isAfter(b.updatedAt)) return true;
+    if (a.updatedAt.isBefore(b.updatedAt)) return false;
     if (a.createdAt.isAfter(b.createdAt)) return true;
     if (a.createdAt.isBefore(b.createdAt)) return false;
     return a.id > b.id;
@@ -820,8 +1019,10 @@ class TagService {
       isSystem: false,
       sortOrder: (maxOrder?.sortOrder ?? 0) + 1,
       mapId: mapId,
+      updated: DateTime.now(),
     );
     await isar.writeTxn(() async {
+      tag.updatedAt = DateTime.now();
       await isar.tags.put(tag);
     });
     return tag;
@@ -831,6 +1032,7 @@ class TagService {
   Future<void> updateTag(Tag tag) async {
     final original = await isar.tags.get(tag.id);
     String? deletedSystemUuidToMark;
+    final now = DateTime.now();
     if (original != null && original.isSystem) {
       final renamed = original.name.trim() != tag.name.trim();
       final dimensionChanged = original.dimension != tag.dimension;
@@ -842,6 +1044,7 @@ class TagService {
     }
 
     await isar.writeTxn(() async {
+      tag.updatedAt = now;
       await isar.tags.put(tag);
 
       final linkedAreas =
@@ -860,6 +1063,7 @@ class TagService {
           changed = true;
         }
         if (changed) {
+          area.updatedAt = now;
           areasToUpdate.add(area);
         }
       }
@@ -875,9 +1079,11 @@ class TagService {
   }
 
   /// 为历史标签补齐 UUID
-  Future<int> ensureTagUuids() async {
+  Future<TagUuidMigrationSummary> ensureTagUuids() async {
     final tags = await isar.tags.where().findAll();
-    if (tags.isEmpty) return 0;
+    if (tags.isEmpty) {
+      return const TagUuidMigrationSummary(migratedCount: 0);
+    }
 
     final mapIds = tags.map((e) => e.mapId).toSet();
     final mapById = <int, GameMap>{};
@@ -898,9 +1104,11 @@ class TagService {
 
     final occupied = <String>{};
     final toFix = <Tag>[];
+    final details = <TagUuidMigrationDetail>[];
     for (final tag in ordered) {
       final current = tag.tagUuid.trim();
       String candidate = current;
+      String? reason;
 
       if (tag.isSystem) {
         final needsSystemUuid = current.isEmpty || occupied.contains(current);
@@ -913,28 +1121,51 @@ class TagService {
               dimension: tag.dimension,
               tagName: tag.name,
             );
+            reason = current.isEmpty ? '系统标签UUID为空' : '系统标签UUID冲突';
           }
         }
       }
 
       if (candidate.isEmpty || occupied.contains(candidate)) {
+        final previous = candidate;
         do {
           candidate = TagUuidService.newRandomUuid();
         } while (occupied.contains(candidate));
+        reason = previous.isEmpty ? 'UUID为空' : 'UUID冲突';
       }
 
       occupied.add(candidate);
       if (candidate != current) {
         tag.tagUuid = candidate;
+        tag.updatedAt = DateTime.now();
         toFix.add(tag);
+        final map = mapById[tag.mapId];
+        details.add(
+          TagUuidMigrationDetail(
+            tagId: tag.id,
+            mapId: tag.mapId,
+            mapName: map?.name ?? 'unknown',
+            tagName: tag.name,
+            dimension: tag.dimension,
+            isSystem: tag.isSystem,
+            oldUuid: current,
+            newUuid: candidate,
+            reason: reason ?? (current.isEmpty ? 'UUID为空' : 'UUID冲突'),
+          ),
+        );
       }
     }
 
-    if (toFix.isEmpty) return 0;
+    if (toFix.isEmpty) {
+      return const TagUuidMigrationSummary(migratedCount: 0);
+    }
     await isar.writeTxn(() async {
       await isar.tags.putAll(toFix);
     });
-    return toFix.length;
+    return TagUuidMigrationSummary(
+      migratedCount: toFix.length,
+      details: details,
+    );
   }
 
   /// 删除标签
@@ -1122,12 +1353,14 @@ class _EnsureSystemTagForMapResult {
   final int updatedTags;
   final int removedObsoleteTags;
   final int keptObsoleteTagsInUse;
+  final List<ObsoleteSystemTagUsageInfo> keptObsoleteTagDetails;
 
   const _EnsureSystemTagForMapResult({
     required this.addedTags,
     required this.updatedTags,
     required this.removedObsoleteTags,
     required this.keptObsoleteTagsInUse,
+    this.keptObsoleteTagDetails = const <ObsoleteSystemTagUsageInfo>[],
   });
 }
 

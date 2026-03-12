@@ -5,6 +5,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:isar_community/isar.dart';
 
 import '../models.dart';
@@ -67,7 +68,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
   @override
   void initState() {
     super.initState();
-    _receiveController = LanSyncReceiveController();
+    _receiveController = LanSyncReceiveController(isar: ref.read(isarProvider));
     _receiveController.setLocalDeviceName(_buildEphemeralDeviceName());
     _receiveController.addListener(_onReceiveControllerChanged);
     _discoveryService = LanSyncDiscoveryService();
@@ -217,6 +218,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
   }
 
   Future<void> _loadLocalState() async {
+    await _localStore.cleanupLegacySyncState();
     final nodeId = await _localStore.loadOrCreateStableNodeId();
     final silentImportEnabled =
         await _localStore.loadReceiveSilentImportEnabled();
@@ -234,7 +236,6 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
     _isLoadingSyncDebug = true;
     try {
       await _localStore.cleanupSyncTombstones();
-      await _localStore.loadBaselineDebugPeers();
       await _localStore.loadTombstoneStats();
       if (!mounted) return;
       setState(() {});
@@ -292,7 +293,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       if (localIps.isEmpty) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('未获取到本机局域网 IP，无法进行网段探测')),
+          const SnackBar(content: Text('未获取到本机局域网 IP，无法进行网段探测'), duration: Duration(seconds: 1)),
         );
         return;
       }
@@ -319,7 +320,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('发现 ${results.length} 台设备')),
+        SnackBar(content: Text('发现 ${results.length} 台设备'), duration: Duration(seconds: 1)),
       );
     } catch (e) {
       await _appendHistory(
@@ -330,7 +331,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('网段探测失败: $e'), backgroundColor: Colors.red),
+        SnackBar(content: Text('网段探测失败: $e'), backgroundColor: Colors.red, duration: Duration(seconds: 1)),
       );
     } finally {
       if (mounted) {
@@ -494,16 +495,16 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             SizedBox(height: 4),
-            Text('发送当前范围内的完整数据，适合首次同步、补齐基线或大范围更新。'),
+            Text('发送当前范围内的完整数据，适合首次同步或大范围更新。'),
             SizedBox(height: 12),
             Text(
               '增量模式',
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             SizedBox(height: 4),
-            Text('只发送相对于上次同步后发生变化的内容，传输更小、更快。'),
+            Text('发送前会先获取接收端当前状态，再只传输本次真正缺失或较新的内容。'),
             SizedBox(height: 12),
-            Text('注意：增量同步依赖双方已先完成过一次全量同步，且不支持按道具发送。'),
+            Text('注意：增量模式暂不支持按道具发送，且要求接收端支持新的 manifest 协议。'),
           ],
         ),
         actions: [
@@ -626,6 +627,195 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
     throw SocketException('无法解析设备地址：$trimmedHost');
   }
 
+  bool _shouldSendIncrementalItem(
+    LanSyncManifestItem local,
+    LanSyncRemoteManifestItem? remote,
+  ) {
+    if (remote == null) return true;
+    if (local.digest == remote.digest) return false;
+    return local.updatedAtMs >= remote.updatedAtMs;
+  }
+
+  Future<
+      ({
+        List<Map<String, dynamic>> grenadePayloads,
+        List<Map<String, dynamic>> tagPayloads,
+        List<Map<String, dynamic>> areaPayloads,
+        List<Map<String, dynamic>> favoriteFolderPayloads,
+        List<Map<String, dynamic>> impactGroupPayloads,
+        Set<String> filesToZip,
+        List<PackageGrenadeTombstoneData> grenadeTombstones,
+        List<PackageEntityTombstoneData> entityTombstones,
+      })> _prepareIncrementalSyncPayload({
+    required DataService dataService,
+    required String host,
+    required int port,
+    required Set<String> scopeMapKeys,
+    required List<String> scopeMapList,
+    required String peerNodeId,
+  }) async {
+    final manifestResp = await LanSyncTransferClient.fetchRemoteManifest(
+      host: host,
+      port: port,
+      scopeType: switch (_sendScope) {
+        _LanSendScope.map => 'map',
+        _LanSendScope.grenades => 'grenades',
+        _LanSendScope.all => 'all',
+      },
+      scopeMapKeys: scopeMapList,
+      senderNodeId: _receiveController.localNodeId,
+      receiverNodeId: peerNodeId.contains(':') ? '' : peerNodeId,
+      manifestSchemaVersion: 1,
+    );
+    if (!manifestResp.ok || manifestResp.manifestSchemaVersion != 1) {
+      throw StateError(
+        '对方版本不支持新的增量协议，请改用全量同步（HTTP ${manifestResp.statusCode}）',
+      );
+    }
+
+    final localManifest =
+        await dataService.buildLanSyncManifest(mapKeys: scopeMapKeys);
+
+    final grenadePayloads = <Map<String, dynamic>>[];
+    final tagPayloads = <Map<String, dynamic>>[];
+    final areaPayloads = <Map<String, dynamic>>[];
+    final favoriteFolderPayloads = <Map<String, dynamic>>[];
+    final impactGroupPayloads = <Map<String, dynamic>>[];
+    final filesToZip = <String>{};
+
+    for (final entry in localManifest.grenades.entries) {
+      if (!_shouldSendIncrementalItem(
+          entry.value, manifestResp.grenades[entry.key])) {
+        continue;
+      }
+      grenadePayloads.add(Map<String, dynamic>.from(entry.value.rawData));
+      filesToZip.addAll(entry.value.filesToZip);
+    }
+    for (final entry in localManifest.tags.entries) {
+      if (_shouldSendIncrementalItem(
+          entry.value, manifestResp.tags[entry.key])) {
+        tagPayloads.add(Map<String, dynamic>.from(entry.value.rawData));
+      }
+    }
+    for (final entry in localManifest.areas.entries) {
+      if (_shouldSendIncrementalItem(
+          entry.value, manifestResp.areas[entry.key])) {
+        areaPayloads.add(Map<String, dynamic>.from(entry.value.rawData));
+      }
+    }
+    for (final entry in localManifest.favoriteFolders.entries) {
+      if (_shouldSendIncrementalItem(
+          entry.value, manifestResp.favoriteFolders[entry.key])) {
+        favoriteFolderPayloads
+            .add(Map<String, dynamic>.from(entry.value.rawData));
+      }
+    }
+    for (final entry in localManifest.impactGroups.entries) {
+      if (_shouldSendIncrementalItem(
+          entry.value, manifestResp.impactGroups[entry.key])) {
+        impactGroupPayloads.add(Map<String, dynamic>.from(entry.value.rawData));
+      }
+    }
+
+    final remoteOnlyGrenadeIds = manifestResp.grenades.keys
+        .where((key) => !localManifest.grenades.containsKey(key))
+        .toSet();
+    final grenadeTombstonesById = await _localStore.loadGrenadeTombstones(
+      uniqueIds: remoteOnlyGrenadeIds,
+      mapKeys: scopeMapList,
+    );
+    final grenadeTombstones = remoteOnlyGrenadeIds
+        .map((uniqueId) {
+          final tombstone = grenadeTombstonesById[uniqueId];
+          final remote = manifestResp.grenades[uniqueId];
+          if (tombstone == null || remote == null) return null;
+          if (tombstone.deletedAt <= remote.updatedAtMs) return null;
+          return PackageGrenadeTombstoneData(
+            uniqueId: tombstone.uniqueId,
+            mapName: tombstone.mapName,
+            deletedAt: tombstone.deletedAt,
+          );
+        })
+        .whereType<PackageGrenadeTombstoneData>()
+        .toList(growable: false);
+
+    final localEntityCompositeKeys = <String>{
+      ...localManifest.tags.keys.map((e) => dataService.entityTombstoneKey(
+            entityType: LanSyncEntityTombstoneType.tag,
+            entityKey: e,
+          )),
+      ...localManifest.areas.keys.map((e) => dataService.entityTombstoneKey(
+            entityType: LanSyncEntityTombstoneType.area,
+            entityKey: e,
+          )),
+      ...localManifest.favoriteFolders.keys
+          .map((e) => dataService.entityTombstoneKey(
+                entityType: LanSyncEntityTombstoneType.favoriteFolder,
+                entityKey: e,
+              )),
+      ...localManifest.impactGroups.keys
+          .map((e) => dataService.entityTombstoneKey(
+                entityType: LanSyncEntityTombstoneType.impactGroup,
+                entityKey: e,
+              )),
+    };
+    final remoteEntityItems = <String, LanSyncRemoteManifestItem>{
+      for (final entry in manifestResp.tags.entries)
+        dataService.entityTombstoneKey(
+          entityType: LanSyncEntityTombstoneType.tag,
+          entityKey: entry.key,
+        ): entry.value,
+      for (final entry in manifestResp.areas.entries)
+        dataService.entityTombstoneKey(
+          entityType: LanSyncEntityTombstoneType.area,
+          entityKey: entry.key,
+        ): entry.value,
+      for (final entry in manifestResp.favoriteFolders.entries)
+        dataService.entityTombstoneKey(
+          entityType: LanSyncEntityTombstoneType.favoriteFolder,
+          entityKey: entry.key,
+        ): entry.value,
+      for (final entry in manifestResp.impactGroups.entries)
+        dataService.entityTombstoneKey(
+          entityType: LanSyncEntityTombstoneType.impactGroup,
+          entityKey: entry.key,
+        ): entry.value,
+    };
+    final remoteOnlyEntityKeys = remoteEntityItems.keys
+        .where((key) => !localEntityCompositeKeys.contains(key))
+        .toSet();
+    final entityTombstoneEntries = await _localStore.loadEntityTombstones(
+      mapKeys: scopeMapList,
+    );
+    final entityTombstones = remoteOnlyEntityKeys
+        .map((compositeKey) {
+          final tombstone = entityTombstoneEntries[compositeKey];
+          final remote = remoteEntityItems[compositeKey];
+          if (tombstone == null || remote == null) return null;
+          if (tombstone.deletedAt <= remote.updatedAtMs) return null;
+          return PackageEntityTombstoneData(
+            entityType: tombstone.entityType,
+            entityKey: tombstone.entityKey,
+            mapName: tombstone.mapName,
+            deletedAt: tombstone.deletedAt,
+            payload: tombstone.payload,
+          );
+        })
+        .whereType<PackageEntityTombstoneData>()
+        .toList(growable: false);
+
+    return (
+      grenadePayloads: grenadePayloads,
+      tagPayloads: tagPayloads,
+      areaPayloads: areaPayloads,
+      favoriteFolderPayloads: favoriteFolderPayloads,
+      impactGroupPayloads: impactGroupPayloads,
+      filesToZip: filesToZip,
+      grenadeTombstones: grenadeTombstones,
+      entityTombstones: entityTombstones,
+    );
+  }
+
   Future<void> _sendAllToTarget() async {
     final originalHost = _targetHostController.text.trim();
     final port = _parsedTargetPort;
@@ -641,14 +831,14 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
 
     if (_sendScope == _LanSendScope.map && _selectedMapForSend == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先选择地图'), backgroundColor: Colors.orange),
+        const SnackBar(content: Text('请先选择地图'), backgroundColor: Colors.orange, duration: Duration(seconds: 1)),
       );
       return;
     }
     if (_sendScope == _LanSendScope.grenades &&
         _selectedGrenadesForSend.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先选择道具'), backgroundColor: Colors.orange),
+        const SnackBar(content: Text('请先选择道具'), backgroundColor: Colors.orange, duration: Duration(seconds: 1)),
       );
       return;
     }
@@ -658,10 +848,12 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
     final scopeMapKeys = _resolveScopeMapKeys(isar);
     final scopeMapList = scopeMapKeys.toList(growable: false);
     final peerNodeId = _resolvePeerNodeId(originalHost, port);
-    Map<String, LanSyncAckedMapBaselineEntry> ackedBaselines = const {};
-    Map<String, String> baseMapBaselineIds = const {};
-    Map<String, Map<String, String>> currentMapDigests = const {};
-    List<Grenade>? incrementalGrenades;
+    List<Map<String, dynamic>> incrementalGrenadePayloads = const [];
+    List<Map<String, dynamic>> incrementalTagPayloads = const [];
+    List<Map<String, dynamic>> incrementalAreaPayloads = const [];
+    List<Map<String, dynamic>> incrementalFavoriteFolderPayloads = const [];
+    List<Map<String, dynamic>> incrementalImpactGroupPayloads = const [];
+    Set<String> incrementalFilesToZip = const <String>{};
     List<PackageGrenadeTombstoneData> incrementalTombstones = const [];
     List<PackageEntityTombstoneData> incrementalEntityTombstones = const [];
     if (_sendMode == _LanSyncMode.incremental) {
@@ -683,120 +875,33 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
         );
         return;
       }
-      ackedBaselines = await _localStore.loadAckedMapBaselineEntries(
+      final host = await _resolveConnectableHost(originalHost, port);
+      final incremental = await _prepareIncrementalSyncPayload(
+        dataService: dataService,
+        host: host,
+        port: port,
+        scopeMapKeys: scopeMapKeys,
+        scopeMapList: scopeMapList,
         peerNodeId: peerNodeId,
-        mapKeys: scopeMapList,
       );
-      baseMapBaselineIds = {
-        for (final entry in ackedBaselines.entries)
-          entry.key: entry.value.baselineId,
-      };
-      if (baseMapBaselineIds.length != scopeMapList.length) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('该设备尚未建立完整增量基线，请先完成一次全量同步'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-        return;
-      }
-
-      final baselineSnapshots = await _localStore.loadMapBaselineSnapshots(
-        peerNodeId: peerNodeId,
-        mapKeys: scopeMapList,
-        expectedBaselineIds: baseMapBaselineIds,
-      );
-      if (baselineSnapshots.length != scopeMapList.length) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('增量快照缺失或过期，请先完成一次全量同步'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-        return;
-      }
-
-      currentMapDigests =
-          await dataService.buildGrenadeDigestByMap(mapKeys: scopeMapKeys);
-      final changedUniqueIds = <String>{};
-      final deletedUniqueIds = <String>{};
-      for (final mapKey in scopeMapList) {
-        final baselineDigest = baselineSnapshots[mapKey] ?? const {};
-        final currentDigest = currentMapDigests[mapKey] ?? const {};
-        for (final entry in currentDigest.entries) {
-          if (baselineDigest[entry.key] != entry.value) {
-            changedUniqueIds.add(entry.key);
-          }
-        }
-        for (final uniqueId in baselineDigest.keys) {
-          if (!currentDigest.containsKey(uniqueId)) {
-            deletedUniqueIds.add(uniqueId);
-          }
-        }
-      }
-      final tombstonesByUniqueId = await _localStore.loadGrenadeTombstones(
-        uniqueIds: deletedUniqueIds,
-        mapKeys: scopeMapList,
-      );
-      final nowMs = DateTime.now().millisecondsSinceEpoch;
-      incrementalTombstones = deletedUniqueIds
-          .map((uniqueId) {
-            final existing = tombstonesByUniqueId[uniqueId];
-            if (existing != null) {
-              return PackageGrenadeTombstoneData(
-                uniqueId: existing.uniqueId,
-                mapName: existing.mapName,
-                deletedAt: existing.deletedAt,
-              );
-            }
-            final mapName = scopeMapList.firstWhere(
-              (mapKey) =>
-                  (baselineSnapshots[mapKey] ?? const {}).containsKey(uniqueId),
-              orElse: () => '',
-            );
-            if (mapName.isEmpty) return null;
-            return PackageGrenadeTombstoneData(
-              uniqueId: uniqueId,
-              mapName: mapName,
-              deletedAt: nowMs,
-            );
-          })
-          .whereType<PackageGrenadeTombstoneData>()
-          .toList(growable: false);
-      final entityTombstones = await _localStore.loadEntityTombstones(
-        mapKeys: scopeMapList,
-      );
-      incrementalEntityTombstones = entityTombstones.values
-          .where((entry) {
-            final baseline = ackedBaselines[entry.mapName];
-            if (baseline == null) return false;
-            return entry.deletedAt > baseline.updatedAtMs;
-          })
-          .map((entry) => PackageEntityTombstoneData(
-                entityType: entry.entityType,
-                entityKey: entry.entityKey,
-                mapName: entry.mapName,
-                deletedAt: entry.deletedAt,
-                payload: entry.payload,
-              ))
-          .toList(growable: false);
-      if (changedUniqueIds.isEmpty &&
+      incrementalGrenadePayloads = incremental.grenadePayloads;
+      incrementalTagPayloads = incremental.tagPayloads;
+      incrementalAreaPayloads = incremental.areaPayloads;
+      incrementalFavoriteFolderPayloads = incremental.favoriteFolderPayloads;
+      incrementalImpactGroupPayloads = incremental.impactGroupPayloads;
+      incrementalFilesToZip = incremental.filesToZip;
+      incrementalTombstones = incremental.grenadeTombstones;
+      incrementalEntityTombstones = incremental.entityTombstones;
+      if (incrementalGrenadePayloads.isEmpty &&
+          incrementalTagPayloads.isEmpty &&
+          incrementalAreaPayloads.isEmpty &&
+          incrementalFavoriteFolderPayloads.isEmpty &&
+          incrementalImpactGroupPayloads.isEmpty &&
           incrementalTombstones.isEmpty &&
           incrementalEntityTombstones.isEmpty) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('当前范围没有可同步的增量变更')),
-        );
-        return;
-      }
-      incrementalGrenades =
-          await dataService.loadGrenadesByUniqueIds(changedUniqueIds);
-      if (changedUniqueIds.isNotEmpty && incrementalGrenades.isEmpty) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('未找到可发送的增量道具，请重试')),
         );
         return;
       }
@@ -811,13 +916,51 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
     String? packagePath;
     try {
       final host = await _resolveConnectableHost(originalHost, port);
+      final fullManifest =
+          _sendMode == _LanSyncMode.full && _sendScope != _LanSendScope.grenades
+              ? await dataService.buildLanSyncManifest(mapKeys: scopeMapKeys)
+              : null;
       switch (_sendScope) {
         case _LanSendScope.all:
           packagePath = await dataService.buildLanSyncPackageToTemp(
             scopeType: 2,
-            explicitGrenades: _sendMode == _LanSyncMode.incremental
-                ? incrementalGrenades
-                : null,
+            explicitGrenadePayloads: _sendMode == _LanSyncMode.incremental
+                ? incrementalGrenadePayloads
+                : fullManifest?.grenades.values
+                        .map((item) => Map<String, dynamic>.from(item.rawData))
+                        .toList(growable: false) ??
+                    const [],
+            explicitTagPayloads: _sendMode == _LanSyncMode.incremental
+                ? incrementalTagPayloads
+                : fullManifest?.tags.values
+                        .map((item) => Map<String, dynamic>.from(item.rawData))
+                        .toList(growable: false) ??
+                    const [],
+            explicitAreaPayloads: _sendMode == _LanSyncMode.incremental
+                ? incrementalAreaPayloads
+                : fullManifest?.areas.values
+                        .map((item) => Map<String, dynamic>.from(item.rawData))
+                        .toList(growable: false) ??
+                    const [],
+            explicitFavoriteFolderPayloads: _sendMode ==
+                    _LanSyncMode.incremental
+                ? incrementalFavoriteFolderPayloads
+                : fullManifest?.favoriteFolders.values
+                        .map((item) => Map<String, dynamic>.from(item.rawData))
+                        .toList(growable: false) ??
+                    const [],
+            explicitImpactGroupPayloads: _sendMode == _LanSyncMode.incremental
+                ? incrementalImpactGroupPayloads
+                : fullManifest?.impactGroups.values
+                        .map((item) => Map<String, dynamic>.from(item.rawData))
+                        .toList(growable: false) ??
+                    const [],
+            explicitFilesToZip: _sendMode == _LanSyncMode.incremental
+                ? incrementalFilesToZip
+                : fullManifest?.grenades.values
+                        .expand((item) => item.filesToZip)
+                        .toSet() ??
+                    const <String>{},
             grenadeTombstones: incrementalTombstones,
             entityTombstones: incrementalEntityTombstones,
           );
@@ -828,9 +971,43 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
             singleMap: _sendMode == _LanSyncMode.incremental
                 ? null
                 : _selectedMapForSend!,
-            explicitGrenades: _sendMode == _LanSyncMode.incremental
-                ? incrementalGrenades
-                : null,
+            explicitGrenadePayloads: _sendMode == _LanSyncMode.incremental
+                ? incrementalGrenadePayloads
+                : fullManifest?.grenades.values
+                        .map((item) => Map<String, dynamic>.from(item.rawData))
+                        .toList(growable: false) ??
+                    const [],
+            explicitTagPayloads: _sendMode == _LanSyncMode.incremental
+                ? incrementalTagPayloads
+                : fullManifest?.tags.values
+                        .map((item) => Map<String, dynamic>.from(item.rawData))
+                        .toList(growable: false) ??
+                    const [],
+            explicitAreaPayloads: _sendMode == _LanSyncMode.incremental
+                ? incrementalAreaPayloads
+                : fullManifest?.areas.values
+                        .map((item) => Map<String, dynamic>.from(item.rawData))
+                        .toList(growable: false) ??
+                    const [],
+            explicitFavoriteFolderPayloads: _sendMode ==
+                    _LanSyncMode.incremental
+                ? incrementalFavoriteFolderPayloads
+                : fullManifest?.favoriteFolders.values
+                        .map((item) => Map<String, dynamic>.from(item.rawData))
+                        .toList(growable: false) ??
+                    const [],
+            explicitImpactGroupPayloads: _sendMode == _LanSyncMode.incremental
+                ? incrementalImpactGroupPayloads
+                : fullManifest?.impactGroups.values
+                        .map((item) => Map<String, dynamic>.from(item.rawData))
+                        .toList(growable: false) ??
+                    const [],
+            explicitFilesToZip: _sendMode == _LanSyncMode.incremental
+                ? incrementalFilesToZip
+                : fullManifest?.grenades.values
+                        .expand((item) => item.filesToZip)
+                        .toSet() ??
+                    const <String>{},
             grenadeTombstones: incrementalTombstones,
             entityTombstones: incrementalEntityTombstones,
           );
@@ -876,8 +1053,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
         syncEnvelopeId: syncEnvelopeId,
         senderNodeId: _receiveController.localNodeId,
         receiverNodeId: peerNodeId.contains(':') ? '' : peerNodeId,
-        packageSchemaVersion: 5,
-        baseMapBaselineIds: baseMapBaselineIds,
+        packageSchemaVersion: 6,
       );
       if (!reqResp.ok || reqResp.requestId.trim().isEmpty) {
         throw StateError(
@@ -954,7 +1130,6 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       final importDeadline = DateTime.now().add(const Duration(minutes: 5));
       var importSucceeded = false;
       String? importFailedMessage;
-      LanSyncTransferRequestResponse? finalImportStatus;
       while (DateTime.now().isBefore(importDeadline)) {
         await Future<void>.delayed(const Duration(milliseconds: 700));
         final statusResp = await LanSyncTransferClient.getTransferRequestStatus(
@@ -963,7 +1138,6 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
           requestId: requestId,
         );
         if (!statusResp.ok) continue;
-        finalImportStatus = statusResp;
         if (statusResp.status ==
             LanIncomingTransferRequestStatus.imported.name) {
           importSucceeded = true;
@@ -987,30 +1161,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
             : '对方尚未完成导入确认，请稍后重试');
       }
 
-      if (scopeMapList.isNotEmpty) {
-        final nextBaselineId =
-            finalImportStatus?.syncEnvelopeId.trim().isNotEmpty == true
-                ? finalImportStatus!.syncEnvelopeId
-                : syncEnvelopeId;
-        await _localStore.upsertAckedMapBaselines(
-          peerNodeId: peerNodeId,
-          mapKeys: scopeMapList,
-          baselineId: nextBaselineId,
-        );
-        final mapDigestsForStore = _sendMode == _LanSyncMode.incremental
-            ? currentMapDigests
-            : await dataService.buildGrenadeDigestByMap(mapKeys: scopeMapKeys);
-        final scopedDigests = <String, Map<String, String>>{
-          for (final mapKey in scopeMapList)
-            mapKey: mapDigestsForStore[mapKey] ?? const {},
-        };
-        await _localStore.upsertMapBaselineSnapshots(
-          peerNodeId: peerNodeId,
-          mapDigests: scopedDigests,
-          baselineId: nextBaselineId,
-        );
-        await _refreshSyncDebugInfo();
-      }
+      await _refreshSyncDebugInfo();
 
       await _appendHistory(
         category: 'send',
@@ -1029,6 +1180,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
                 : '全量同步完成（已收到导入确认）',
           ),
           backgroundColor: Colors.green,
+          duration: Duration(seconds: 1)
         ),
       );
     } catch (e) {
@@ -1040,7 +1192,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('发送失败: $e'), backgroundColor: Colors.red),
+        SnackBar(content: Text('发送失败: $e'), backgroundColor: Colors.red, duration: Duration(seconds: 1)),
       );
     } finally {
       if (packagePath != null) {
@@ -1074,7 +1226,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
         );
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error), backgroundColor: Colors.red),
+          SnackBar(content: Text(error), backgroundColor: Colors.red, duration: Duration(seconds: 1)),
         );
       } else if (_receiveController.isRunning) {
         await _appendHistory(
@@ -1103,7 +1255,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('接收模式已关闭')),
+      const SnackBar(content: Text('接收模式已关闭'), duration: Duration(seconds: 1)),
     );
   }
 
@@ -1345,7 +1497,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('文件不存在，无法导入'), backgroundColor: Colors.red),
+            content: Text('文件不存在，无法导入'), backgroundColor: Colors.red, duration: Duration(seconds: 1)),
       );
       return;
     }
@@ -1807,6 +1959,34 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
               ],
             ),
           ),
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: colorScheme.secondaryContainer.withValues(alpha: 0.45),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.sync_problem_outlined,
+                  size: 18,
+                  color: colorScheme.onSecondaryContainer,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '若你是从旧版本升级到当前版本，建议先在设备间执行一次全量同步，统一旧版本遗留的数据状态；完成后再使用增量同步会更稳定。',
+                    style: TextStyle(
+                      color: colorScheme.onSecondaryContainer,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
           const SizedBox(height: 12),
           _SectionCard(
             icon: Icons.upload_file,
@@ -2104,6 +2284,7 @@ class _LanSyncGrenadePickerScreenState
     extends State<_LanSyncGrenadePickerScreen> {
   late final Set<int> _selectedIds;
   int? _filterType;
+  String? _filterMapName;
 
   @override
   void initState() {
@@ -2112,10 +2293,37 @@ class _LanSyncGrenadePickerScreenState
   }
 
   List<Grenade> get _visibleGrenades {
-    if (_filterType == null) return widget.grenades;
-    return widget.grenades
-        .where((grenade) => grenade.type == _filterType)
-        .toList(growable: false);
+    return widget.grenades.where((grenade) {
+      if (_filterType != null && grenade.type != _filterType) {
+        return false;
+      }
+      if (_filterMapName == null) return true;
+      grenade.layer.loadSync();
+      final layer = grenade.layer.value;
+      layer?.map.loadSync();
+      final mapName = layer?.map.value?.name.trim() ?? '';
+      return mapName == _filterMapName;
+    }).toList(growable: false);
+  }
+
+  List<_LanSyncMapFilterOption> get _availableMaps {
+    final optionsByName = <String, _LanSyncMapFilterOption>{};
+    for (final grenade in widget.grenades) {
+      grenade.layer.loadSync();
+      final layer = grenade.layer.value;
+      layer?.map.loadSync();
+      final map = layer?.map.value;
+      final mapName = map?.name.trim() ?? '';
+      if (mapName.isEmpty || optionsByName.containsKey(mapName)) continue;
+      optionsByName[mapName] = _LanSyncMapFilterOption(
+        name: mapName,
+        iconPath: map?.iconPath.trim() ?? '',
+      );
+    }
+
+    final options = optionsByName.values.toList(growable: false);
+    options.sort((a, b) => a.name.compareTo(b.name));
+    return options;
   }
 
   void _toggleSelection(int id) {
@@ -2172,6 +2380,7 @@ class _LanSyncGrenadePickerScreenState
       ),
       body: Column(
         children: [
+          _buildMapDropdown(),
           _buildTypeFilter(),
           _buildSelectionBar(selectedInVisible, visibleGrenades.length),
           Expanded(
@@ -2229,6 +2438,42 @@ class _LanSyncGrenadePickerScreenState
             label: Text('确认选择 (${_selectedIds.length})'),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildMapDropdown() {
+    final maps = _availableMaps;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: DropdownButtonFormField<String?>(
+        initialValue: _filterMapName,
+        decoration: const InputDecoration(
+          labelText: '选择地图',
+          border: OutlineInputBorder(),
+          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        ),
+        items: [
+          const DropdownMenuItem<String?>(
+            value: null,
+            child: _LanSyncMapDropdownLabel(
+              icon: Icon(Icons.public, size: 20, color: Colors.orange),
+              text: '全部地图',
+            ),
+          ),
+          ...maps.map(
+            (map) => DropdownMenuItem<String?>(
+              value: map.name,
+              child: _LanSyncMapDropdownLabel(
+                icon: _LanSyncMapIcon(iconPath: map.iconPath, size: 20),
+                text: map.name,
+              ),
+            ),
+          ),
+        ],
+        onChanged: (value) => setState(() => _filterMapName = value),
       ),
     );
   }
@@ -2351,6 +2596,68 @@ class _SectionCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _LanSyncMapFilterOption {
+  final String name;
+  final String iconPath;
+
+  const _LanSyncMapFilterOption({
+    required this.name,
+    required this.iconPath,
+  });
+}
+
+class _LanSyncMapIcon extends StatelessWidget {
+  final String iconPath;
+  final double size;
+
+  const _LanSyncMapIcon({
+    required this.iconPath,
+    this.size = 18,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (iconPath.isEmpty) {
+      return Icon(Icons.map_outlined, size: size, color: Colors.orange);
+    }
+    return SvgPicture.asset(
+      iconPath,
+      width: size,
+      height: size,
+      placeholderBuilder: (_) =>
+          Icon(Icons.map_outlined, size: size, color: Colors.orange),
+    );
+  }
+}
+
+class _LanSyncMapDropdownLabel extends StatelessWidget {
+  final Widget icon;
+  final String text;
+
+  const _LanSyncMapDropdownLabel({
+    required this.icon,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        icon,
+        const SizedBox(width: 10),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 220),
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
     );
   }
 }

@@ -3,9 +3,11 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:isar_community/isar.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../data_service.dart';
 import 'lan_sync_auth.dart';
 
 enum LanReceiveTaskStatus { receiving, pending, importing, imported, failed }
@@ -162,6 +164,7 @@ class LanReceivedPackageTask {
 }
 
 class LanSyncReceiveController extends ChangeNotifier {
+  final Isar isar;
   String _localNodeId;
   HttpServer? _server;
   bool _disposed = false;
@@ -177,8 +180,10 @@ class LanSyncReceiveController extends ChangeNotifier {
   String? _activePairCode;
   int? _activePairCodeExpireAtMs;
 
-  LanSyncReceiveController({String? stableNodeId})
-      : _localNodeId = (stableNodeId ?? '').trim().isEmpty
+  LanSyncReceiveController({
+    required this.isar,
+    String? stableNodeId,
+  }) : _localNodeId = (stableNodeId ?? '').trim().isEmpty
             ? 'node_${LanSyncAuth.generateSecret(bytes: 9)}'
             : stableNodeId!.trim();
 
@@ -204,6 +209,7 @@ class LanSyncReceiveController extends ChangeNotifier {
   String get pairPath => '/v1/pair/request';
   String get transferRequestPath => '/v1/transfer/request';
   String get transferRequestStatusPath => '/v1/transfer/request_status';
+  String get transferManifestPath => '/v1/transfer/manifest';
   String get uploadPath => '/v1/transfer/package';
 
   void setLocalNodeId(String nodeId) {
@@ -338,7 +344,7 @@ class LanSyncReceiveController extends ChangeNotifier {
           'trustedPeerCount': _trustedPeerSecrets.length,
           'capabilities': {
             'fullSyncV3': true,
-            'deltaSyncV4': true,
+            'deltaSyncV6Manifest': true,
             'requestStatusImportAck': true,
           },
           'time': DateTime.now().toIso8601String(),
@@ -358,6 +364,11 @@ class LanSyncReceiveController extends ChangeNotifier {
 
       if (request.method == 'GET' && path == transferRequestStatusPath) {
         await _handleTransferRequestStatus(request);
+        return;
+      }
+
+      if (request.method == 'POST' && path == transferManifestPath) {
+        await _handleTransferManifest(request);
         return;
       }
 
@@ -575,7 +586,7 @@ class LanSyncReceiveController extends ChangeNotifier {
     final senderNodeId = (body['senderNodeId'] as String? ?? '').trim();
     final receiverNodeId = (body['receiverNodeId'] as String? ?? '').trim();
     final packageSchemaVersion =
-        body['packageSchemaVersion'] as int? ?? (syncMode == 'delta' ? 4 : 3);
+        body['packageSchemaVersion'] as int? ?? (syncMode == 'delta' ? 6 : 3);
     final baseMapBaselineIds = <String, String>{};
     if (body['baseMapBaselineIds'] is Map) {
       final map = Map<String, dynamic>.from(body['baseMapBaselineIds'] as Map);
@@ -630,6 +641,45 @@ class LanSyncReceiveController extends ChangeNotifier {
       'scopeType': incoming.scopeType,
       'scopeMapKeys': incoming.scopeMapKeys,
       'syncEnvelopeId': incoming.syncEnvelopeId,
+    });
+  }
+
+  Future<void> _handleTransferManifest(HttpRequest request) async {
+    final rawBody = await utf8.decoder.bind(request).join();
+    Map<String, dynamic> body;
+    try {
+      final decoded = jsonDecode(rawBody);
+      if (decoded is! Map) throw const FormatException('bad_body');
+      body = Map<String, dynamic>.from(decoded);
+    } catch (_) {
+      _writeJson(request.response, HttpStatus.badRequest, {
+        'ok': false,
+        'error': 'bad_json',
+      });
+      return;
+    }
+
+    final manifestSchemaVersion = body['manifestSchemaVersion'] as int? ?? 0;
+    if (manifestSchemaVersion != 1) {
+      _writeJson(request.response, HttpStatus.preconditionFailed, {
+        'ok': false,
+        'error': 'unsupported_manifest_schema',
+      });
+      return;
+    }
+
+    final scopeMapKeys = ((body['scopeMapKeys'] as List?) ?? const [])
+        .map((e) => '$e'.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet();
+    final dataService = DataService(isar);
+    final manifest = await dataService.buildLanSyncManifest(
+      mapKeys: scopeMapKeys,
+    );
+    final payload = manifest.toManifestJson();
+    _writeJson(request.response, HttpStatus.ok, {
+      'ok': true,
+      ...payload,
     });
   }
 

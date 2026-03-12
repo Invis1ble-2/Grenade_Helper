@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:isar_community/isar.dart';
 import '../models.dart';
 import '../providers.dart';
@@ -190,7 +191,13 @@ class _GrenadeSelectDeleteScreenState
               ),
               initialValue: _selectedMap,
               items: _maps.map((map) {
-                return DropdownMenuItem(value: map, child: Text(map.name));
+                return DropdownMenuItem(
+                  value: map,
+                  child: _DeleteMapDropdownLabel(
+                    iconPath: map.iconPath,
+                    text: map.name,
+                  ),
+                );
               }).toList(),
               onChanged: (value) {
                 setState(() => _selectedMap = value);
@@ -282,6 +289,43 @@ class _GrenadeSelectDeleteScreenState
       onChanged: (_) => _toggleSelection(grenade.id),
       onTap: () => _toggleSelection(grenade.id),
       onPreview: () => _previewGrenade(grenade),
+    );
+  }
+}
+
+class _DeleteMapDropdownLabel extends StatelessWidget {
+  final String iconPath;
+  final String text;
+
+  const _DeleteMapDropdownLabel({
+    required this.iconPath,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        if (iconPath.trim().isEmpty)
+          const Icon(Icons.map_outlined, size: 20, color: Colors.orange)
+        else
+          SvgPicture.asset(
+            iconPath,
+            width: 20,
+            height: 20,
+            placeholderBuilder: (_) =>
+                const Icon(Icons.map_outlined, size: 20, color: Colors.orange),
+          ),
+        const SizedBox(width: 10),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 220),
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
     );
   }
 }

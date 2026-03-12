@@ -337,6 +337,12 @@ class LanSyncLocalStore {
     return created;
   }
 
+  Future<void> cleanupLegacySyncState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_ackedMapBaselinesKey);
+    await prefs.remove(_mapBaselineSnapshotsKey);
+  }
+
   Future<Map<String, String>> loadAckedMapBaselineIds({
     required String peerNodeId,
     required Iterable<String> mapKeys,

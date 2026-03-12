@@ -143,7 +143,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     _loadAuthorHistory();
   }
 
-  void _loadData({bool resetTitle = true}) async {
+  Future<void> _loadData({bool resetTitle = true}) async {
     final isar = ref.read(isarProvider);
     grenade = await isar.grenades.get(widget.grenadeId);
     if (grenade != null) {
@@ -156,7 +156,9 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
         _originalTitle = grenade!.title; // 存原始标题
       }
     }
-    setState(() {});
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   /// 默认作者
@@ -188,11 +190,16 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
   Future<void> _markAsLocallyEdited() async {
     if (grenade == null) return;
     final isar = ref.read(isarProvider);
-    grenade!.hasLocalEdits = true;
-    grenade!.updatedAt = DateTime.now();
+    final now = DateTime.now();
     await isar.writeTxn(() async {
-      await isar.grenades.put(grenade!);
+      final latest = await isar.grenades.get(grenade!.id);
+      if (latest == null) return;
+      latest.hasLocalEdits = true;
+      latest.updatedAt = now;
+      await isar.grenades.put(latest);
     });
+    grenade!.hasLocalEdits = true;
+    grenade!.updatedAt = now;
     if (mounted) {
       setState(() {});
     }
@@ -1905,17 +1912,19 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
 
                           if (result != null && result['strokes'] != null) {
                             final isar = ref.read(isarProvider);
+                            final newStrokes = result['strokes'] as String;
                             await isar.writeTxn(() async {
                               final g = await isar.grenades.get(grenade!.id);
                               if (g != null) {
-                                g.impactAreaStrokes =
-                                    result['strokes'] as String;
+                                g.impactAreaStrokes = newStrokes;
                                 g.updatedAt = DateTime.now();
                                 await isar.grenades.put(g);
                               }
                             });
+                            grenade!.impactAreaStrokes = newStrokes;
+                            grenade!.updatedAt = DateTime.now();
                             await _markAsLocallyEdited();
-                            _loadData(resetTitle: false);
+                            await _loadData(resetTitle: false);
                             sendOverlayCommand('reload_data');
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(

@@ -51,6 +51,11 @@ const MapAreaSchema = CollectionSchema(
       id: 6,
       name: r'tagId',
       type: IsarType.long,
+    ),
+    r'updatedAt': PropertySchema(
+      id: 7,
+      name: r'updatedAt',
+      type: IsarType.dateTime,
     )
   },
   estimateSize: _mapAreaEstimateSize,
@@ -118,6 +123,7 @@ void _mapAreaSerialize(
   writer.writeString(offsets[4], object.name);
   writer.writeString(offsets[5], object.strokes);
   writer.writeLong(offsets[6], object.tagId);
+  writer.writeDateTime(offsets[7], object.updatedAt);
 }
 
 MapArea _mapAreaDeserialize(
@@ -136,6 +142,7 @@ MapArea _mapAreaDeserialize(
     tagId: reader.readLong(offsets[6]),
   );
   object.id = id;
+  object.updatedAt = reader.readDateTime(offsets[7]);
   return object;
 }
 
@@ -160,6 +167,8 @@ P _mapAreaDeserializeProp<P>(
       return (reader.readString(offset)) as P;
     case 6:
       return (reader.readLong(offset)) as P;
+    case 7:
+      return (reader.readDateTime(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
   }
@@ -986,6 +995,59 @@ extension MapAreaQueryFilter
       ));
     });
   }
+
+  QueryBuilder<MapArea, MapArea, QAfterFilterCondition> updatedAtEqualTo(
+      DateTime value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'updatedAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<MapArea, MapArea, QAfterFilterCondition> updatedAtGreaterThan(
+    DateTime value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'updatedAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<MapArea, MapArea, QAfterFilterCondition> updatedAtLessThan(
+    DateTime value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'updatedAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<MapArea, MapArea, QAfterFilterCondition> updatedAtBetween(
+    DateTime lower,
+    DateTime upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'updatedAt',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
 }
 
 extension MapAreaQueryObject
@@ -1076,6 +1138,18 @@ extension MapAreaQuerySortBy on QueryBuilder<MapArea, MapArea, QSortBy> {
   QueryBuilder<MapArea, MapArea, QAfterSortBy> sortByTagIdDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'tagId', Sort.desc);
+    });
+  }
+
+  QueryBuilder<MapArea, MapArea, QAfterSortBy> sortByUpdatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'updatedAt', Sort.asc);
+    });
+  }
+
+  QueryBuilder<MapArea, MapArea, QAfterSortBy> sortByUpdatedAtDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'updatedAt', Sort.desc);
     });
   }
 }
@@ -1177,6 +1251,18 @@ extension MapAreaQuerySortThenBy
       return query.addSortBy(r'tagId', Sort.desc);
     });
   }
+
+  QueryBuilder<MapArea, MapArea, QAfterSortBy> thenByUpdatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'updatedAt', Sort.asc);
+    });
+  }
+
+  QueryBuilder<MapArea, MapArea, QAfterSortBy> thenByUpdatedAtDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'updatedAt', Sort.desc);
+    });
+  }
 }
 
 extension MapAreaQueryWhereDistinct
@@ -1222,6 +1308,12 @@ extension MapAreaQueryWhereDistinct
   QueryBuilder<MapArea, MapArea, QDistinct> distinctByTagId() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'tagId');
+    });
+  }
+
+  QueryBuilder<MapArea, MapArea, QDistinct> distinctByUpdatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'updatedAt');
     });
   }
 }
@@ -1273,6 +1365,12 @@ extension MapAreaQueryProperty
   QueryBuilder<MapArea, int, QQueryOperations> tagIdProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'tagId');
+    });
+  }
+
+  QueryBuilder<MapArea, DateTime, QQueryOperations> updatedAtProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'updatedAt');
     });
   }
 }

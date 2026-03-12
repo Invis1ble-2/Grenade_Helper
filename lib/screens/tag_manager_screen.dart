@@ -82,6 +82,8 @@ class _TagManagerScreenState extends ConsumerState<TagManagerScreen> {
 
     final sorted = List<MapArea>.from(areas)
       ..sort((a, b) {
+        if (a.updatedAt.isAfter(b.updatedAt)) return -1;
+        if (a.updatedAt.isBefore(b.updatedAt)) return 1;
         if (a.createdAt.isAfter(b.createdAt)) return -1;
         if (a.createdAt.isBefore(b.createdAt)) return 1;
         return b.id.compareTo(a.id);
@@ -123,6 +125,8 @@ class _TagManagerScreenState extends ConsumerState<TagManagerScreen> {
         .findAll();
     if (areas.isEmpty) return null;
     areas.sort((a, b) {
+      if (a.updatedAt.isAfter(b.updatedAt)) return -1;
+      if (a.updatedAt.isBefore(b.updatedAt)) return 1;
       if (a.createdAt.isAfter(b.createdAt)) return -1;
       if (a.createdAt.isBefore(b.createdAt)) return 1;
       return b.id.compareTo(a.id);

@@ -56,6 +56,11 @@ const TagSchema = CollectionSchema(
       id: 7,
       name: r'tagUuid',
       type: IsarType.string,
+    ),
+    r'updatedAt': PropertySchema(
+      id: 8,
+      name: r'updatedAt',
+      type: IsarType.dateTime,
     )
   },
   estimateSize: _tagEstimateSize,
@@ -156,6 +161,7 @@ void _tagSerialize(
   writer.writeString(offsets[5], object.name);
   writer.writeLong(offsets[6], object.sortOrder);
   writer.writeString(offsets[7], object.tagUuid);
+  writer.writeDateTime(offsets[8], object.updatedAt);
 }
 
 Tag _tagDeserialize(
@@ -175,6 +181,7 @@ Tag _tagDeserialize(
     tagUuid: reader.readStringOrNull(offsets[7]) ?? '',
   );
   object.id = id;
+  object.updatedAt = reader.readDateTime(offsets[8]);
   return object;
 }
 
@@ -201,6 +208,8 @@ P _tagDeserializeProp<P>(
       return (reader.readLongOrNull(offset) ?? 0) as P;
     case 7:
       return (reader.readStringOrNull(offset) ?? '') as P;
+    case 8:
+      return (reader.readDateTime(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
   }
@@ -1195,6 +1204,59 @@ extension TagQueryFilter on QueryBuilder<Tag, Tag, QFilterCondition> {
       ));
     });
   }
+
+  QueryBuilder<Tag, Tag, QAfterFilterCondition> updatedAtEqualTo(
+      DateTime value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'updatedAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QAfterFilterCondition> updatedAtGreaterThan(
+    DateTime value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'updatedAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QAfterFilterCondition> updatedAtLessThan(
+    DateTime value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'updatedAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QAfterFilterCondition> updatedAtBetween(
+    DateTime lower,
+    DateTime upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'updatedAt',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
 }
 
 extension TagQueryObject on QueryBuilder<Tag, Tag, QFilterCondition> {}
@@ -1295,6 +1357,18 @@ extension TagQuerySortBy on QueryBuilder<Tag, Tag, QSortBy> {
   QueryBuilder<Tag, Tag, QAfterSortBy> sortByTagUuidDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'tagUuid', Sort.desc);
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QAfterSortBy> sortByUpdatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'updatedAt', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QAfterSortBy> sortByUpdatedAtDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'updatedAt', Sort.desc);
     });
   }
 }
@@ -1407,6 +1481,18 @@ extension TagQuerySortThenBy on QueryBuilder<Tag, Tag, QSortThenBy> {
       return query.addSortBy(r'tagUuid', Sort.desc);
     });
   }
+
+  QueryBuilder<Tag, Tag, QAfterSortBy> thenByUpdatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'updatedAt', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QAfterSortBy> thenByUpdatedAtDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'updatedAt', Sort.desc);
+    });
+  }
 }
 
 extension TagQueryWhereDistinct on QueryBuilder<Tag, Tag, QDistinct> {
@@ -1458,6 +1544,12 @@ extension TagQueryWhereDistinct on QueryBuilder<Tag, Tag, QDistinct> {
       {bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'tagUuid', caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<Tag, Tag, QDistinct> distinctByUpdatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'updatedAt');
     });
   }
 }
@@ -1514,6 +1606,12 @@ extension TagQueryProperty on QueryBuilder<Tag, Tag, QQueryProperty> {
   QueryBuilder<Tag, String, QQueryOperations> tagUuidProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'tagUuid');
+    });
+  }
+
+  QueryBuilder<Tag, DateTime, QQueryOperations> updatedAtProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'updatedAt');
     });
   }
 }

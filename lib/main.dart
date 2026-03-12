@@ -123,18 +123,7 @@ Future<void> _runMainWindow() async {
     await dataDir.create(recursive: true);
   }
 
-  // 2. 清理可能残留的锁文件（应用异常关闭时可能产生）
-  try {
-    final lockFile = File('$dataPath/default.isar-lck');
-    if (await lockFile.exists()) {
-      debugPrint('[Main] Found stale lock file, removing...');
-      await lockFile.delete();
-    }
-  } catch (e) {
-    debugPrint('[Main] Error cleaning lock file: $e');
-  }
-
-  // 3. 初始化数据库
+  // 2. 初始化数据库
   final isar = await Isar.open(
     [
       GameMapSchema,
@@ -166,14 +155,34 @@ Future<void> _runMainWindow() async {
   if (favoriteMigratedCount > 0) {
     debugPrint('已修复 $favoriteMigratedCount 个收藏夹归档数据');
   }
-  final tagMigratedCount = await migrationService.migrateTagUuids();
-  if (tagMigratedCount > 0) {
-    debugPrint('已为 $tagMigratedCount 个标签补齐 UUID');
+  final tagMigrationSummary = await migrationService.migrateTagUuids();
+  if (tagMigrationSummary.migratedCount > 0) {
+    debugPrint('已为 ${tagMigrationSummary.migratedCount} 个标签补齐 UUID');
+    for (final detail in tagMigrationSummary.details) {
+      debugPrint(
+        '  标签UUID补齐：地图=${detail.mapName}(id=${detail.mapId})，'
+        '标签=${detail.tagName}(id=${detail.tagId})，'
+        '维度=${detail.dimensionName}，'
+        '系统标签=${detail.isSystem}，'
+        '原因=${detail.reason}',
+      );
+      debugPrint(
+        '  UUID：旧=[${detail.oldUuid.isEmpty ? "空" : detail.oldUuid}] -> '
+        '新=[${detail.newUuid}]',
+      );
+    }
   }
   final tagService = TagService(isar);
   final ensuredSystemTagSummary = await tagService.ensureSystemTagsForAllMaps(
     cleanupObsoleteSystemTags: true,
   );
+  String summarizeRefs(List<String> refs, {int maxItems = 5}) {
+    if (refs.isEmpty) return '无';
+    final visible = refs.take(maxItems).join('，');
+    if (refs.length <= maxItems) return visible;
+    return '$visible 等${refs.length}项';
+  }
+
   if (ensuredSystemTagSummary.addedTags > 0 ||
       ensuredSystemTagSummary.updatedTags > 0 ||
       ensuredSystemTagSummary.removedObsoleteTags > 0) {
@@ -188,6 +197,56 @@ Future<void> _runMainWindow() async {
     debugPrint(
       '检测到${ensuredSystemTagSummary.keptObsoleteTagsInUse}个废弃系统标签仍被引用，已跳过清理',
     );
+    for (final detail in ensuredSystemTagSummary.keptObsoleteTagDetails) {
+      debugPrint(
+        '  来源：地图=${detail.mapName}(id=${detail.mapId})，'
+        '标签=${detail.tagName}(id=${detail.tagId})，'
+        '维度=${detail.dimensionName}，'
+        'UUID=${detail.tagUuid}',
+      );
+      debugPrint(
+        '  引用：道具${detail.grenadeRefs.length}个'
+        ' [${summarizeRefs(detail.grenadeRefs)}]；'
+        '区域${detail.areaRefs.length}个'
+        ' [${summarizeRefs(detail.areaRefs)}]',
+      );
+    }
+  }
+  final defaultAreaSummary =
+      await tagService.initializeBuiltinAreaMetadataForAllMaps();
+  if (defaultAreaSummary.addedTags > 0 ||
+      defaultAreaSummary.updatedTags > 0 ||
+      defaultAreaSummary.addedAreas > 0 ||
+      defaultAreaSummary.updatedAreas > 0 ||
+      defaultAreaSummary.removedDuplicateAreas > 0) {
+    debugPrint(
+      '已初始化默认区域：地图${defaultAreaSummary.processedMaps}张，'
+      '区域标签新增${defaultAreaSummary.addedTags}个，'
+      '区域标签更新${defaultAreaSummary.updatedTags}个，'
+      '区域新增${defaultAreaSummary.addedAreas}个，'
+      '区域更新${defaultAreaSummary.updatedAreas}个，'
+      '去重${defaultAreaSummary.removedDuplicateAreas}个',
+    );
+    for (final detail in defaultAreaSummary.addedTagDetails) {
+      debugPrint(
+        '  区域标签新增：地图=${detail.mapName}(id=${detail.mapId})，'
+        '标签=${detail.tagName}，'
+        'UUID=${detail.newTagUuid}，'
+        '颜色=${detail.newColorValue}',
+      );
+    }
+    for (final detail in defaultAreaSummary.updatedTagDetails) {
+      debugPrint(
+        '  区域标签更新：地图=${detail.mapName}(id=${detail.mapId})，'
+        '标签=${detail.tagName}(id=${detail.tagId ?? -1})，'
+        '原因=${detail.reasonSummary}',
+      );
+      debugPrint(
+        '  变化：UUID=[${detail.oldTagUuid.isEmpty ? "空" : detail.oldTagUuid}] -> '
+        '[${detail.newTagUuid}]；'
+        '颜色=[${detail.oldColorValue}] -> [${detail.newColorValue}]',
+      );
+    }
   }
 
   // 2.5 初始化设置服务（所有平台）

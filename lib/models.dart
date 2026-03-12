@@ -220,6 +220,7 @@ class ImpactGroup {
 
   /// 创建时间
   DateTime createdAt;
+  DateTime updatedAt;
 
   ImpactGroup({
     required this.name,
@@ -228,7 +229,9 @@ class ImpactGroup {
     required this.impactYRatio,
     required this.layerId,
     DateTime? created,
-  }) : createdAt = created ?? DateTime.now();
+    DateTime? updated,
+  })  : createdAt = created ?? DateTime.now(),
+        updatedAt = updated ?? (created ?? DateTime.now());
 }
 
 /// 收藏夹

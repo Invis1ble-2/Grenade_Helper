@@ -6,6 +6,7 @@ import '../models/tag.dart';
 import '../models/grenade_tag.dart';
 import '../models.dart';
 import 'lan_sync/lan_sync_local_store.dart';
+import 'tag_uuid_service.dart';
 
 class AutoTagSummary {
   final int processedGrenades;
@@ -86,6 +87,10 @@ class AreaService {
       await isar.writeTxn(() async {
         final tag = await isar.tags.get(existingTagId);
         if (tag != null) {
+          if (tag.tagUuid.trim().isEmpty) {
+            tag.tagUuid = TagUuidService.newRandomUuid();
+          }
+          tag.updatedAt = DateTime.now();
           tag.name = name;
           tag.colorValue = colorValue;
           await isar.tags.put(tag);
@@ -94,6 +99,7 @@ class AreaService {
     } else {
       // 先创建对应的区域标签
       final tag = Tag(
+        tagUuid: TagUuidService.newRandomUuid(),
         name: name,
         colorValue: colorValue,
         dimension: TagDimension.area,
@@ -116,6 +122,7 @@ class AreaService {
       layerId: layerId,
       tagId: tagId,
       createdAt: DateTime.now(),
+      updated: DateTime.now(),
     );
     await isar.writeTxn(() async {
       await isar.mapAreas.put(area);
@@ -199,12 +206,14 @@ class AreaService {
       // 1. 更新对应标签
       final tag = await isar.tags.get(area.tagId);
       if (tag != null) {
+        tag.updatedAt = DateTime.now();
         tag.name = name;
         tag.colorValue = colorValue;
         await isar.tags.put(tag);
       }
 
       // 2. 更新区域
+      area.updatedAt = DateTime.now();
       area.name = name;
       area.colorValue = colorValue;
       area.strokes = strokes;

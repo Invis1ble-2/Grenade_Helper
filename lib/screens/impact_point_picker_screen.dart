@@ -349,7 +349,22 @@ class _ImpactPointPickerScreenState
     });
   }
 
+  void _commitCurrentStrokeIfNeeded() {
+    if (_selectedShapeType > 0 || _currentStroke.isEmpty) {
+      return;
+    }
+    _drawingStrokes.add({
+      'points': _currentStroke.map((o) => [o.dx, o.dy]).toList(),
+      'strokeWidth': _brushSize,
+      'isEraser': _isEraserMode,
+    });
+    _currentStroke = [];
+  }
+
   void _confirmDrawing() {
+    if (_currentStroke.isNotEmpty) {
+      setState(_commitCurrentStrokeIfNeeded);
+    }
     final strokesJson = jsonEncode(_drawingStrokes);
     Navigator.pop(context, {'strokes': strokesJson});
   }
@@ -383,7 +398,12 @@ class _ImpactPointPickerScreenState
               if (_drawingStrokes.isNotEmpty)
                 IconButton(
                   onPressed: () {
-                    setState(() => _drawingStrokes.removeLast());
+                    setState(() {
+                      _commitCurrentStrokeIfNeeded();
+                      if (_drawingStrokes.isNotEmpty) {
+                        _drawingStrokes.removeLast();
+                      }
+                    });
                   },
                   icon: const Icon(Icons.undo),
                   tooltip: '撤销',
@@ -392,7 +412,10 @@ class _ImpactPointPickerScreenState
                 onPressed: _drawingStrokes.isEmpty
                     ? null
                     : () {
-                        setState(() => _drawingStrokes.clear());
+                        setState(() {
+                          _currentStroke = [];
+                          _drawingStrokes.clear();
+                        });
                       },
                 icon: const Icon(Icons.delete_outline),
                 tooltip: '清除全部',
@@ -616,12 +639,7 @@ class _ImpactPointPickerScreenState
               if (_selectedShapeType > 0) return;
               if (_currentStroke.isNotEmpty) {
                 setState(() {
-                  _drawingStrokes.add({
-                    'points': _currentStroke.map((o) => [o.dx, o.dy]).toList(),
-                    'strokeWidth': _brushSize,
-                    'isEraser': _isEraserMode,
-                  });
-                  _currentStroke = [];
+                  _commitCurrentStrokeIfNeeded();
                 });
               }
             },
@@ -657,12 +675,15 @@ class _ImpactPointPickerScreenState
               if (_selectedShapeType > 0) return;
               if (_currentStroke.isNotEmpty) {
                 setState(() {
-                  _drawingStrokes.add({
-                    'points': _currentStroke.map((o) => [o.dx, o.dy]).toList(),
-                    'strokeWidth': _brushSize,
-                    'isEraser': _isEraserMode,
-                  });
-                  _currentStroke = [];
+                  _commitCurrentStrokeIfNeeded();
+                });
+              }
+            },
+            onPanCancel: () {
+              if (_selectedShapeType > 0) return;
+              if (_currentStroke.isNotEmpty) {
+                setState(() {
+                  _commitCurrentStrokeIfNeeded();
                 });
               }
             },

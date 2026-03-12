@@ -25,6 +25,7 @@ class MapArea {
   int tagId;
 
   DateTime createdAt;
+  DateTime updatedAt;
 
   MapArea({
     required this.name,
@@ -34,5 +35,6 @@ class MapArea {
     this.layerId,
     required this.tagId,
     required this.createdAt,
-  });
+    DateTime? updated,
+  }) : updatedAt = updated ?? createdAt;
 }

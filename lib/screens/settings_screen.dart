@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:isar_community/isar.dart';
 import '../services/settings_service.dart';
 import '../services/seasonal_theme_service.dart';
@@ -76,8 +77,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String _currentDataPath = '';
   String _defaultDataPath = '';
   bool _isLoadingLanSyncDebug = false;
-  bool _isLanSyncDebugExpanded = false;
-  List<LanSyncBaselineDebugPeerInfo> _lanSyncDebugPeers = const [];
   LanSyncTombstoneStats _lanSyncTombstoneStats =
       const LanSyncTombstoneStats(grenadeCount: 0, entityCount: 0);
 
@@ -597,7 +596,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           title: const Text('重导入默认区域标签/数据'),
           subtitle: const Text('一键补齐内置默认区域标签与区域几何数据'),
           trailing: const Icon(Icons.chevron_right),
-          onTap: () => _reimportDefaultAreaTagsForAllMaps(),
+          onTap: () => _initializeBuiltinAreaMetadataForAllMaps(),
         ),
         ListTile(
           leading: const Icon(Icons.delete_sweep, color: Colors.redAccent),
@@ -634,54 +633,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       title: '🧪 调试信息',
       subtitle: '仅 Debug 构建显示',
       children: [
-        InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () {
-            final nextExpanded = !_isLanSyncDebugExpanded;
-            setState(() => _isLanSyncDebugExpanded = nextExpanded);
-            if (nextExpanded) {
-              _loadLanSyncDebugInfo();
-            }
-          },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        '局域网同步增量基线',
-                        style: TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _isLoadingLanSyncDebug
-                            ? '正在加载...'
-                            : '删除日志 ${_lanSyncTombstoneStats.grenadeCount + _lanSyncTombstoneStats.entityCount} 条',
-                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                      ),
-                    ],
-                  ),
-                ),
-                Icon(
-                  _isLanSyncDebugExpanded
-                      ? Icons.expand_less
-                      : Icons.expand_more,
-                ),
-              ],
-            ),
+        ListTile(
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          title: const Text(
+            '局域网同步删除日志',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+          subtitle: Text(
+            _isLoadingLanSyncDebug
+                ? '正在加载...'
+                : '共 ${_lanSyncTombstoneStats.grenadeCount + _lanSyncTombstoneStats.entityCount} 条',
+          ),
+          trailing: IconButton(
+            tooltip: '刷新',
+            onPressed: _isLoadingLanSyncDebug ? null : _loadLanSyncDebugInfo,
+            icon: const Icon(Icons.refresh),
           ),
         ),
-        AnimatedCrossFade(
-          firstChild: const SizedBox.shrink(),
-          secondChild: _buildLanSyncDebugExpandedContent(),
-          crossFadeState: _isLanSyncDebugExpanded
-              ? CrossFadeState.showSecond
-              : CrossFadeState.showFirst,
-          duration: const Duration(milliseconds: 180),
-        ),
+        _buildLanSyncDebugExpandedContent(),
       ],
     );
   }
@@ -693,65 +663,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         child: Center(child: CircularProgressIndicator()),
       );
     }
-    if (_lanSyncDebugPeers.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.fromLTRB(16, 8, 16, 16),
-        child: Text('当前还没有可显示的增量基线。'),
-      );
-    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
         children: [
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              Chip(label: Text('道具删除 ${_lanSyncTombstoneStats.grenadeCount}')),
-              Chip(label: Text('其他删除 ${_lanSyncTombstoneStats.entityCount}')),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ..._lanSyncDebugPeers.map((peer) => Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                child: Padding(
-                  padding: const EdgeInsets.all(10),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        peer.peerNodeId,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 8),
-                      ...peer.maps.map((entry) {
-                        final updatedAt = entry.updatedAtMs <= 0
-                            ? '未知'
-                            : _formatDateTime(
-                                DateTime.fromMillisecondsSinceEpoch(
-                                    entry.updatedAtMs),
-                              );
-                        final baseline = entry.baselineId.isEmpty
-                            ? '-'
-                            : (entry.baselineId.length > 18
-                                ? '${entry.baselineId.substring(0, 18)}...'
-                                : entry.baselineId);
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 6),
-                          child: Text(
-                            '${entry.mapKey} · $updatedAt · 快照 ${entry.snapshotCount} 条 · $baseline',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        );
-                      }),
-                    ],
-                  ),
-                ),
-              )),
+          Chip(label: Text('道具删除 ${_lanSyncTombstoneStats.grenadeCount}')),
+          Chip(label: Text('其他删除 ${_lanSyncTombstoneStats.entityCount}')),
         ],
       ),
     );
@@ -762,12 +681,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     setState(() => _isLoadingLanSyncDebug = true);
     try {
       final store = LanSyncLocalStore();
+      await store.cleanupLegacySyncState();
       await store.cleanupSyncTombstones();
-      final peers = await store.loadBaselineDebugPeers();
       final stats = await store.loadTombstoneStats();
       if (!mounted) return;
       setState(() {
-        _lanSyncDebugPeers = peers;
         _lanSyncTombstoneStats = stats;
       });
     } finally {
@@ -775,11 +693,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         setState(() => _isLoadingLanSyncDebug = false);
       }
     }
-  }
-
-  String _formatDateTime(DateTime value) {
-    String two(int v) => v.toString().padLeft(2, '0');
-    return '${value.year}-${two(value.month)}-${two(value.day)} ${two(value.hour)}:${two(value.minute)}';
   }
 
   Future<void> _scanAndCleanupOrphanMediaFiles() async {
@@ -980,7 +893,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   final count = mapGrenadeCount[map.id] ?? 0;
                   return DropdownMenuItem(
                     value: map,
-                    child: Text('${map.name} ($count 个道具)'),
+                    child: _SettingsMapDropdownLabel(
+                      iconPath: map.iconPath,
+                      text: '${map.name} ($count 个道具)',
+                    ),
                   );
                 }).toList(),
                 onChanged: (value) => setDialogState(() => selectedMap = value),
@@ -1032,7 +948,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  Future<void> _reimportDefaultAreaTagsForAllMaps() async {
+  Future<void> _initializeBuiltinAreaMetadataForAllMaps() async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1074,7 +990,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     try {
       final isar = ref.read(isarProvider);
       final tagService = TagService(isar);
-      final result = await tagService.reimportDefaultAreaTagsForAllMaps();
+      final result = await tagService.initializeBuiltinAreaMetadataForAllMaps();
 
       if (!mounted) return;
       Navigator.pop(context);
@@ -1536,6 +1452,43 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         );
       }).toList(),
+    );
+  }
+}
+
+class _SettingsMapDropdownLabel extends StatelessWidget {
+  final String iconPath;
+  final String text;
+
+  const _SettingsMapDropdownLabel({
+    required this.iconPath,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        if (iconPath.trim().isEmpty)
+          const Icon(Icons.map_outlined, size: 20, color: Colors.orange)
+        else
+          SvgPicture.asset(
+            iconPath,
+            width: 20,
+            height: 20,
+            placeholderBuilder: (_) =>
+                const Icon(Icons.map_outlined, size: 20, color: Colors.orange),
+          ),
+        const SizedBox(width: 10),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 220),
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
     );
   }
 }

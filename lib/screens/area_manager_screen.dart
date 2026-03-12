@@ -59,6 +59,8 @@ class _AreaManagerScreenState extends ConsumerState<AreaManagerScreen> {
     }
 
     int sortByTime(MapArea a, MapArea b) {
+      if (a.updatedAt.isAfter(b.updatedAt)) return -1;
+      if (a.updatedAt.isBefore(b.updatedAt)) return 1;
       if (a.createdAt.isAfter(b.createdAt)) return -1;
       if (a.createdAt.isBefore(b.createdAt)) return 1;
       return b.id.compareTo(a.id);

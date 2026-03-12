@@ -94,6 +94,26 @@ class PackagePreviewResult {
       if (trimmed.isEmpty || !seen.add(trimmed)) continue;
       ordered.add(trimmed);
     }
+    for (final tag in tagsByUuid.values) {
+      final trimmed = tag.mapName.trim();
+      if (trimmed.isEmpty || !seen.add(trimmed)) continue;
+      ordered.add(trimmed);
+    }
+    for (final area in areas) {
+      final trimmed = area.mapName.trim();
+      if (trimmed.isEmpty || !seen.add(trimmed)) continue;
+      ordered.add(trimmed);
+    }
+    for (final folder in favoriteFolders) {
+      final trimmed = folder.mapName.trim();
+      if (trimmed.isEmpty || !seen.add(trimmed)) continue;
+      ordered.add(trimmed);
+    }
+    for (final group in impactGroups) {
+      final trimmed = group.mapName.trim();
+      if (trimmed.isEmpty || !seen.add(trimmed)) continue;
+      ordered.add(trimmed);
+    }
     return ordered;
   }
 }
@@ -171,6 +191,7 @@ class PackageTagData {
   final int colorValue;
   final String? groupName;
   final bool isSystem;
+  final int updatedAt;
 
   const PackageTagData({
     required this.tagUuid,
@@ -180,6 +201,7 @@ class PackageTagData {
     required this.colorValue,
     this.groupName,
     required this.isSystem,
+    required this.updatedAt,
   });
 
   factory PackageTagData.fromJson(Map<String, dynamic> json) {
@@ -191,6 +213,8 @@ class PackageTagData {
       colorValue: json['colorValue'] as int? ?? 0xFF607D8B,
       groupName: json['groupName'] as String?,
       isSystem: json['isSystem'] as bool? ?? false,
+      updatedAt:
+          json['updatedAt'] as int? ?? DateTime.now().millisecondsSinceEpoch,
     );
   }
 
@@ -202,6 +226,7 @@ class PackageTagData {
         'colorValue': colorValue,
         'groupName': groupName,
         'isSystem': isSystem,
+        'updatedAt': updatedAt,
       };
 }
 
@@ -213,6 +238,7 @@ class PackageAreaData {
   final int colorValue;
   final String strokes;
   final int createdAt;
+  final int updatedAt;
 
   const PackageAreaData({
     required this.tagUuid,
@@ -222,6 +248,7 @@ class PackageAreaData {
     required this.colorValue,
     required this.strokes,
     required this.createdAt,
+    required this.updatedAt,
   });
 
   factory PackageAreaData.fromJson(Map<String, dynamic> json) {
@@ -234,6 +261,8 @@ class PackageAreaData {
       strokes: json['strokes'] as String? ?? '[]',
       createdAt:
           json['createdAt'] as int? ?? DateTime.now().millisecondsSinceEpoch,
+      updatedAt: json['updatedAt'] as int? ??
+          (json['createdAt'] as int? ?? DateTime.now().millisecondsSinceEpoch),
     );
   }
 
@@ -245,6 +274,7 @@ class PackageAreaData {
         'colorValue': colorValue,
         'strokes': strokes,
         'createdAt': createdAt,
+        'updatedAt': updatedAt,
       };
 }
 
@@ -296,6 +326,7 @@ class PackageImpactGroupData {
   final double impactXRatio;
   final double impactYRatio;
   final int createdAt;
+  final int updatedAt;
 
   const PackageImpactGroupData({
     required this.mapName,
@@ -305,6 +336,7 @@ class PackageImpactGroupData {
     required this.impactXRatio,
     required this.impactYRatio,
     required this.createdAt,
+    required this.updatedAt,
   });
 
   factory PackageImpactGroupData.fromJson(Map<String, dynamic> json) {
@@ -317,6 +349,8 @@ class PackageImpactGroupData {
       impactYRatio: (json['impactYRatio'] as num?)?.toDouble() ?? 0.0,
       createdAt:
           json['createdAt'] as int? ?? DateTime.now().millisecondsSinceEpoch,
+      updatedAt: json['updatedAt'] as int? ??
+          (json['createdAt'] as int? ?? DateTime.now().millisecondsSinceEpoch),
     );
   }
 
@@ -328,7 +362,80 @@ class PackageImpactGroupData {
         'impactXRatio': impactXRatio,
         'impactYRatio': impactYRatio,
         'createdAt': createdAt,
+        'updatedAt': updatedAt,
       };
+}
+
+class LanSyncManifestItem {
+  final String key;
+  final String mapName;
+  final String digest;
+  final int updatedAtMs;
+  final Map<String, dynamic> rawData;
+  final Set<String> filesToZip;
+
+  const LanSyncManifestItem({
+    required this.key,
+    required this.mapName,
+    required this.digest,
+    required this.updatedAtMs,
+    this.rawData = const {},
+    this.filesToZip = const <String>{},
+  });
+
+  Map<String, dynamic> toManifestJson() => {
+        'digest': digest,
+        'updatedAtMs': updatedAtMs,
+        'mapName': mapName,
+      };
+}
+
+class LanSyncManifestBundle {
+  final Map<String, LanSyncManifestItem> grenades;
+  final Map<String, LanSyncManifestItem> tags;
+  final Map<String, LanSyncManifestItem> areas;
+  final Map<String, LanSyncManifestItem> favoriteFolders;
+  final Map<String, LanSyncManifestItem> impactGroups;
+
+  const LanSyncManifestBundle({
+    this.grenades = const {},
+    this.tags = const {},
+    this.areas = const {},
+    this.favoriteFolders = const {},
+    this.impactGroups = const {},
+  });
+
+  Map<String, dynamic> toManifestJson() {
+    final grenadesByMap = <String, Map<String, dynamic>>{};
+    for (final entry in grenades.entries) {
+      grenadesByMap.putIfAbsent(entry.value.mapName, () => <String, dynamic>{});
+      grenadesByMap[entry.value.mapName]![entry.key] =
+          entry.value.toManifestJson();
+    }
+    return {
+      'manifestSchemaVersion': 1,
+      'generatedAtMs': DateTime.now().millisecondsSinceEpoch,
+      'grenadesByMap': grenadesByMap,
+      'entitiesByType': {
+        LanSyncEntityTombstoneType.tag: {
+          for (final entry in tags.entries)
+            entry.key: entry.value.toManifestJson(),
+        },
+        LanSyncEntityTombstoneType.area: {
+          for (final entry in areas.entries)
+            entry.key: entry.value.toManifestJson(),
+        },
+        LanSyncEntityTombstoneType.favoriteFolder: {
+          for (final entry in favoriteFolders.entries)
+            entry.key: entry.value.toManifestJson(),
+        },
+        LanSyncEntityTombstoneType.impactGroup: {
+          for (final entry in impactGroups.entries)
+            entry.key: entry.value.toManifestJson(),
+        },
+      },
+    };
+  }
 }
 
 enum TagConflictType { uuidMismatch, semanticMatch }
@@ -524,7 +631,7 @@ class _LanSyncExportBundle {
   });
 
   Map<String, dynamic> toJson() => {
-        'schemaVersion': 5,
+        'schemaVersion': 6,
         'grenades': grenades,
         'tags': tags,
         'areas': areas,
@@ -935,6 +1042,10 @@ class DataService {
     }
 
     if (grenadesData.isEmpty &&
+        tagsByUuid.isEmpty &&
+        areas.isEmpty &&
+        favoriteFolders.isEmpty &&
+        impactGroups.isEmpty &&
         grenadeTombstones.isEmpty &&
         entityTombstones.isEmpty) {
       return null;
@@ -998,7 +1109,11 @@ class DataService {
           }
 
           if (existing != null) {
-            if (importedUpdatedAt.isAfter(existing.updatedAt)) {
+            if (await _shouldImportGrenadeOverLocal(
+              existing,
+              item,
+              memoryImages,
+            )) {
               status = ImportStatus.update;
             } else {
               status = ImportStatus.skip;
@@ -1123,7 +1238,6 @@ class DataService {
         'author': g.author,
         'sourceUrl': g.sourceUrl,
         'sourceNote': g.sourceNote,
-        'hasLocalEdits': g.hasLocalEdits,
         'x': g.xRatio,
         'y': g.yRatio,
         'impactX': g.impactXRatio,
@@ -1183,6 +1297,7 @@ class DataService {
         'colorValue': tag.colorValue,
         'groupName': tag.groupName,
         'isSystem': tag.isSystem,
+        'updatedAt': tag.updatedAt.millisecondsSinceEpoch,
       });
     }
 
@@ -1220,6 +1335,7 @@ class DataService {
           'colorValue': area.colorValue,
           'strokes': area.strokes,
           'createdAt': area.createdAt.millisecondsSinceEpoch,
+          'updatedAt': area.updatedAt.millisecondsSinceEpoch,
         });
       }
     }
@@ -1301,6 +1417,269 @@ class DataService {
       name: name,
       impactXRatio: impactXRatio,
       impactYRatio: impactYRatio,
+    );
+  }
+
+  Future<Map<String, GameMap>> _resolveScopeMaps(Set<String> mapKeys) async {
+    final normalized =
+        mapKeys.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
+    if (normalized.isEmpty) return const {};
+    final maps = await isar.gameMaps.where().findAll();
+    return {
+      for (final map in maps)
+        if (normalized.contains(map.name.trim())) map.name.trim(): map,
+    };
+  }
+
+  Future<List<Grenade>> _loadScopedGrenades(
+    Map<String, GameMap> scopedMaps,
+  ) async {
+    if (scopedMaps.isEmpty) return const [];
+    final grenades = <Grenade>[];
+    for (final map in scopedMaps.values) {
+      await map.layers.load();
+      for (final layer in map.layers) {
+        await layer.grenades.load();
+        grenades.addAll(layer.grenades);
+      }
+    }
+    return grenades;
+  }
+
+  Future<Set<String>> _collectGrenadeFilesToZip(Grenade grenade) async {
+    await grenade.steps.load();
+    final files = <String>{};
+    for (final step in grenade.steps) {
+      await step.medias.load();
+      for (final media in step.medias) {
+        final path = media.localPath.trim();
+        if (path.isNotEmpty) {
+          files.add(path);
+        }
+      }
+    }
+    return files;
+  }
+
+  Future<Map<int, String>> _buildLayerNameById(
+    Iterable<GameMap> maps,
+  ) async {
+    final result = <int, String>{};
+    for (final map in maps) {
+      await map.layers.load();
+      for (final layer in map.layers) {
+        result[layer.id] = layer.name;
+      }
+    }
+    return result;
+  }
+
+  Future<Map<String, LanSyncManifestItem>> _buildGrenadeManifestItems(
+    List<Grenade> grenades,
+  ) async {
+    if (grenades.isEmpty) return const {};
+    final syncBundle = await _buildLanSyncBundle(grenades);
+    final result = <String, LanSyncManifestItem>{};
+    for (var i = 0; i < grenades.length; i++) {
+      final grenade = grenades[i];
+      final rawData = Map<String, dynamic>.from(syncBundle.grenades[i]);
+      final uniqueId = (rawData['uniqueId'] as String? ?? '').trim();
+      final mapName = (rawData['mapName'] as String? ?? '').trim();
+      if (uniqueId.isEmpty || mapName.isEmpty) continue;
+      final filesToZip = await _collectGrenadeFilesToZip(grenade);
+      result[uniqueId] = LanSyncManifestItem(
+        key: uniqueId,
+        mapName: mapName,
+        digest: await _buildLocalGrenadeDigest(grenade),
+        updatedAtMs: grenade.updatedAt.millisecondsSinceEpoch,
+        rawData: rawData,
+        filesToZip: filesToZip,
+      );
+    }
+    return result;
+  }
+
+  Future<Map<String, LanSyncManifestItem>> _buildTagManifestItems(
+    Map<String, GameMap> scopedMaps,
+  ) async {
+    if (scopedMaps.isEmpty) return const {};
+    final result = <String, LanSyncManifestItem>{};
+    for (final map in scopedMaps.values) {
+      final tags = await isar.tags.filter().mapIdEqualTo(map.id).findAll();
+      for (final tag in tags) {
+        final tagUuid = tag.tagUuid.trim();
+        if (tagUuid.isEmpty) continue;
+        final payload = PackageTagData(
+          tagUuid: tagUuid,
+          mapName: map.name,
+          name: tag.name,
+          dimension: tag.dimension,
+          colorValue: tag.colorValue,
+          groupName: tag.groupName,
+          isSystem: tag.isSystem,
+          updatedAt: tag.updatedAt.millisecondsSinceEpoch,
+        ).toJson();
+        result[tagUuid] = LanSyncManifestItem(
+          key: tagUuid,
+          mapName: map.name,
+          digest: _digestJsonValue(_normalizePayloadForSyncDigest(payload)),
+          updatedAtMs: tag.updatedAt.millisecondsSinceEpoch,
+          rawData: payload,
+        );
+      }
+    }
+    return result;
+  }
+
+  Future<Map<String, LanSyncManifestItem>> _buildAreaManifestItems(
+    Map<String, GameMap> scopedMaps,
+  ) async {
+    if (scopedMaps.isEmpty) return const {};
+    final tagsById = <int, Tag>{};
+    final layerNameById = await _buildLayerNameById(scopedMaps.values);
+    final result = <String, LanSyncManifestItem>{};
+    for (final map in scopedMaps.values) {
+      final areas = await isar.mapAreas.filter().mapIdEqualTo(map.id).findAll();
+      for (final area in areas) {
+        final tag = tagsById[area.tagId] ?? await isar.tags.get(area.tagId);
+        if (tag == null) continue;
+        tagsById[area.tagId] = tag;
+        final tagUuid = tag.tagUuid.trim();
+        if (tagUuid.isEmpty) continue;
+        final layerName = area.layerId == null
+            ? 'Default'
+            : (layerNameById[area.layerId!] ?? 'Default');
+        final payload = PackageAreaData(
+          tagUuid: tagUuid,
+          mapName: map.name,
+          layerName: layerName,
+          name: area.name,
+          colorValue: area.colorValue,
+          strokes: area.strokes,
+          createdAt: area.createdAt.millisecondsSinceEpoch,
+          updatedAt: area.updatedAt.millisecondsSinceEpoch,
+        ).toJson();
+        final key = buildAreaEntityKey(tagUuid: tagUuid, layerName: layerName);
+        final current = result[key];
+        final updatedAtMs = area.updatedAt.millisecondsSinceEpoch;
+        if (current == null || updatedAtMs >= current.updatedAtMs) {
+          result[key] = LanSyncManifestItem(
+            key: key,
+            mapName: map.name,
+            digest: _digestJsonValue(_normalizePayloadForSyncDigest(payload)),
+            updatedAtMs: updatedAtMs,
+            rawData: payload,
+          );
+        }
+      }
+    }
+    return result;
+  }
+
+  Future<Map<String, LanSyncManifestItem>> _buildFavoriteFolderManifestItems(
+    Map<String, GameMap> scopedMaps,
+  ) async {
+    if (scopedMaps.isEmpty) return const {};
+    final result = <String, LanSyncManifestItem>{};
+    for (final map in scopedMaps.values) {
+      final folders =
+          await isar.favoriteFolders.filter().mapIdEqualTo(map.id).findAll();
+      for (final folder in folders) {
+        final nameKey = folder.nameKey.trim().isEmpty
+            ? _normalizeFolderNameKey(folder.name)
+            : _normalizeFolderNameKey(folder.nameKey);
+        if (nameKey.isEmpty) continue;
+        final payload = PackageFavoriteFolderData(
+          mapName: map.name,
+          name: folder.name,
+          nameKey: nameKey,
+          sortOrder: folder.sortOrder,
+          createdAt: folder.createdAt.millisecondsSinceEpoch,
+          updatedAt: folder.updatedAt.millisecondsSinceEpoch,
+        ).toJson();
+        final key =
+            buildFavoriteFolderEntityKey(mapName: map.name, nameKey: nameKey);
+        result[key] = LanSyncManifestItem(
+          key: key,
+          mapName: map.name,
+          digest: _digestJsonValue(_normalizePayloadForSyncDigest(payload)),
+          updatedAtMs: folder.updatedAt.millisecondsSinceEpoch,
+          rawData: payload,
+        );
+      }
+    }
+    return result;
+  }
+
+  Future<Map<String, LanSyncManifestItem>> _buildImpactGroupManifestItems(
+    Map<String, GameMap> scopedMaps,
+  ) async {
+    if (scopedMaps.isEmpty) return const {};
+    final layerNameById = await _buildLayerNameById(scopedMaps.values);
+    final mapNameByLayerId = <int, String>{};
+    for (final map in scopedMaps.values) {
+      await map.layers.load();
+      for (final layer in map.layers) {
+        mapNameByLayerId[layer.id] = map.name;
+      }
+    }
+    final result = <String, LanSyncManifestItem>{};
+    for (final entry in mapNameByLayerId.entries) {
+      final groups =
+          await isar.impactGroups.filter().layerIdEqualTo(entry.key).findAll();
+      final mapName = entry.value;
+      final layerName = layerNameById[entry.key] ?? 'Default';
+      for (final group in groups) {
+        final payload = PackageImpactGroupData(
+          mapName: mapName,
+          layerName: layerName,
+          name: group.name,
+          type: group.type,
+          impactXRatio: group.impactXRatio,
+          impactYRatio: group.impactYRatio,
+          createdAt: group.createdAt.millisecondsSinceEpoch,
+          updatedAt: group.updatedAt.millisecondsSinceEpoch,
+        ).toJson();
+        final key = buildImpactGroupEntityKey(
+          mapName: mapName,
+          layerName: layerName,
+          type: group.type,
+          name: group.name,
+          impactXRatio: group.impactXRatio,
+          impactYRatio: group.impactYRatio,
+        );
+        result[key] = LanSyncManifestItem(
+          key: key,
+          mapName: mapName,
+          digest: _digestJsonValue(_normalizePayloadForSyncDigest(payload)),
+          updatedAtMs: group.updatedAt.millisecondsSinceEpoch,
+          rawData: payload,
+        );
+      }
+    }
+    return result;
+  }
+
+  Future<LanSyncManifestBundle> buildLanSyncManifest({
+    required Set<String> mapKeys,
+  }) async {
+    final scopedMaps = await _resolveScopeMaps(mapKeys);
+    if (scopedMaps.isEmpty) {
+      return const LanSyncManifestBundle();
+    }
+    final grenades = await _loadScopedGrenades(scopedMaps);
+    final grenadeItems = await _buildGrenadeManifestItems(grenades);
+    final tagItems = await _buildTagManifestItems(scopedMaps);
+    final areaItems = await _buildAreaManifestItems(scopedMaps);
+    final favoriteFolderItems =
+        await _buildFavoriteFolderManifestItems(scopedMaps);
+    final impactGroupItems = await _buildImpactGroupManifestItems(scopedMaps);
+    return LanSyncManifestBundle(
+      grenades: grenadeItems,
+      tags: tagItems,
+      areas: areaItems,
+      favoriteFolders: favoriteFolderItems,
+      impactGroups: impactGroupItems,
     );
   }
 
@@ -1407,6 +1786,7 @@ class DataService {
         impactXRatio: group.impactXRatio,
         impactYRatio: group.impactYRatio,
         createdAt: group.createdAt.millisecondsSinceEpoch,
+        updatedAt: group.updatedAt.millisecondsSinceEpoch,
       );
       final semanticKey = _impactGroupSemanticKey(
         mapName: payload.mapName,
@@ -1464,26 +1844,65 @@ class DataService {
     Grenade? singleGrenade,
     GameMap? singleMap,
     List<Grenade>? explicitGrenades,
+    List<Map<String, dynamic>> explicitGrenadePayloads = const [],
+    List<Map<String, dynamic>> explicitTagPayloads = const [],
+    List<Map<String, dynamic>> explicitAreaPayloads = const [],
+    List<Map<String, dynamic>> explicitFavoriteFolderPayloads = const [],
+    List<Map<String, dynamic>> explicitImpactGroupPayloads = const [],
+    Set<String> explicitFilesToZip = const <String>{},
     List<PackageGrenadeTombstoneData> grenadeTombstones = const [],
     List<PackageEntityTombstoneData> entityTombstones = const [],
   }) async {
-    final grenades = await _resolveExportGrenades(
-      scopeType: scopeType,
-      singleGrenade: singleGrenade,
-      singleMap: singleMap,
-      explicitGrenades: explicitGrenades,
-    );
-    if (grenades.isEmpty &&
+    final hasExplicitPayloads = explicitGrenadePayloads.isNotEmpty ||
+        explicitTagPayloads.isNotEmpty ||
+        explicitAreaPayloads.isNotEmpty ||
+        explicitFavoriteFolderPayloads.isNotEmpty ||
+        explicitImpactGroupPayloads.isNotEmpty ||
+        grenadeTombstones.isNotEmpty ||
+        entityTombstones.isNotEmpty;
+    final List<Grenade> grenades = hasExplicitPayloads
+        ? const []
+        : await _resolveExportGrenades(
+            scopeType: scopeType,
+            singleGrenade: singleGrenade,
+            singleMap: singleMap,
+            explicitGrenades: explicitGrenades,
+          );
+    if (!hasExplicitPayloads &&
+        grenades.isEmpty &&
         grenadeTombstones.isEmpty &&
         entityTombstones.isEmpty) {
       throw StateError('没有可同步的道具');
     }
 
-    final syncBundle = await _buildLanSyncBundle(
-      grenades,
-      grenadeTombstones: grenadeTombstones,
-      entityTombstones: entityTombstones,
-    );
+    final syncBundle = hasExplicitPayloads
+        ? _LanSyncExportBundle(
+            grenades: explicitGrenadePayloads,
+            tags: explicitTagPayloads,
+            areas: explicitAreaPayloads,
+            favoriteFolders: explicitFavoriteFolderPayloads,
+            impactGroups: explicitImpactGroupPayloads,
+            grenadeTombstones: grenadeTombstones
+                .map((e) => e.toJson())
+                .toList(growable: false),
+            entityTombstones:
+                entityTombstones.map((e) => e.toJson()).toList(growable: false),
+            filesToZip: explicitFilesToZip,
+          )
+        : await _buildLanSyncBundle(
+            grenades,
+            grenadeTombstones: grenadeTombstones,
+            entityTombstones: entityTombstones,
+          );
+    if (syncBundle.grenades.isEmpty &&
+        syncBundle.tags.isEmpty &&
+        syncBundle.areas.isEmpty &&
+        syncBundle.favoriteFolders.isEmpty &&
+        syncBundle.impactGroups.isEmpty &&
+        grenadeTombstones.isEmpty &&
+        entityTombstones.isEmpty) {
+      throw StateError('当前范围没有可同步的增量变更');
+    }
     final tempDir = await getTemporaryDirectory();
     final exportDirPath = p.join(tempDir.path, "lan_sync_export_temp");
     final zipPath = p.join(tempDir.path, "lan_sync_data.cs2pkg");
@@ -1643,6 +2062,20 @@ class DataService {
     final canonical = _canonicalizeJson(value);
     final encoded = jsonEncode(canonical);
     return sha256.convert(utf8.encode(encoded)).toString();
+  }
+
+  Map<String, dynamic> _normalizePayloadForSyncDigest(
+    Map<String, dynamic> value, {
+    bool removeHasLocalEdits = false,
+  }) {
+    final normalized =
+        Map<String, dynamic>.from(_canonicalizeJson(value) as Map);
+    normalized.remove('createdAt');
+    normalized.remove('updatedAt');
+    if (removeHasLocalEdits) {
+      normalized.remove('hasLocalEdits');
+    }
+    return normalized;
   }
 
   Object? _canonicalizeJson(Object? value) {
@@ -1881,6 +2314,138 @@ class DataService {
         local.isSystem != shared.isSystem;
   }
 
+  bool _requiresManualConflictResolution({
+    required int sharedUpdatedAtMs,
+    required int localUpdatedAtMs,
+    required bool contentDifferent,
+  }) {
+    return sharedUpdatedAtMs == localUpdatedAtMs && contentDifferent;
+  }
+
+  bool _shouldApplyIncomingUpdate({
+    required int sharedUpdatedAtMs,
+    required int localUpdatedAtMs,
+    required bool contentDifferent,
+  }) {
+    if (sharedUpdatedAtMs > localUpdatedAtMs) return true;
+    if (sharedUpdatedAtMs < localUpdatedAtMs) return false;
+    return contentDifferent;
+  }
+
+  String _sha256BytesHex(List<int> bytes) {
+    return sha256.convert(bytes).toString();
+  }
+
+  Map<String, dynamic> _normalizeGrenadePayloadForSync(
+    Map<String, dynamic> value,
+  ) {
+    return _normalizePayloadForSyncDigest(
+      value,
+      removeHasLocalEdits: true,
+    );
+  }
+
+  Future<String> _sha256FileHex(String localPath) async {
+    final normalized = localPath.trim();
+    if (normalized.isEmpty) return '';
+    final file = File(normalized);
+    if (!await file.exists()) return '';
+    return _sha256BytesHex(await file.readAsBytes());
+  }
+
+  Future<String> _buildLocalGrenadeDigest(Grenade grenade) async {
+    final bundle = await _buildLanSyncBundle([grenade]);
+    if (bundle.grenades.isEmpty) return '';
+    final raw = bundle.grenades.first;
+    final normalized = _normalizeGrenadePayloadForSync(raw);
+    await grenade.steps.load();
+    final localSteps = grenade.steps.toList(growable: false);
+    final sharedSteps = ((normalized['steps'] as List?) ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList(growable: false);
+    for (var i = 0; i < sharedSteps.length; i++) {
+      final medias =
+          ((sharedSteps[i]['medias'] as List?) ?? const []).cast<dynamic>();
+      if (i >= localSteps.length) continue;
+      final localStep = localSteps[i];
+      await localStep.medias.load();
+      final localMedias = localStep.medias.toList(growable: false);
+      final normalizedMedias = <Map<String, dynamic>>[];
+      for (var j = 0; j < medias.length; j++) {
+        final mediaMap = Map<String, dynamic>.from(medias[j] as Map);
+        final mediaHash = j < localMedias.length
+            ? await _sha256FileHex(localMedias[j].localPath)
+            : '';
+        normalizedMedias.add({
+          'type': mediaMap['type'],
+          'contentHash': mediaHash,
+        });
+      }
+      sharedSteps[i]['medias'] = normalizedMedias;
+    }
+    normalized['steps'] = sharedSteps;
+    return _digestJsonValue(normalized);
+  }
+
+  String _buildSharedGrenadeDigest(
+    Map<String, dynamic> item,
+    Map<String, List<int>> memoryImages,
+  ) {
+    final normalized = _normalizeGrenadePayloadForSync(item);
+    final sharedSteps = ((normalized['steps'] as List?) ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList(growable: false);
+    for (var i = 0; i < sharedSteps.length; i++) {
+      final medias =
+          ((sharedSteps[i]['medias'] as List?) ?? const []).cast<dynamic>();
+      final normalizedMedias = <Map<String, dynamic>>[];
+      for (final media in medias) {
+        final mediaMap = Map<String, dynamic>.from(media as Map);
+        final fileName = (mediaMap['path'] as String? ?? '').trim();
+        final mediaHash =
+            fileName.isNotEmpty && memoryImages.containsKey(fileName)
+                ? _sha256BytesHex(memoryImages[fileName]!)
+                : '';
+        normalizedMedias.add({
+          'type': mediaMap['type'],
+          'contentHash': mediaHash,
+        });
+      }
+      sharedSteps[i]['medias'] = normalizedMedias;
+    }
+    normalized['steps'] = sharedSteps;
+    return _digestJsonValue(normalized);
+  }
+
+  Future<bool> _shouldImportGrenadeOverLocal(
+    Grenade local,
+    Map<String, dynamic> shared,
+    Map<String, List<int>> memoryImages,
+  ) async {
+    final sharedUpdatedAtMs = shared['updatedAt'] as int? ?? 0;
+    final localUpdatedAtMs = local.updatedAt.millisecondsSinceEpoch;
+    if (sharedUpdatedAtMs > localUpdatedAtMs) return true;
+    if (sharedUpdatedAtMs < localUpdatedAtMs) return false;
+    final localDigest = await _buildLocalGrenadeDigest(local);
+    final sharedDigest = _buildSharedGrenadeDigest(shared, memoryImages);
+    return localDigest != sharedDigest;
+  }
+
+  Set<String> _collectImportTagUuids(
+    PackagePreviewResult preview,
+    Set<String> selectedUniqueIds,
+  ) {
+    final selected = _collectSelectedTagUuids(preview, selectedUniqueIds);
+    final uuids = <String>{
+      ...selected,
+      ...preview.tagsByUuid.keys
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty),
+      ...preview.areas.map((e) => e.tagUuid.trim()).where((e) => e.isNotEmpty),
+    };
+    return uuids.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
+  }
+
   Future<_LocalTagContext> _buildLocalTagContext(Set<String> mapNames) async {
     final mapByName = <String, GameMap>{};
     for (final mapName in mapNames) {
@@ -1918,7 +2483,7 @@ class DataService {
       return const ImportConflictBundle(tagConflicts: [], localTagByUuid: {});
     }
 
-    final usedUuids = _collectSelectedTagUuids(preview, selectedUniqueIds);
+    final usedUuids = _collectImportTagUuids(preview, selectedUniqueIds);
     if (usedUuids.isEmpty) {
       return const ImportConflictBundle(tagConflicts: [], localTagByUuid: {});
     }
@@ -1939,7 +2504,12 @@ class DataService {
       if (shared == null) continue;
       final localByUuid = context.localByUuid[uuid];
       if (localByUuid != null) {
-        if (_isTagDifferent(localByUuid, shared)) {
+        final contentDifferent = _isTagDifferent(localByUuid, shared);
+        if (_requiresManualConflictResolution(
+          sharedUpdatedAtMs: shared.updatedAt,
+          localUpdatedAtMs: localByUuid.updatedAt.millisecondsSinceEpoch,
+          contentDifferent: contentDifferent,
+        )) {
           conflicts.add(TagConflictItem(
             type: TagConflictType.uuidMismatch,
             sharedTag: shared,
@@ -1955,11 +2525,19 @@ class DataService {
           _semanticTagKey(map.id, shared.dimension, shared.name);
       final semanticTag = context.localBySemantic[semanticKey];
       if (semanticTag != null) {
-        conflicts.add(TagConflictItem(
-          type: TagConflictType.semanticMatch,
-          sharedTag: shared,
-          localTag: semanticTag,
-        ));
+        final contentDifferent =
+            _isTagDifferent(semanticTag, shared) || semanticTag.tagUuid != uuid;
+        if (_requiresManualConflictResolution(
+          sharedUpdatedAtMs: shared.updatedAt,
+          localUpdatedAtMs: semanticTag.updatedAt.millisecondsSinceEpoch,
+          contentDifferent: contentDifferent,
+        )) {
+          conflicts.add(TagConflictItem(
+            type: TagConflictType.semanticMatch,
+            sharedTag: shared,
+            localTag: semanticTag,
+          ));
+        }
       }
     }
 
@@ -1980,7 +2558,7 @@ class DataService {
       return const [];
     }
 
-    final usedUuids = _collectSelectedTagUuids(preview, selectedUniqueIds)
+    final usedUuids = _collectImportTagUuids(preview, selectedUniqueIds)
       ..removeWhere((uuid) {
         final shared = preview.tagsByUuid[uuid];
         return shared == null || shared.dimension != TagDimension.area;
@@ -2046,6 +2624,21 @@ class DataService {
           (localArea) => _isSharedAreaEquivalent(localArea, area),
         );
         if (hasEquivalent) continue;
+
+        sameLayerAreas.sort((a, b) {
+          if (a.updatedAt.isAfter(b.updatedAt)) return -1;
+          if (a.updatedAt.isBefore(b.updatedAt)) return 1;
+          return b.id.compareTo(a.id);
+        });
+        final target = sameLayerAreas.first;
+        final contentDifferent = !_isSharedAreaEquivalent(target, area);
+        if (!_requiresManualConflictResolution(
+          sharedUpdatedAtMs: area.updatedAt,
+          localUpdatedAtMs: target.updatedAt.millisecondsSinceEpoch,
+          contentDifferent: contentDifferent,
+        )) {
+          continue;
+        }
 
         final key = '$tagUuid|${sharedTag.name}|${sharedTag.mapName}';
         groupLayers.putIfAbsent(key, () => <String>{}).add(area.layerName);
@@ -2187,9 +2780,13 @@ class DataService {
     Map<String, ImportAreaConflictResolution> areaResolutions = const {},
   }) async {
     final hasGrenadeSelection = selectedUniqueIds.isNotEmpty;
+    final hasMetadataChanges = preview.tagsByUuid.isNotEmpty ||
+        preview.areas.isNotEmpty ||
+        preview.favoriteFolders.isNotEmpty ||
+        preview.impactGroups.isNotEmpty;
     final hasTombstones = preview.grenadeTombstones.isNotEmpty ||
         preview.entityTombstones.isNotEmpty;
-    if (!hasGrenadeSelection && !hasTombstones) {
+    if (!hasGrenadeSelection && !hasMetadataChanges && !hasTombstones) {
       return "未选择任何道具";
     }
 
@@ -2200,9 +2797,7 @@ class DataService {
     final tombstoneResult = await _applyGrenadeTombstones(preview);
     final entityTombstoneResult = await _applyEntityTombstones(preview);
 
-    final selectedTagUuids = hasGrenadeSelection
-        ? _collectSelectedTagUuids(preview, selectedUniqueIds)
-        : <String>{};
+    final selectedTagUuids = _collectImportTagUuids(preview, selectedUniqueIds);
     final tagIdByUuid = await _upsertTagsForImport(
       preview,
       selectedTagUuids,
@@ -2216,11 +2811,9 @@ class DataService {
     );
     final favoriteFolderIdByRef = await _upsertFavoriteFoldersForImport(
       preview,
-      selectedUniqueIds,
     );
     final impactGroupIdByRef = await _upsertImpactGroupsForImport(
       preview,
-      selectedUniqueIds,
     );
 
     int newCount = 0;
@@ -2229,88 +2822,92 @@ class DataService {
     final importedGrenades = <Grenade>[];
 
     if (hasGrenadeSelection) {
-      await isar.writeTxn(() async {
-        for (final mapGrenades in preview.grenadesByMap.values) {
-          for (final previewItem in mapGrenades) {
-            if (!selectedUniqueIds.contains(previewItem.uniqueId)) continue;
+      for (final mapGrenades in preview.grenadesByMap.values) {
+        for (final previewItem in mapGrenades) {
+          if (!selectedUniqueIds.contains(previewItem.uniqueId)) continue;
 
-            final item = previewItem.rawData;
-            final mapName = item['mapName'];
-            final layerName = item['layerName'];
+          final item = previewItem.rawData;
+          final mapName = item['mapName'];
+          final layerName = item['layerName'];
 
-            final map =
-                await isar.gameMaps.filter().nameEqualTo(mapName).findFirst();
-            if (map == null) continue;
+          final map =
+              await isar.gameMaps.filter().nameEqualTo(mapName).findFirst();
+          if (map == null) continue;
 
-            await map.layers.load();
-            MapLayer? layer;
-            for (final l in map.layers) {
-              if (l.name == layerName) {
-                layer = l;
-                break;
-              }
+          await map.layers.load();
+          MapLayer? layer;
+          for (final l in map.layers) {
+            if (l.name == layerName) {
+              layer = l;
+              break;
             }
-            layer ??= map.layers.isNotEmpty ? map.layers.first : null;
-            if (layer == null) continue;
+          }
+          layer ??= map.layers.isNotEmpty ? map.layers.first : null;
+          if (layer == null) continue;
 
-            final importedUniqueId = item['uniqueId'] as String?;
-            final title = item['title'] as String;
-            final xRatio = (item['x'] as num).toDouble();
-            final yRatio = (item['y'] as num).toDouble();
-            final importedUpdatedAt = item['updatedAt'] != null
-                ? DateTime.fromMillisecondsSinceEpoch(item['updatedAt'])
-                : DateTime.now();
-            final tagUuids = _readTagUuids(item);
+          final importedUniqueId = item['uniqueId'] as String?;
+          final title = item['title'] as String;
+          final xRatio = (item['x'] as num).toDouble();
+          final yRatio = (item['y'] as num).toDouble();
+          final tagUuids = _readTagUuids(item);
 
-            Grenade? existing;
-            if (importedUniqueId != null && importedUniqueId.isNotEmpty) {
-              final allGrenades = await isar.grenades.where().findAll();
-              existing = allGrenades
-                  .where((g) => g.uniqueId == importedUniqueId)
-                  .firstOrNull;
-            }
-            if (existing == null && importedUniqueId == null) {
-              await layer.grenades.load();
-              existing = layer.grenades
-                  .where((g) =>
-                      g.title == title &&
-                      (g.xRatio - xRatio).abs() < 0.01 &&
-                      (g.yRatio - yRatio).abs() < 0.01)
-                  .firstOrNull;
-            }
+          Grenade? existing;
+          if (importedUniqueId != null && importedUniqueId.isNotEmpty) {
+            final allGrenades = await isar.grenades.where().findAll();
+            existing = allGrenades
+                .where((g) => g.uniqueId == importedUniqueId)
+                .firstOrNull;
+          }
+          if (existing == null && importedUniqueId == null) {
+            await layer.grenades.load();
+            existing = layer.grenades
+                .where((g) =>
+                    g.title == title &&
+                    (g.xRatio - xRatio).abs() < 0.01 &&
+                    (g.yRatio - yRatio).abs() < 0.01)
+                .firstOrNull;
+          }
 
-            if (existing != null) {
-              if (importedUpdatedAt.isAfter(existing.updatedAt)) {
-                await _updateExistingGrenade(
-                    existing, item, memoryImages, dataPath);
-                await _replaceGrenadeTags(existing.id, tagUuids, tagIdByUuid);
-                await _applyLanSyncRefsToGrenade(
-                  existing,
-                  item,
-                  favoriteFolderIdByRef: favoriteFolderIdByRef,
-                  impactGroupIdByRef: impactGroupIdByRef,
-                );
-                importedGrenades.add(existing);
-                updatedCount++;
-              } else {
-                skippedCount++;
-              }
-            } else {
-              final newGrenade = await _createNewGrenade(
-                  item, memoryImages, dataPath, layer, importedUniqueId);
-              await _replaceGrenadeTags(newGrenade.id, tagUuids, tagIdByUuid);
+          if (existing != null) {
+            if (await _shouldImportGrenadeOverLocal(
+              existing,
+              item,
+              memoryImages,
+            )) {
+              await _updateExistingGrenade(
+                  existing, item, memoryImages, dataPath);
+              await _replaceGrenadeTags(existing.id, tagUuids, tagIdByUuid);
               await _applyLanSyncRefsToGrenade(
-                newGrenade,
+                existing,
                 item,
                 favoriteFolderIdByRef: favoriteFolderIdByRef,
                 impactGroupIdByRef: impactGroupIdByRef,
               );
-              importedGrenades.add(newGrenade);
-              newCount++;
+              importedGrenades.add(existing);
+              updatedCount++;
+            } else {
+              skippedCount++;
             }
+          } else {
+            final newGrenade = await _createNewGrenade(
+              item,
+              memoryImages,
+              dataPath,
+              layer,
+              importedUniqueId,
+            );
+            await _replaceGrenadeTags(newGrenade.id, tagUuids, tagIdByUuid);
+            await _applyLanSyncRefsToGrenade(
+              newGrenade,
+              item,
+              favoriteFolderIdByRef: favoriteFolderIdByRef,
+              impactGroupIdByRef: impactGroupIdByRef,
+            );
+            importedGrenades.add(newGrenade);
+            newCount++;
           }
         }
-      });
+      }
       if (importedGrenades.isNotEmpty) {
         final importedIds = importedGrenades
             .map((e) => e.id)
@@ -2363,6 +2960,20 @@ class DataService {
         final count = entityTombstoneResult.skippedByType[type] ?? 0;
         if (count <= 0) continue;
         messages.add('忽略 $count 条较新的${_entityTypeLabel(type)}删除');
+      }
+    }
+    if (!hasGrenadeSelection) {
+      if (selectedTagUuids.isNotEmpty) {
+        messages.add('标签同步 ${selectedTagUuids.length} 条');
+      }
+      if (preview.areas.isNotEmpty) {
+        messages.add('区域同步 ${preview.areas.length} 条');
+      }
+      if (preview.favoriteFolders.isNotEmpty) {
+        messages.add('收藏夹同步 ${preview.favoriteFolders.length} 条');
+      }
+      if (preview.impactGroups.isNotEmpty) {
+        messages.add('爆点分组同步 ${preview.impactGroups.length} 条');
       }
     }
 
@@ -2466,6 +3077,12 @@ class DataService {
           final tag =
               await isar.tags.filter().tagUuidEqualTo(tagUuid).findFirst();
           if (tag == null) continue;
+          final deletedAt =
+              DateTime.fromMillisecondsSinceEpoch(tombstone.deletedAt);
+          if (tag.updatedAt.isAfter(deletedAt)) {
+            markSkipped(tombstone.entityType);
+            continue;
+          }
           final deleteRelatedAreas =
               tombstone.payload['deleteRelatedAreas'] == true;
           await isar.writeTxn(() async {
@@ -2500,6 +3117,12 @@ class DataService {
               .layerIdEqualTo(layer.id)
               .findAll();
           if (matchedAreas.isEmpty) continue;
+          final deletedAt =
+              DateTime.fromMillisecondsSinceEpoch(tombstone.deletedAt);
+          if (matchedAreas.any((item) => item.updatedAt.isAfter(deletedAt))) {
+            markSkipped(tombstone.entityType);
+            continue;
+          }
           await isar.writeTxn(() async {
             await isar.mapAreas
                 .deleteAll(matchedAreas.map((item) => item.id).toList());
@@ -2583,6 +3206,12 @@ class DataService {
             return currentKey == targetKey;
           }).firstOrNull;
           if (group == null) continue;
+          final deletedAt =
+              DateTime.fromMillisecondsSinceEpoch(tombstone.deletedAt);
+          if (group.updatedAt.isAfter(deletedAt)) {
+            markSkipped(tombstone.entityType);
+            continue;
+          }
           await deleteImpactGroup(group, recordSyncTombstone: false);
           markDeleted(tombstone.entityType);
           break;
@@ -2652,25 +3281,41 @@ class DataService {
 
   Future<Map<String, int>> _upsertFavoriteFoldersForImport(
     PackagePreviewResult preview,
-    Set<String> selectedUniqueIds,
   ) async {
-    if (preview.schemaVersion < 3 || preview.favoriteFolders.isEmpty) {
+    if (preview.schemaVersion < 3) {
       return const {};
     }
 
     final referencedKeys = <String>{};
+    final referencedRefsByKey = <String, _PackageFavoriteFolderRef>{};
+    final referencedMapNames = <String>{};
+    for (final folder in preview.favoriteFolders) {
+      final nameKey = folder.nameKey.trim().isEmpty
+          ? _normalizeFolderNameKey(folder.name)
+          : _normalizeFolderNameKey(folder.nameKey);
+      if (folder.mapName.trim().isEmpty || nameKey.isEmpty) continue;
+      referencedMapNames.add(folder.mapName.trim());
+      final key = _favoriteFolderRefKey(
+        mapName: folder.mapName,
+        nameKey: nameKey,
+      );
+      referencedKeys.add(key);
+      referencedRefsByKey[key] = _PackageFavoriteFolderRef(
+        mapName: folder.mapName.trim(),
+        nameKey: nameKey,
+      );
+    }
     for (final mapGrenades in preview.grenadesByMap.values) {
       for (final previewItem in mapGrenades) {
-        if (!selectedUniqueIds.contains(previewItem.uniqueId)) continue;
-        final item = previewItem.rawData;
-        final isFavorite = item['isFavorite'] == true;
-        if (!isFavorite) continue;
-        final ref = _readFavoriteFolderRef(item);
+        final ref = _readFavoriteFolderRef(previewItem.rawData);
         if (ref == null) continue;
-        referencedKeys.add(_favoriteFolderRefKey(
+        referencedMapNames.add(ref.mapName);
+        final key = _favoriteFolderRefKey(
           mapName: ref.mapName,
           nameKey: ref.nameKey,
-        ));
+        );
+        referencedKeys.add(key);
+        referencedRefsByKey[key] = ref;
       }
     }
     if (referencedKeys.isEmpty) return const {};
@@ -2688,9 +3333,10 @@ class DataService {
         sharedByKey[key] = folder;
       }
     }
-    if (sharedByKey.isEmpty) return const {};
-
-    final mapNames = sharedByKey.values.map((e) => e.mapName).toSet();
+    final mapNames = <String>{
+      ...sharedByKey.values.map((e) => e.mapName),
+      ...referencedMapNames,
+    };
     final mapByName = <String, GameMap>{};
     for (final mapName in mapNames) {
       final map = await isar.gameMaps.filter().nameEqualTo(mapName).findFirst();
@@ -2742,7 +3388,14 @@ class DataService {
 
       final sharedUpdated =
           DateTime.fromMillisecondsSinceEpoch(shared.updatedAt);
-      if (!sharedUpdated.isBefore(local.updatedAt)) {
+      if (_shouldApplyIncomingUpdate(
+        sharedUpdatedAtMs: shared.updatedAt,
+        localUpdatedAtMs: local.updatedAt.millisecondsSinceEpoch,
+        contentDifferent:
+            local.name != (shared.name.isEmpty ? local.name : shared.name) ||
+                local.nameKey != normalizedNameKey ||
+                local.sortOrder != shared.sortOrder,
+      )) {
         final nextName = shared.name.isEmpty ? local.name : shared.name;
         final changed = local.name != nextName ||
             local.nameKey != normalizedNameKey ||
@@ -2769,6 +3422,16 @@ class DataService {
       });
     }
 
+    for (final compositeKey in referencedKeys) {
+      final ref = referencedRefsByKey[compositeKey];
+      if (ref == null) continue;
+      final map = mapByName[ref.mapName];
+      if (map == null) continue;
+      final local = foldersByMapIdAndNameKey['${map.id}|${ref.nameKey}'];
+      if (local != null) {
+        result[compositeKey] = local.id;
+      }
+    }
     for (final entry in sharedByKey.entries) {
       final shared = entry.value;
       final map = mapByName[shared.mapName];
@@ -2787,16 +3450,24 @@ class DataService {
 
   Future<Map<String, int>> _upsertImpactGroupsForImport(
     PackagePreviewResult preview,
-    Set<String> selectedUniqueIds,
   ) async {
-    if (preview.schemaVersion < 3 || preview.impactGroups.isEmpty) {
+    if (preview.schemaVersion < 3) {
       return const {};
     }
 
     final referencedKeys = <String>{};
+    for (final group in preview.impactGroups) {
+      referencedKeys.add(_impactGroupSemanticKey(
+        mapName: group.mapName,
+        layerName: group.layerName,
+        type: group.type,
+        name: group.name,
+        impactXRatio: group.impactXRatio,
+        impactYRatio: group.impactYRatio,
+      ));
+    }
     for (final mapGrenades in preview.grenadesByMap.values) {
       for (final previewItem in mapGrenades) {
-        if (!selectedUniqueIds.contains(previewItem.uniqueId)) continue;
         final ref = _readImpactGroupRef(previewItem.rawData);
         if (ref == null) continue;
         referencedKeys.add(_impactGroupSemanticKey(
@@ -2823,13 +3494,14 @@ class DataService {
       );
       if (!referencedKeys.contains(key)) continue;
       final previous = sharedByKey[key];
-      if (previous == null || group.createdAt >= previous.createdAt) {
+      if (previous == null || group.updatedAt >= previous.updatedAt) {
         sharedByKey[key] = group;
       }
     }
-    if (sharedByKey.isEmpty) return const {};
-
-    final mapNames = sharedByKey.values.map((e) => e.mapName).toSet();
+    final mapNames = <String>{
+      ...sharedByKey.values.map((e) => e.mapName),
+      ...preview.grenadesByMap.keys,
+    };
     final mapByName = <String, GameMap>{};
     final layerByMapAndName = <String, MapLayer>{};
     for (final mapName in mapNames) {
@@ -2882,6 +3554,7 @@ class DataService {
         impactYRatio: shared.impactYRatio,
         layerId: layer.id,
         created: DateTime.fromMillisecondsSinceEpoch(shared.createdAt),
+        updated: DateTime.fromMillisecondsSinceEpoch(shared.updatedAt),
       );
       toCreate.add(created);
       localBySemanticKey[entry.key] = created;
@@ -2958,7 +3631,9 @@ class DataService {
     }
 
     if (changed) {
-      await isar.grenades.put(grenade);
+      await isar.writeTxn(() async {
+        await isar.grenades.put(grenade);
+      });
     }
   }
 
@@ -2975,11 +3650,13 @@ class DataService {
       }
     }
 
-    await isar.grenadeTags.filter().grenadeIdEqualTo(grenadeId).deleteAll();
-    for (final tagId in targetTagIds) {
-      await isar.grenadeTags
-          .put(GrenadeTag(grenadeId: grenadeId, tagId: tagId));
-    }
+    await isar.writeTxn(() async {
+      await isar.grenadeTags.filter().grenadeIdEqualTo(grenadeId).deleteAll();
+      for (final tagId in targetTagIds) {
+        await isar.grenadeTags
+            .put(GrenadeTag(grenadeId: grenadeId, tagId: tagId));
+      }
+    });
   }
 
   Future<Map<String, int>> _upsertTagsForImport(
@@ -2987,7 +3664,17 @@ class DataService {
     Set<String> selectedTagUuids, {
     required Map<String, ImportTagConflictResolution> tagResolutions,
   }) async {
-    if (selectedTagUuids.isEmpty || preview.tagsByUuid.isEmpty) return const {};
+    if (selectedTagUuids.isEmpty) return const {};
+    if (preview.tagsByUuid.isEmpty) {
+      final localTagIdByUuid = <String, int>{};
+      final allTags = await isar.tags.where().findAll();
+      for (final tag in allTags) {
+        final uuid = tag.tagUuid.trim();
+        if (uuid.isEmpty || !selectedTagUuids.contains(uuid)) continue;
+        localTagIdByUuid[uuid] = tag.id;
+      }
+      return localTagIdByUuid;
+    }
 
     final tagMapNames = <String>{};
     for (final uuid in selectedTagUuids) {
@@ -3005,21 +3692,33 @@ class DataService {
     for (final tagUuid in selectedTagUuids) {
       final shared = preview.tagsByUuid[tagUuid];
       if (shared == null || shared.mapName.isEmpty) continue;
+      final sharedUpdatedAt = shared.updatedAt;
 
       final map = context.mapByName[shared.mapName];
       if (map == null) continue;
 
       final localByUuid = context.localByUuid[tagUuid];
       if (localByUuid != null) {
-        final resolution =
-            tagResolutions[tagUuid] ?? ImportTagConflictResolution.local;
-        if (resolution == ImportTagConflictResolution.shared &&
-            _isTagDifferent(localByUuid, shared)) {
+        final resolution = tagResolutions[tagUuid];
+        final shouldApplyShared =
+            resolution == ImportTagConflictResolution.shared ||
+                (resolution == null &&
+                    sharedUpdatedAt >
+                        localByUuid.updatedAt.millisecondsSinceEpoch &&
+                    _isTagDifferent(localByUuid, shared));
+        if (shouldApplyShared &&
+            _shouldApplyIncomingUpdate(
+              sharedUpdatedAtMs: sharedUpdatedAt,
+              localUpdatedAtMs: localByUuid.updatedAt.millisecondsSinceEpoch,
+              contentDifferent: _isTagDifferent(localByUuid, shared),
+            )) {
           localByUuid.name = shared.name;
           localByUuid.dimension = shared.dimension;
           localByUuid.colorValue = shared.colorValue;
           localByUuid.groupName = shared.groupName;
           localByUuid.isSystem = shared.isSystem;
+          localByUuid.updatedAt =
+              DateTime.fromMillisecondsSinceEpoch(sharedUpdatedAt);
           toPut.add(localByUuid);
         }
         tagIdByUuid[tagUuid] = localByUuid.id;
@@ -3030,15 +3729,29 @@ class DataService {
           _semanticTagKey(map.id, shared.dimension, shared.name);
       final semanticTag = context.localBySemantic[semanticKey];
       if (semanticTag != null) {
-        final resolution =
-            tagResolutions[tagUuid] ?? ImportTagConflictResolution.local;
-        if (resolution == ImportTagConflictResolution.shared) {
+        final resolution = tagResolutions[tagUuid];
+        final contentDifferent = _isTagDifferent(semanticTag, shared) ||
+            semanticTag.tagUuid != tagUuid;
+        final shouldApplyShared =
+            resolution == ImportTagConflictResolution.shared ||
+                (resolution == null &&
+                    sharedUpdatedAt >
+                        semanticTag.updatedAt.millisecondsSinceEpoch &&
+                    contentDifferent);
+        if (shouldApplyShared &&
+            _shouldApplyIncomingUpdate(
+              sharedUpdatedAtMs: sharedUpdatedAt,
+              localUpdatedAtMs: semanticTag.updatedAt.millisecondsSinceEpoch,
+              contentDifferent: contentDifferent,
+            )) {
           semanticTag.tagUuid = tagUuid;
           semanticTag.name = shared.name;
           semanticTag.dimension = shared.dimension;
           semanticTag.colorValue = shared.colorValue;
           semanticTag.groupName = shared.groupName;
           semanticTag.isSystem = shared.isSystem;
+          semanticTag.updatedAt =
+              DateTime.fromMillisecondsSinceEpoch(sharedUpdatedAt);
           toPut.add(semanticTag);
           context.localByUuid[tagUuid] = semanticTag;
         }
@@ -3055,6 +3768,7 @@ class DataService {
         isSystem: shared.isSystem,
         sortOrder: 0,
         mapId: map.id,
+        updated: DateTime.fromMillisecondsSinceEpoch(sharedUpdatedAt),
       );
       toCreate.add(newTag);
     }
@@ -3118,7 +3832,7 @@ class DataService {
       if (!selectedTagUuids.contains(area.tagUuid)) continue;
       final key = '${area.tagUuid}|${area.mapName}|${area.layerName}';
       final previous = dedupedShared[key];
-      if (previous == null || area.createdAt >= previous.createdAt) {
+      if (previous == null || area.updatedAt >= previous.updatedAt) {
         dedupedShared[key] = area;
       }
     }
@@ -3156,25 +3870,38 @@ class DataService {
           layerId: layerId,
           tagId: tagId,
           createdAt: DateTime.fromMillisecondsSinceEpoch(shared.createdAt),
+          updated: DateTime.fromMillisecondsSinceEpoch(shared.updatedAt),
         ));
         continue;
       }
 
-      final resolution = areaResolutions[shared.tagUuid] ??
-          ImportAreaConflictResolution.keepLocal;
-      if (resolution == ImportAreaConflictResolution.keepLocal) {
-        continue;
-      }
-
       sameLayer.sort((a, b) {
-        if (a.createdAt.isAfter(b.createdAt)) return -1;
-        if (a.createdAt.isBefore(b.createdAt)) return 1;
+        if (a.updatedAt.isAfter(b.updatedAt)) return -1;
+        if (a.updatedAt.isBefore(b.updatedAt)) return 1;
         return b.id.compareTo(a.id);
       });
       final target = sameLayer.first;
+      final resolution = areaResolutions[shared.tagUuid];
+      final contentDifferent = !_isSharedAreaEquivalent(target, shared);
+      final shouldApplyShared =
+          resolution == ImportAreaConflictResolution.overwriteShared ||
+              (resolution == null &&
+                  shared.updatedAt > target.updatedAt.millisecondsSinceEpoch &&
+                  contentDifferent);
+      if (!shouldApplyShared) {
+        continue;
+      }
+      if (!_shouldApplyIncomingUpdate(
+        sharedUpdatedAtMs: shared.updatedAt,
+        localUpdatedAtMs: target.updatedAt.millisecondsSinceEpoch,
+        contentDifferent: contentDifferent,
+      )) {
+        continue;
+      }
       target.name = shared.name;
       target.colorValue = shared.colorValue;
       target.strokes = shared.strokes;
+      target.updatedAt = DateTime.fromMillisecondsSinceEpoch(shared.updatedAt);
       putAreas.add(target);
       for (final duplicate in sameLayer.skip(1)) {
         deleteAreaIds.add(duplicate.id);
@@ -3215,24 +3942,30 @@ class DataService {
     existing.impactAreaStrokes = item['impactAreaStrokes'] as String?;
     existing.updatedAt = DateTime.fromMillisecondsSinceEpoch(item['updatedAt']);
     existing.isNewImport = true;
-    await isar.grenades.put(existing);
+    await isar.writeTxn(() async {
+      await isar.grenades.put(existing);
+    });
 
     // 删旧数据
     await existing.steps.load();
     final oldMediaPaths = <String>{};
-    for (final step in existing.steps) {
-      await step.medias.load();
-      for (final media in step.medias) {
-        final path = media.localPath.trim();
-        if (path.isNotEmpty) {
-          oldMediaPaths.add(path);
+    await isar.writeTxn(() async {
+      for (final step in existing.steps) {
+        await step.medias.load();
+        for (final media in step.medias) {
+          final path = media.localPath.trim();
+          if (path.isNotEmpty) {
+            oldMediaPaths.add(path);
+          }
+          await isar.stepMedias.delete(media.id);
         }
-        await isar.stepMedias.delete(media.id);
+        await isar.grenadeSteps.delete(step.id);
       }
-      await isar.grenadeSteps.delete(step.id);
-    }
+    });
     existing.steps.clear();
-    await existing.steps.save();
+    await isar.writeTxn(() async {
+      await existing.steps.save();
+    });
     for (final path in oldMediaPaths) {
       await deleteMediaFileIfUnused(path);
     }
@@ -3245,14 +3978,8 @@ class DataService {
         description: sItem['description'],
         stepIndex: sItem['index'],
       );
-      await isar.grenadeSteps.put(step);
-
-      step.grenade.value = existing;
-      await step.grenade.save();
-
-      existing.steps.add(step);
-
       final mediasList = sItem['medias'] as List;
+      final mediasToCreate = <StepMedia>[];
       for (var mItem in mediasList) {
         final fileName = mItem['path'];
         if (memoryImages.containsKey(fileName)) {
@@ -3260,18 +3987,27 @@ class DataService {
               dataPath, "${DateTime.now().millisecondsSinceEpoch}_$fileName");
           await File(savePath).writeAsBytes(memoryImages[fileName]!);
 
-          final media = StepMedia(localPath: savePath, type: mItem['type']);
-          await isar.stepMedias.put(media);
-
-          media.step.value = step;
-          await media.step.save();
-
-          step.medias.add(media);
+          mediasToCreate
+              .add(StepMedia(localPath: savePath, type: mItem['type']));
         }
       }
-      await step.medias.save();
+      await isar.writeTxn(() async {
+        await isar.grenadeSteps.put(step);
+        step.grenade.value = existing;
+        await step.grenade.save();
+        existing.steps.add(step);
+        for (final media in mediasToCreate) {
+          await isar.stepMedias.put(media);
+          media.step.value = step;
+          await media.step.save();
+          step.medias.add(media);
+        }
+        await step.medias.save();
+      });
     }
-    await existing.steps.save();
+    await isar.writeTxn(() async {
+      await existing.steps.save();
+    });
   }
 
   /// 创建新道具
@@ -3305,11 +4041,15 @@ class DataService {
     g.impactXRatio = (item['impactX'] as num?)?.toDouble();
     g.impactYRatio = (item['impactY'] as num?)?.toDouble();
     g.impactAreaStrokes = item['impactAreaStrokes'] as String?;
-    await isar.grenades.put(g);
+    await isar.writeTxn(() async {
+      await isar.grenades.put(g);
+    });
 
     // 设置关联
     g.layer.value = layer;
-    await g.layer.save();
+    await isar.writeTxn(() async {
+      await g.layer.save();
+    });
 
     // 创建 Steps & Medias
     final stepsList = item['steps'] as List;
@@ -3319,14 +4059,8 @@ class DataService {
         description: sItem['description'],
         stepIndex: sItem['index'],
       );
-      await isar.grenadeSteps.put(step);
-
-      step.grenade.value = g;
-      await step.grenade.save();
-
-      g.steps.add(step);
-
       final mediasList = sItem['medias'] as List;
+      final mediasToCreate = <StepMedia>[];
       for (var mItem in mediasList) {
         final fileName = mItem['path'];
         if (memoryImages.containsKey(fileName)) {
@@ -3334,18 +4068,27 @@ class DataService {
               dataPath, "${DateTime.now().millisecondsSinceEpoch}_$fileName");
           await File(savePath).writeAsBytes(memoryImages[fileName]!);
 
-          final media = StepMedia(localPath: savePath, type: mItem['type']);
-          await isar.stepMedias.put(media);
-
-          media.step.value = step;
-          await media.step.save();
-
-          step.medias.add(media);
+          mediasToCreate
+              .add(StepMedia(localPath: savePath, type: mItem['type']));
         }
       }
-      await step.medias.save();
+      await isar.writeTxn(() async {
+        await isar.grenadeSteps.put(step);
+        step.grenade.value = g;
+        await step.grenade.save();
+        g.steps.add(step);
+        for (final media in mediasToCreate) {
+          await isar.stepMedias.put(media);
+          media.step.value = step;
+          await media.step.save();
+          step.medias.add(media);
+        }
+        await step.medias.save();
+      });
     }
-    await g.steps.save();
+    await isar.writeTxn(() async {
+      await g.steps.save();
+    });
 
     return g; // 返回创建的道具
   }
