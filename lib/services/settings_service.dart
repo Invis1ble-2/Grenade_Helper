@@ -45,6 +45,7 @@ class HotkeyConfig {
     if (key == LogicalKeyboardKey.pageUp) return 'PageUp';
     if (key == LogicalKeyboardKey.pageDown) return 'PageDown';
     if (key == LogicalKeyboardKey.escape) return 'Esc';
+    if (key == LogicalKeyboardKey.enter) return 'Enter';
     if (key == LogicalKeyboardKey.bracketLeft) return '[';
     if (key == LogicalKeyboardKey.bracketRight) return ']';
     // 数字键
@@ -131,6 +132,7 @@ enum HotkeyAction {
   toggleWallbang, // 切换穿点过滤
   hideOverlay, // 隐藏悬浮窗
   togglePlayPause, // 播放/暂停视频
+  toggleMediaFullscreenPreview, // 切换媒体全屏预览
   increaseNavSpeed, // 增加导航速度
   decreaseNavSpeed, // 减少导航速度
   scrollUp, // 向上滚动
@@ -488,6 +490,10 @@ class SettingsService {
       HotkeyAction.hideOverlay: HotkeyConfig(key: LogicalKeyboardKey.escape),
       HotkeyAction.togglePlayPause: HotkeyConfig(
         key: LogicalKeyboardKey.keyP,
+        modifiers: {LogicalKeyboardKey.alt},
+      ),
+      HotkeyAction.toggleMediaFullscreenPreview: HotkeyConfig(
+        key: LogicalKeyboardKey.enter,
         modifiers: {LogicalKeyboardKey.alt},
       ),
       HotkeyAction.increaseNavSpeed: HotkeyConfig(

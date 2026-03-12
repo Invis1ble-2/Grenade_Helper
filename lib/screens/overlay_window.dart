@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:window_manager/window_manager.dart';
 import '../models.dart';
 import '../services/settings_service.dart';
 import '../services/overlay_state_service.dart';
@@ -12,8 +15,8 @@ import 'grenade_detail_screen.dart'
 class OverlayWindow extends StatefulWidget {
   final SettingsService settingsService;
   final OverlayStateService overlayState;
-  final VoidCallback onClose;
-  final VoidCallback onMinimize;
+  final AsyncCallback onClose;
+  final AsyncCallback onMinimize;
   final VoidCallback onStartDrag;
 
   const OverlayWindow({
@@ -34,6 +37,9 @@ class OverlayWindowState extends State<OverlayWindow> {
   late Map<HotkeyAction, HotkeyConfig> _hotkeys;
   final GlobalKey<VideoPlayerWidgetState> _videoPlayerKey = GlobalKey();
   final ScrollController _scrollController = ScrollController();
+  bool _isMediaFullscreenPreview = false;
+  bool _isTogglingMediaFullscreenPreview = false;
+  Rect? _normalWindowBoundsBeforePreview;
 
   @override
   void initState() {
@@ -86,6 +92,19 @@ class OverlayWindowState extends State<OverlayWindow> {
     return label;
   }
 
+  Offset? get persistedWindowPosition {
+    if (_isMediaFullscreenPreview && _normalWindowBoundsBeforePreview != null) {
+      return _normalWindowBoundsBeforePreview!.topLeft;
+    }
+    return null;
+  }
+
+  bool get blocksDirectionalNavigation => _isMediaFullscreenPreview;
+
+  Future<void> pauseActiveVideoPlayback() async {
+    await _videoPlayerKey.currentState?.pauseIfPlaying();
+  }
+
   @override
   Widget build(BuildContext context) {
     final overlayOpacity = widget.overlayState.overlayOpacity;
@@ -93,34 +112,35 @@ class OverlayWindowState extends State<OverlayWindow> {
       focusNode: _focusNode,
       autofocus: true,
       onKeyEvent: _handleKeyEvent,
-      child: Opacity(
-        opacity: overlayOpacity,
-        child: Material(
-          color: const Color(0xFF1B1E23),
-          child: Container(
-            // 填满窗口
-            decoration: BoxDecoration(
-              color: const Color(0xFF1B1E23),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                  color: Colors.orange.withValues(alpha: 0.5), width: 2),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.5),
-                  blurRadius: 30,
-                  spreadRadius: 5,
+      child: Material(
+        color: Colors.transparent,
+        child: _isMediaFullscreenPreview
+            ? _buildFullscreenPreview()
+            : Opacity(
+                opacity: overlayOpacity,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1B1E23),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                        color: Colors.orange.withValues(alpha: 0.5), width: 2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.5),
+                        blurRadius: 30,
+                        spreadRadius: 5,
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      _buildTitleBar(),
+                      Expanded(child: _buildContent()),
+                      _buildFooter(),
+                    ],
+                  ),
                 ),
-              ],
-            ),
-            child: Column(
-              children: [
-                _buildTitleBar(),
-                Expanded(child: _buildContent()),
-                _buildFooter(),
-              ],
-            ),
-          ),
-        ),
+              ),
       ),
     );
   }
@@ -185,7 +205,7 @@ class OverlayWindowState extends State<OverlayWindow> {
             // 最小化
             _buildWindowButton(
               icon: Icons.remove,
-              onTap: widget.onClose,
+              onTap: () => unawaited(widget.onClose()),
               color: Colors.grey,
             ),
           ],
@@ -436,14 +456,8 @@ class OverlayWindowState extends State<OverlayWindow> {
   }
 
   Widget _buildMediaArea() {
-    final state = widget.overlayState;
-    final grenade = state.currentGrenade;
-    if (grenade == null) return const SizedBox.shrink();
-
-    final steps = grenade.steps.toList();
-    steps.sort((a, b) => a.stepIndex.compareTo(b.stepIndex));
-
-    if (steps.isEmpty) {
+    final medias = _getCurrentStepMedias();
+    if (medias == null) {
       return Container(
         height: 200,
         decoration: BoxDecoration(
@@ -455,13 +469,6 @@ class OverlayWindowState extends State<OverlayWindow> {
         ),
       );
     }
-
-    final currentStep = state.currentStepIndex < steps.length
-        ? steps[state.currentStepIndex]
-        : steps.first;
-
-    final medias = currentStep.medias.toList()
-      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
 
     if (medias.isEmpty) {
       return Container(
@@ -476,21 +483,34 @@ class OverlayWindowState extends State<OverlayWindow> {
       );
     }
 
-    // 显示所有媒体
     return Column(
       children: medias.asMap().entries.map((entry) {
         final index = entry.key;
         final media = entry.value;
         return Padding(
           padding: EdgeInsets.only(bottom: index < medias.length - 1 ? 8 : 0),
-          child: _buildSingleMediaItem(media),
+          child: _buildSingleMediaItem(
+            media,
+            isFullscreenPreview: _isMediaFullscreenPreview,
+          ),
         );
       }).toList(),
     );
   }
 
   /// 单个媒体
-  Widget _buildSingleMediaItem(StepMedia media) {
+  Widget _buildSingleMediaItem(
+    StepMedia media, {
+    required bool isFullscreenPreview,
+    double? preferredHeight,
+  }) {
+    final loadingHeight =
+        preferredHeight ?? (isFullscreenPreview ? 560.0 : 400.0);
+    final defaultHeight =
+        preferredHeight ?? (isFullscreenPreview ? 560.0 : 400.0);
+    final portraitHeight =
+        preferredHeight ?? (isFullscreenPreview ? 760.0 : 450.0);
+
     // 图片显示
     if (media.type == MediaType.image) {
       return FutureBuilder<Size?>(
@@ -499,7 +519,7 @@ class OverlayWindowState extends State<OverlayWindow> {
           // 加载占位
           if (snapshot.connectionState == ConnectionState.waiting) {
             return Container(
-              height: 400,
+              height: loadingHeight,
               decoration: BoxDecoration(
                 color: Colors.black.withValues(alpha: 0.3),
                 borderRadius: BorderRadius.circular(12),
@@ -514,11 +534,13 @@ class OverlayWindowState extends State<OverlayWindow> {
           }
 
           // 图片高度
-          double height = 400;
+          double height = defaultHeight;
           // 0:正 1:竖 2:横
           int imageType = 0;
 
-          if (snapshot.hasData && snapshot.data != null) {
+          if (preferredHeight == null &&
+              snapshot.hasData &&
+              snapshot.data != null) {
             final size = snapshot.data!;
             final diff = (size.height - size.width).abs();
 
@@ -528,7 +550,7 @@ class OverlayWindowState extends State<OverlayWindow> {
             } else if (size.height > size.width) {
               // 竖屏
               imageType = 1;
-              height = 450;
+              height = portraitHeight;
             } else {
               // 横版
               imageType = 2;
@@ -549,7 +571,7 @@ class OverlayWindowState extends State<OverlayWindow> {
 
     // 非图片（视频）使用默认高度
     return Container(
-      height: 400,
+      height: defaultHeight,
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(12),
@@ -583,7 +605,7 @@ class OverlayWindowState extends State<OverlayWindow> {
 
     if (media.type == MediaType.image) {
       // 缩放逻辑
-      final bool needsScale = imageType != 0;
+      final bool needsScale = !_isMediaFullscreenPreview && imageType != 0;
 
       Widget imageWidget = Image.file(
         file,
@@ -654,6 +676,272 @@ class OverlayWindowState extends State<OverlayWindow> {
     );
   }
 
+  Widget _buildFullscreenPreview() {
+    final title = widget.overlayState.currentGrenade?.title ?? '媒体预览';
+    final fullscreenKey =
+        _getHotkeyLabel(HotkeyAction.toggleMediaFullscreenPreview);
+    final medias = _getCurrentStepMedias();
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => unawaited(toggleMediaFullscreenPreview()),
+          child: Container(
+            color: Colors.black.withValues(alpha: 0.38),
+          ),
+        ),
+        SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: 1600,
+                maxHeight: 980,
+              ),
+              child: Container(
+                margin: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: const Color(0xF214171C),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(
+                    color: Colors.orange.withValues(alpha: 0.35),
+                    width: 1.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.35),
+                      blurRadius: 40,
+                      spreadRadius: 4,
+                    ),
+                  ],
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.fullscreen,
+                            color: Colors.orange,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              title,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Text(
+                            '$fullscreenKey 退出全屏',
+                            style: TextStyle(
+                              color: Colors.grey[400],
+                              fontSize: 12,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          _buildWindowButton(
+                            icon: Icons.fullscreen_exit,
+                            onTap: () =>
+                                unawaited(toggleMediaFullscreenPreview()),
+                            color: Colors.orange,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Expanded(
+                        child: _buildFullscreenPreviewContent(medias),
+                      ),
+                      const SizedBox(height: 12),
+                      _buildFullscreenHintBar(),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFullscreenPreviewContent(List<StepMedia>? medias) {
+    final safeMedias = medias ?? const <StepMedia>[];
+
+    if (safeMedias.length == 1) {
+      return Column(
+        children: [
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return _buildSingleMediaItem(
+                  safeMedias.first,
+                  isFullscreenPreview: true,
+                  preferredHeight: constraints.maxHeight,
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildDescription(),
+        ],
+      );
+    }
+
+    return SingleChildScrollView(
+      controller: _scrollController,
+      child: Column(
+        children: [
+          _buildMediaArea(),
+          const SizedBox(height: 12),
+          _buildDescription(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFullscreenHintBar() {
+    final state = widget.overlayState;
+    final grenade = state.currentGrenade;
+    final grenadeTotal = state.currentClusterGrenades.length;
+    final grenadeIndex = grenade == null ? 0 : state.currentClusterIndex + 1;
+    final steps = grenade?.steps.toList() ?? const <GrenadeStep>[];
+    steps.sort((a, b) => a.stepIndex.compareTo(b.stepIndex));
+    final stepTotal = steps.isEmpty ? 0 : steps.length;
+    final stepIndex = steps.isEmpty ? 0 : state.currentStepIndex + 1;
+    final currentStep =
+        steps.isNotEmpty && state.currentStepIndex < steps.length
+            ? steps[state.currentStepIndex]
+            : null;
+    final stepTitle = (currentStep?.title ?? '').trim();
+    final stepDisplayTitle = stepTitle.isEmpty ? '步骤' : stepTitle;
+
+    final prevGrenadeKey = _getHotkeyLabel(HotkeyAction.prevGrenade);
+    final nextGrenadeKey = _getHotkeyLabel(HotkeyAction.nextGrenade);
+    final prevStepKey = _getHotkeyLabel(HotkeyAction.prevStep);
+    final nextStepKey = _getHotkeyLabel(HotkeyAction.nextStep);
+    final togglePlayKey = _getHotkeyLabel(HotkeyAction.togglePlayPause);
+    final fullscreenKey =
+        _getHotkeyLabel(HotkeyAction.toggleMediaFullscreenPreview);
+    final scrollUpKey = _getHotkeyLabel(HotkeyAction.scrollUp);
+    final scrollDownKey = _getHotkeyLabel(HotkeyAction.scrollDown);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.22),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.08),
+          width: 1,
+        ),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 920;
+
+          final leftInfo = Wrap(
+            spacing: 14,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(
+                '道具 $grenadeIndex/$grenadeTotal',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              Text(
+                '$stepDisplayTitle $stepIndex/$stepTotal',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          );
+
+          final rightHints = Wrap(
+            spacing: 14,
+            runSpacing: 8,
+            alignment: WrapAlignment.end,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(
+                '$prevGrenadeKey/$nextGrenadeKey 切换道具',
+                style: TextStyle(color: Colors.grey[300], fontSize: 12),
+              ),
+              Text(
+                '$prevStepKey/$nextStepKey 切换步骤',
+                style: TextStyle(color: Colors.grey[300], fontSize: 12),
+              ),
+              Text(
+                '$togglePlayKey 播放/暂停',
+                style: TextStyle(color: Colors.grey[300], fontSize: 12),
+              ),
+              Text(
+                '$scrollUpKey/$scrollDownKey 滚动',
+                style: TextStyle(color: Colors.grey[300], fontSize: 12),
+              ),
+              Text(
+                '$fullscreenKey 退出全屏',
+                style: TextStyle(color: Colors.grey[300], fontSize: 12),
+              ),
+              Text(
+                '方向导航已禁用',
+                style: TextStyle(
+                  color: Colors.orange[300],
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          );
+
+          if (compact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                leftInfo,
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: rightHints,
+                ),
+              ],
+            );
+          }
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: leftInfo),
+              const SizedBox(width: 16),
+              Expanded(
+                flex: 2,
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: rightHints,
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   /// 底栏
   Widget _buildFooter() {
     final state = widget.overlayState;
@@ -670,6 +958,8 @@ class OverlayWindowState extends State<OverlayWindow> {
       final nextStepKey = _getHotkeyLabel(HotkeyAction.nextStep);
       final scrollUpKey = _getHotkeyLabel(HotkeyAction.scrollUp);
       final scrollDownKey = _getHotkeyLabel(HotkeyAction.scrollDown);
+      final fullscreenKey =
+          _getHotkeyLabel(HotkeyAction.toggleMediaFullscreenPreview);
 
       return Container(
         height: 60,
@@ -680,7 +970,7 @@ class OverlayWindowState extends State<OverlayWindow> {
         ),
         child: Center(
           child: Text(
-            '$navUpKey$navLeftKey$navDownKey$navRightKey 导航 | $prevGrenadeKey/$nextGrenadeKey 道具 | $prevStepKey/$nextStepKey 步骤 | $scrollUpKey/$scrollDownKey 滚动',
+            '$navUpKey$navLeftKey$navDownKey$navRightKey 导航 | $prevGrenadeKey/$nextGrenadeKey 道具 | $prevStepKey/$nextStepKey 步骤 | $scrollUpKey/$scrollDownKey 滚动 | $fullscreenKey 全屏',
             style: const TextStyle(color: Colors.grey, fontSize: 11),
           ),
         ),
@@ -748,9 +1038,12 @@ class OverlayWindowState extends State<OverlayWindow> {
                   final scrollUpKey = _getHotkeyLabel(HotkeyAction.scrollUp);
                   final scrollDownKey =
                       _getHotkeyLabel(HotkeyAction.scrollDown);
+                  final fullscreenKey = _getHotkeyLabel(
+                    HotkeyAction.toggleMediaFullscreenPreview,
+                  );
 
                   return Text(
-                    '$navUpKey$navLeftKey$navDownKey$navRightKey 导航 | $smokeKey/$flashKey/$molotovKey/$heKey 过滤 | $prevGrenadeKey/$nextGrenadeKey 道具 | $prevStepKey/$nextStepKey 步骤 | $scrollUpKey/$scrollDownKey 滚动',
+                    '$navUpKey$navLeftKey$navDownKey$navRightKey 导航 | $smokeKey/$flashKey/$molotovKey/$heKey 过滤 | $prevGrenadeKey/$nextGrenadeKey 道具 | $prevStepKey/$nextStepKey 步骤 | $scrollUpKey/$scrollDownKey 滚动 | $fullscreenKey 全屏',
                     style: TextStyle(color: Colors.grey[600], fontSize: 10),
                   );
                 }),
@@ -844,6 +1137,7 @@ class OverlayWindowState extends State<OverlayWindow> {
     // 处理方向键的连续移动
     final navDirection = _getNavigationDirection(key);
     if (navDirection != null) {
+      if (_isMediaFullscreenPreview) return;
       if (event is KeyDownEvent) {
         widget.overlayState.startNavigation(navDirection);
       } else if (event is KeyUpEvent) {
@@ -879,6 +1173,12 @@ class OverlayWindowState extends State<OverlayWindow> {
     // 直接检查 Alt+P 用于视频播放/暂停 (备用方案)
     if (hasAlt && !hasCtrl && !hasShift && key == LogicalKeyboardKey.keyP) {
       _executeAction(HotkeyAction.togglePlayPause);
+      return;
+    }
+
+    // 直接检查 Alt+Enter 用于媒体全屏预览 (备用方案)
+    if (hasAlt && !hasCtrl && !hasShift && key == LogicalKeyboardKey.enter) {
+      _executeAction(HotkeyAction.toggleMediaFullscreenPreview);
       return;
     }
   }
@@ -963,18 +1263,22 @@ class OverlayWindowState extends State<OverlayWindow> {
     switch (action) {
       case HotkeyAction.hideOverlay:
       case HotkeyAction.toggleOverlay:
-        widget.onClose();
+        unawaited(widget.onClose());
         break;
       case HotkeyAction.navigateUp:
+        if (_isMediaFullscreenPreview) break;
         state.navigateDirection(NavigationDirection.up);
         break;
       case HotkeyAction.navigateDown:
+        if (_isMediaFullscreenPreview) break;
         state.navigateDirection(NavigationDirection.down);
         break;
       case HotkeyAction.navigateLeft:
+        if (_isMediaFullscreenPreview) break;
         state.navigateDirection(NavigationDirection.left);
         break;
       case HotkeyAction.navigateRight:
+        if (_isMediaFullscreenPreview) break;
         state.navigateDirection(NavigationDirection.right);
         break;
       case HotkeyAction.prevGrenade:
@@ -1014,6 +1318,9 @@ class OverlayWindowState extends State<OverlayWindow> {
           // print('togglePlayPause: no video player state available');
         }
         break;
+      case HotkeyAction.toggleMediaFullscreenPreview:
+        unawaited(toggleMediaFullscreenPreview());
+        break;
       case HotkeyAction.increaseNavSpeed:
         state.increaseNavSpeed();
         break;
@@ -1041,5 +1348,64 @@ class OverlayWindowState extends State<OverlayWindow> {
       duration: const Duration(milliseconds: 150),
       curve: Curves.easeOut,
     );
+  }
+
+  List<StepMedia>? _getCurrentStepMedias() {
+    final state = widget.overlayState;
+    final grenade = state.currentGrenade;
+    if (grenade == null) return null;
+
+    final steps = grenade.steps.toList()
+      ..sort((a, b) => a.stepIndex.compareTo(b.stepIndex));
+    if (steps.isEmpty) return null;
+
+    final currentStep = state.currentStepIndex < steps.length
+        ? steps[state.currentStepIndex]
+        : steps.first;
+
+    final medias = currentStep.medias.toList()
+      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+    return medias;
+  }
+
+  Future<void> toggleMediaFullscreenPreview() async {
+    if (_isTogglingMediaFullscreenPreview) return;
+
+    final medias = _getCurrentStepMedias();
+    if (!_isMediaFullscreenPreview && (medias == null || medias.isEmpty)) {
+      return;
+    }
+
+    _isTogglingMediaFullscreenPreview = true;
+    try {
+      if (_isMediaFullscreenPreview) {
+        final restoreBounds = _normalWindowBoundsBeforePreview;
+        widget.overlayState.setNavigationLocked(false);
+        await windowManager.setFullScreen(false);
+        if (restoreBounds != null) {
+          await windowManager.setBounds(restoreBounds);
+        }
+        if (!mounted) return;
+        setState(() {
+          _isMediaFullscreenPreview = false;
+          _normalWindowBoundsBeforePreview = null;
+        });
+        return;
+      }
+
+      _normalWindowBoundsBeforePreview ??= await windowManager.getBounds();
+      widget.overlayState.setNavigationLocked(true);
+      await windowManager.setFullScreen(true);
+
+      if (!mounted) return;
+      setState(() {
+        _isMediaFullscreenPreview = true;
+      });
+    } catch (e) {
+      debugPrint(
+          '[OverlayWindow] Failed to toggle media fullscreen preview: $e');
+    } finally {
+      _isTogglingMediaFullscreenPreview = false;
+    }
   }
 }

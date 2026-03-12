@@ -526,7 +526,6 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
       appBar: AppBar(title: const Text("删除同步预览")),
       body: Column(
         children: [
-          _buildPackageMetaBar(),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -549,7 +548,6 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
       appBar: AppBar(title: const Text("选择地图")),
       body: Column(
         children: [
-          _buildPackageMetaBar(),
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.all(16),
@@ -626,8 +624,6 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
       ),
       body: Column(
         children: [
-          if (_preview != null && _preview!.schemaVersion >= 2)
-            _buildPackageMetaBar(),
           // 类型筛选
           if (grenades.isNotEmpty) _buildTypeFilter(),
           // 全选栏
@@ -836,65 +832,6 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
             style: TextStyle(color: Colors.grey[600], fontSize: 12),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildPackageMetaBar() {
-    final preview = _preview!;
-    final chips = <String>[
-      '协议 v${preview.schemaVersion}',
-      '删除 ${preview.grenadeTombstones.length}',
-      '标签 ${preview.tagsByUuid.length}',
-      '区域 ${preview.areas.length}',
-    ];
-    if (preview.schemaVersion >= 3) {
-      chips.add('收藏夹 ${preview.favoriteFolders.length}');
-      chips.add('爆点分组 ${preview.impactGroups.length}');
-    }
-    final entityByType = <String, int>{};
-    for (final tombstone in preview.entityTombstones) {
-      entityByType[tombstone.entityType] =
-          (entityByType[tombstone.entityType] ?? 0) + 1;
-    }
-    if ((entityByType[LanSyncEntityTombstoneType.tag] ?? 0) > 0) {
-      chips.add('标签删 ${(entityByType[LanSyncEntityTombstoneType.tag] ?? 0)}');
-    }
-    if ((entityByType[LanSyncEntityTombstoneType.area] ?? 0) > 0) {
-      chips.add('区域删 ${(entityByType[LanSyncEntityTombstoneType.area] ?? 0)}');
-    }
-    if ((entityByType[LanSyncEntityTombstoneType.favoriteFolder] ?? 0) > 0) {
-      chips.add(
-          '收藏夹删 ${(entityByType[LanSyncEntityTombstoneType.favoriteFolder] ?? 0)}');
-    }
-    if ((entityByType[LanSyncEntityTombstoneType.impactGroup] ?? 0) > 0) {
-      chips.add(
-          '分组删 ${(entityByType[LanSyncEntityTombstoneType.impactGroup] ?? 0)}');
-    }
-
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: chips
-            .map(
-              (text) => Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(text, style: const TextStyle(fontSize: 12)),
-              ),
-            )
-            .toList(),
       ),
     );
   }

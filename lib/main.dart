@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:isar_community/isar.dart';
@@ -315,6 +316,10 @@ Future<void> _runMainWindow() async {
     globalHotkeyService!.registerHandler(HotkeyAction.togglePlayPause, () {
       sendOverlayCommand('toggle_play_pause');
     });
+    globalHotkeyService!
+        .registerHandler(HotkeyAction.toggleMediaFullscreenPreview, () {
+      sendOverlayCommand('toggle_media_fullscreen_preview');
+    });
     // 速度调节
     globalHotkeyService!.registerHandler(HotkeyAction.increaseNavSpeed, () {
       sendOverlayCommand('increase_nav_speed');
@@ -424,6 +429,24 @@ Future<void> _runOverlayWindow(
   // 创建 OverlayWindowApp 的 key，以便在 IPC 中访问其状态
   final overlayAppKey = GlobalKey<OverlayWindowAppState>();
 
+  Future<void> persistOverlayPosition() async {
+    final preferredPosition = overlayAppKey
+        .currentState?.overlayWindowKey.currentState?.persistedWindowPosition;
+    final position = preferredPosition ?? await windowManager.getPosition();
+    await settingsService.setOverlayPosition(position.dx, position.dy);
+  }
+
+  Future<void> pauseOverlayVideoPlayback() async {
+    await overlayAppKey.currentState?.overlayWindowKey.currentState
+        ?.pauseActiveVideoPlayback();
+  }
+
+  bool blocksDirectionalNavigation() {
+    return overlayAppKey.currentState?.overlayWindowKey.currentState
+            ?.blocksDirectionalNavigation ==
+        true;
+  }
+
   // 设置窗口方法处理器（接收主窗口的命令）
   await controller.setWindowMethodHandler((call) async {
     switch (call.method) {
@@ -445,9 +468,14 @@ Future<void> _runOverlayWindow(
         return 'ok';
       case 'close':
         // 保存位置
-        final position = await windowManager.getPosition();
-        await settingsService.setOverlayPosition(position.dx, position.dy);
+        await pauseOverlayVideoPlayback();
+        await persistOverlayPosition();
         await windowManager.close();
+        return 'ok';
+      case 'hide_overlay':
+        await pauseOverlayVideoPlayback();
+        await persistOverlayPosition();
+        await windowManager.hide();
         return 'ok';
       // === 悬浮窗操作命令（由全局热键触发）===
       case 'prev_grenade':
@@ -479,15 +507,19 @@ Future<void> _runOverlayWindow(
         return 'ok';
       // 方向键导航 - 兼容旧版步进移动指令
       case 'navigate_up':
+        if (blocksDirectionalNavigation()) return 'ignored';
         overlayState.navigateDirection(NavigationDirection.up);
         return 'ok';
       case 'navigate_down':
+        if (blocksDirectionalNavigation()) return 'ignored';
         overlayState.navigateDirection(NavigationDirection.down);
         return 'ok';
       case 'navigate_left':
+        if (blocksDirectionalNavigation()) return 'ignored';
         overlayState.navigateDirection(NavigationDirection.left);
         return 'ok';
       case 'navigate_right':
+        if (blocksDirectionalNavigation()) return 'ignored';
         overlayState.navigateDirection(NavigationDirection.right);
         return 'ok';
       // 方向键导航 - 新版平滑移动指令 (start/stop)
@@ -496,6 +528,10 @@ Future<void> _runOverlayWindow(
         final dirStr = args?['direction'] as String?;
         final dir = _parseDirection(dirStr);
         debugPrint('[Overlay] start_navigation: $dirStr -> $dir');
+        if (blocksDirectionalNavigation()) {
+          overlayState.stopAllNavigation();
+          return 'ignored';
+        }
         if (dir != null) overlayState.startNavigation(dir);
         return 'ok';
       case 'stop_navigation':
@@ -512,6 +548,10 @@ Future<void> _runOverlayWindow(
       // 视频播放控制
       case 'toggle_play_pause':
         overlayState.triggerVideoTogglePlayPause();
+        return 'ok';
+      case 'toggle_media_fullscreen_preview':
+        overlayAppKey.currentState?.overlayWindowKey.currentState
+            ?.toggleMediaFullscreenPreview();
         return 'ok';
       // 更新透明度（设置界面调整时，直接通过 IPC 传递值）
       case 'update_opacity':
@@ -620,8 +660,8 @@ Future<void> _runOverlayWindow(
           settingsService: settingsService,
           overlayState: overlayState,
           onClose: () async {
-            final position = await windowManager.getPosition();
-            await settingsService.setOverlayPosition(position.dx, position.dy);
+            await pauseOverlayVideoPlayback();
+            await persistOverlayPosition();
             // 直接隐藏悬浮窗
             // 注意：由于 desktop_multi_window 的限制，子窗口无法向主窗口发送消息
             // 热键将在用户下次按 Alt+G 时自动注销
@@ -629,8 +669,8 @@ Future<void> _runOverlayWindow(
             await windowManager.hide();
           },
           onMinimize: () async {
-            final position = await windowManager.getPosition();
-            await settingsService.setOverlayPosition(position.dx, position.dy);
+            await pauseOverlayVideoPlayback();
+            await persistOverlayPosition();
             // 直接隐藏悬浮窗
             debugPrint('[Overlay] Minimizing overlay window');
             await windowManager.hide();
@@ -997,8 +1037,8 @@ class _MainAppState extends ConsumerState<MainApp> {
 
   Future<void> _hideOverlay() async {
     if (overlayWindowController == null) return;
-    // 仅隐藏，不关闭
-    await overlayWindowController!.hide();
+    // 让悬浮窗自己先暂停媒体，再保存位置并隐藏
+    await overlayWindowController!.invokeMethod('hide_overlay');
   }
 
   /// 同步地图信息到悬浮窗
@@ -1260,8 +1300,8 @@ class _MainAppState extends ConsumerState<MainApp> {
 class OverlayWindowApp extends StatefulWidget {
   final SettingsService settingsService;
   final OverlayStateService overlayState;
-  final VoidCallback onClose;
-  final VoidCallback onMinimize;
+  final AsyncCallback onClose;
+  final AsyncCallback onMinimize;
 
   const OverlayWindowApp({
     super.key,

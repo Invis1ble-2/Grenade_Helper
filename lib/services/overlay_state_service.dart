@@ -62,9 +62,21 @@ class OverlayStateService extends ChangeNotifier {
 
   // 当前档位
   int _navSpeedLevel = 3;
+  bool _navigationLocked = false;
 
   /// 获取档位
   int get navSpeedLevel => _navSpeedLevel;
+  bool get navigationLocked => _navigationLocked;
+
+  void setNavigationLocked(bool locked) {
+    if (_navigationLocked == locked) return;
+    _navigationLocked = locked;
+    if (locked) {
+      stopAllNavigation();
+    } else {
+      notifyListeners();
+    }
+  }
 
   /// 设置档位
   void setNavSpeedLevel(int level) {
@@ -364,16 +376,18 @@ class OverlayStateService extends ChangeNotifier {
   /// 上一个道具
   void prevGrenade() {
     final cluster = currentClusterGrenades;
-    if (cluster.isEmpty) return;
+    if (cluster.length <= 1) return;
 
     final clusterIdx = currentClusterIndex;
-    final newClusterIdx = (clusterIdx - 1 + cluster.length) % cluster.length;
+    if (clusterIdx <= 0) return;
+
+    final newClusterIdx = clusterIdx - 1;
     final targetGrenade = cluster[newClusterIdx];
 
     // 找到该道具在 filteredGrenades 中的索引
     final globalIdx =
         _filteredGrenades.indexWhere((g) => g.id == targetGrenade.id);
-    if (globalIdx >= 0) {
+    if (globalIdx >= 0 && globalIdx != _currentGrenadeIndex) {
       _currentGrenadeIndex = globalIdx;
       _currentStepIndex = 0;
       notifyListeners();
@@ -383,16 +397,18 @@ class OverlayStateService extends ChangeNotifier {
   /// 下一个道具
   void nextGrenade() {
     final cluster = currentClusterGrenades;
-    if (cluster.isEmpty) return;
+    if (cluster.length <= 1) return;
 
     final clusterIdx = currentClusterIndex;
-    final newClusterIdx = (clusterIdx + 1) % cluster.length;
+    if (clusterIdx < 0 || clusterIdx >= cluster.length - 1) return;
+
+    final newClusterIdx = clusterIdx + 1;
     final targetGrenade = cluster[newClusterIdx];
 
     // 找到该道具在 filteredGrenades 中的索引
     final globalIdx =
         _filteredGrenades.indexWhere((g) => g.id == targetGrenade.id);
-    if (globalIdx >= 0) {
+    if (globalIdx >= 0 && globalIdx != _currentGrenadeIndex) {
       _currentGrenadeIndex = globalIdx;
       _currentStepIndex = 0;
       notifyListeners();
@@ -555,6 +571,7 @@ class OverlayStateService extends ChangeNotifier {
 
   /// 开始移动
   void startNavigation(NavigationDirection direction) {
+    if (_navigationLocked) return;
     final now = DateTime.now();
 
     // 关键修复：当按下新方向时，如果有相反方向在活动，先移除相反方向
@@ -724,6 +741,7 @@ class OverlayStateService extends ChangeNotifier {
 
   /// 单次移动
   void navigateDirection(NavigationDirection direction) {
+    if (_navigationLocked) return;
     // 记录移动前是否处于吸附状态
     final wasSnapped = _isSnapped;
 

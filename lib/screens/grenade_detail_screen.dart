@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:grenade_helper/models/tag.dart';
+import 'package:grenade_helper/services/settings_service.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:pro_image_editor/pro_image_editor.dart';
@@ -22,6 +23,7 @@ import '../providers.dart';
 import '../services/data_service.dart';
 import '../services/favorite_folder_service.dart';
 import '../services/tag_service.dart';
+import '../widgets/instant_hide_desktop_video_controls.dart';
 import '../widgets/grenade_tag_editor.dart';
 import '../main.dart' show sendOverlayCommand;
 import 'impact_point_picker_screen.dart';
@@ -56,6 +58,9 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget> {
         looping: true,
         allowMuting: true,
         aspectRatio: _videoController!.value.aspectRatio,
+        customControls: SettingsService.isDesktop
+            ? const InstantHideDesktopVideoControls()
+            : null,
         errorBuilder: (context, errorMessage) {
           return Center(
               child: Text(errorMessage,
@@ -78,6 +83,15 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       _videoController!.pause();
     } else {
       _videoController!.play();
+    }
+  }
+
+  Future<void> pauseIfPlaying() async {
+    if (_videoController == null || !_videoController!.value.isInitialized) {
+      return;
+    }
+    if (_videoController!.value.isPlaying) {
+      await _videoController!.pause();
     }
   }
 

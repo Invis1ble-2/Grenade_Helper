@@ -47,6 +47,7 @@ dependencies:
   http: ^1.6.0                    
   package_info_plus: ^9.0.0       
   url_launcher: ^6.3.2           
+  provider: ^6.1.5+1
   
   # --- 桌面端功能 ---
   hotkey_manager: ^0.2.3

@@ -77,6 +77,7 @@ class HotkeyService {
       HotkeyAction.navigateRight,
       // 视频
       HotkeyAction.togglePlayPause,
+      HotkeyAction.toggleMediaFullscreenPreview,
       // 速度
       HotkeyAction.increaseNavSpeed,
       HotkeyAction.decreaseNavSpeed,
@@ -236,6 +237,7 @@ class HotkeyService {
       LogicalKeyboardKey.digit9.keyId: PhysicalKeyboardKey.digit9,
       // F键
       LogicalKeyboardKey.escape.keyId: PhysicalKeyboardKey.escape,
+      LogicalKeyboardKey.enter.keyId: PhysicalKeyboardKey.enter,
       LogicalKeyboardKey.f1.keyId: PhysicalKeyboardKey.f1,
       LogicalKeyboardKey.f2.keyId: PhysicalKeyboardKey.f2,
       LogicalKeyboardKey.f3.keyId: PhysicalKeyboardKey.f3,
