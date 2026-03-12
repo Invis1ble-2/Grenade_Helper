@@ -1,7 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 import 'settings_service.dart';
+import 'windows_navigation_polling_service.dart';
 
 /// 快捷键服务
 class HotkeyService {
@@ -55,6 +58,20 @@ class HotkeyService {
     return action == HotkeyAction.toggleOverlay;
   }
 
+  bool _shouldHandleNavigationWithPolling() {
+    if (!Platform.isWindows) return false;
+    return WindowsNavigationPollingService.supportsNavigationBindings(
+      _settings.getHotkeys(),
+    );
+  }
+
+  bool _isNavigationAction(HotkeyAction action) {
+    return action == HotkeyAction.navigateUp ||
+        action == HotkeyAction.navigateDown ||
+        action == HotkeyAction.navigateLeft ||
+        action == HotkeyAction.navigateRight;
+  }
+
   /// 注册悬浮键
   Future<void> registerOverlayHotkeys() async {
     if (_overlayHotkeysRegistered) return;
@@ -86,7 +103,11 @@ class HotkeyService {
       HotkeyAction.scrollDown,
     ];
 
+    final useNavigationPolling = _shouldHandleNavigationWithPolling();
     for (final action in overlayActions) {
+      if (useNavigationPolling && _isNavigationAction(action)) {
+        continue;
+      }
       final config = hotkeys[action];
       if (config != null) {
         await _registerHotkey(action, config, _overlayHotkeys,
@@ -298,7 +319,8 @@ class HotkeyService {
     }
 
     // 检查是否是悬浮窗热键
-    if (_overlayHotkeys.containsKey(action)) {
+    if (_overlayHotkeysRegistered &&
+        (_overlayHotkeys.containsKey(action) || _isNavigationAction(action))) {
       await unregisterOverlayHotkeys();
       await registerOverlayHotkeys();
     }

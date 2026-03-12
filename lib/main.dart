@@ -22,6 +22,7 @@ import 'services/overlay_state_service.dart';
 import 'services/update_service.dart';
 import 'services/migration_service.dart';
 import 'services/tag_service.dart';
+import 'services/windows_navigation_polling_service.dart';
 import 'themes/christmas_theme.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -30,6 +31,7 @@ SettingsService? globalSettingsService;
 HotkeyService? globalHotkeyService;
 WindowService? globalWindowService;
 OverlayStateService? globalOverlayState;
+WindowsNavigationPollingService? globalWindowsNavigationService;
 Isar? globalIsar;
 
 // 悬浮窗控制器
@@ -259,6 +261,12 @@ Future<void> _runMainWindow() async {
     globalHotkeyService = HotkeyService(globalSettingsService!);
     globalWindowService = WindowService(globalSettingsService!);
     globalOverlayState = OverlayStateService(isar);
+    if (Platform.isWindows) {
+      globalWindowsNavigationService = WindowsNavigationPollingService(
+        globalSettingsService!,
+        sendOverlayCommand,
+      );
+    }
 
     // 连接热键服务和窗口服务
     globalWindowService!.setHotkeyService(globalHotkeyService!);
@@ -1033,10 +1041,12 @@ class _MainAppState extends ConsumerState<MainApp> {
     }
     // 注册热键
     await globalHotkeyService?.registerOverlayHotkeys();
+    await globalWindowsNavigationService?.start();
   }
 
   Future<void> _hideOverlay() async {
     if (overlayWindowController == null) return;
+    await globalWindowsNavigationService?.stop();
     // 让悬浮窗自己先暂停媒体，再保存位置并隐藏
     await overlayWindowController!.invokeMethod('hide_overlay');
   }
@@ -1068,6 +1078,7 @@ class _MainAppState extends ConsumerState<MainApp> {
       } catch (_) {}
       overlayWindowController = null;
     }
+    await globalWindowsNavigationService?.dispose();
     globalHotkeyService?.dispose();
   }
 
@@ -1075,6 +1086,7 @@ class _MainAppState extends ConsumerState<MainApp> {
   void dispose() {
     _visibilityPollTimer?.cancel();
     _hideOverlay();
+    globalWindowsNavigationService?.dispose();
     globalHotkeyService?.dispose();
     globalWindowService?.dispose();
     super.dispose();

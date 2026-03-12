@@ -1138,6 +1138,7 @@ class OverlayWindowState extends State<OverlayWindow> {
     final navDirection = _getNavigationDirection(key);
     if (navDirection != null) {
       if (_isMediaFullscreenPreview) return;
+      if (Platform.isWindows) return;
       if (event is KeyDownEvent) {
         widget.overlayState.startNavigation(navDirection);
       } else if (event is KeyUpEvent) {

@@ -237,9 +237,13 @@ class HomeScreen extends ConsumerWidget {
                                 await globalHotkeyService!
                                     .updateHotkey(action, config);
                               }
+                              await globalWindowsNavigationService
+                                  ?.reloadBindings();
                             },
                             onHotkeysReset: () async {
                               await globalHotkeyService?.reloadFromSettings();
+                              await globalWindowsNavigationService
+                                  ?.reloadBindings();
                             },
                           ),
                         ),

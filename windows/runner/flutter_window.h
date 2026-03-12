@@ -3,8 +3,12 @@
 
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
+#include <flutter/method_channel.h>
+#include <flutter/standard_method_codec.h>
 
 #include <memory>
+#include <optional>
+#include <string>
 
 #include "win32_window.h"
 
@@ -23,11 +27,34 @@ class FlutterWindow : public Win32Window {
                          LPARAM const lparam) noexcept override;
 
  private:
+  struct NavigationBinding {
+    std::optional<int> virtual_key;
+    bool requires_alt = false;
+    bool requires_ctrl = false;
+    bool requires_shift = false;
+  };
+
+  void HandleNavigationMethodCall(
+      const flutter::MethodCall<flutter::EncodableValue>& method_call,
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+  void ClearNavigationBindings();
+  NavigationBinding* GetBindingForDirection(const std::string& direction);
+  const NavigationBinding* GetBindingForDirection(
+      const std::string& direction) const;
+  flutter::EncodableMap ReadNavigationState() const;
+  bool IsBindingPressed(const NavigationBinding& binding) const;
+
   // The project to run.
   flutter::DartProject project_;
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      navigation_channel_;
+  NavigationBinding up_binding_;
+  NavigationBinding down_binding_;
+  NavigationBinding left_binding_;
+  NavigationBinding right_binding_;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_
