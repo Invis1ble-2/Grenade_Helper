@@ -7,13 +7,13 @@ jobs:
   build-ios:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.38.4'
           channel: 'stable'
-          cache: true
+          cache: false
           
       - name: Get Dependencies
         run: flutter pub get
@@ -30,7 +30,7 @@ jobs:
           zip -r release.ipa Payload
 
       - name: Upload IPA
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: unsigned-ipa
           path: release.ipa

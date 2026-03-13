@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import https from 'https';
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 
 // === 配置区域 ===
 const OWNER = 'Invis1ble-2';
@@ -58,6 +58,24 @@ function fetchJson(url, headers = {}) {
       });
     }).on('error', reject);
   });
+}
+
+function runCurl(args, { captureOutput = false } = {}) {
+  const result = spawnSync('curl', args, {
+    encoding: 'utf8',
+    stdio: captureOutput ? 'pipe' : 'inherit'
+  });
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  if (result.status !== 0) {
+    const details = [result.stderr, result.stdout].filter(Boolean).join('\n').trim();
+    throw new Error(details || `curl exited with code ${result.status}`);
+  }
+
+  return result;
 }
 
 /**
@@ -140,15 +158,13 @@ async function main() {
     // 不能使用 browser_download_url
     console.log(`Downloading ${targetAsset.name} from private repo...`);
 
-    const downloadCmd = [
-      `curl -L`,
-      `-H "Authorization: token ${GITHUB_TOKEN}"`, // 认证
-      `-H "Accept: application/octet-stream"`,     // 告诉 GitHub 我们要二进制流
-      `-o "${tempFilePath}"`,
-      `"${targetAsset.url}"`                        // 使用 API URL
-    ].join(' ');
-
-    execSync(downloadCmd);
+    runCurl([
+      '-fL',
+      '-H', `Authorization: token ${GITHUB_TOKEN}`, // 认证
+      '-H', 'Accept: application/octet-stream',     // 告诉 GitHub 我们要二进制流
+      '-o', tempFilePath,
+      targetAsset.url                               // 使用 API URL
+    ]);
 
     // 验证文件大小
     const stats = fs.statSync(tempFilePath);
@@ -169,27 +185,38 @@ async function main() {
     const forceMatch = bodyText.match(/\b(?:force|forceUpdate)\s*[:=]\s*(true|1|yes)/i);
     const forceUpdate = forceMatch ? 'true' : 'false';
 
+    const failedServers = [];
+
     for (const serverUrl of SERVER_URLS) {
       console.log(`Uploading to ${serverUrl} (Platform: ${PLATFORM})...`);
 
-      const uploadCmd = [
-        `curl -X POST "${serverUrl}/upload"`,
-        `-H "Authorization: ${ADMIN_SECRET}"`,
-        `-F "file=@${tempFilePath}"`,
-        `-F "versionCode=${versionCode}"`,
-        `-F "versionName=${versionName}"`,
-        `-F "content=${cleanContent || 'Update'}"`,
-        `-F "platform=${PLATFORM}"`,
-        `-F "forceUpdate=${forceUpdate}"`
-      ].join(' ');
-
       try {
-        execSync(uploadCmd);
+        const result = runCurl([
+          '-fsS',
+          '-X', 'POST',
+          `${serverUrl}/upload`,
+          '-H', `Authorization: ${ADMIN_SECRET}`,
+          '-F', `file=@${tempFilePath}`,
+          '-F', `versionCode=${versionCode}`,
+          '-F', `versionName=${versionName}`,
+          '-F', `content=${cleanContent || 'Update'}`,
+          '-F', `platform=${PLATFORM}`,
+          '-F', `forceUpdate=${forceUpdate}`
+        ], { captureOutput: true });
+
+        const responseText = (result.stdout || '').trim();
         console.log(`✓ Upload to ${serverUrl} successful!`);
+        if (responseText) {
+          console.log(`Server response: ${responseText}`);
+        }
       } catch (err) {
         console.error(`✗ Upload to ${serverUrl} failed:`, err.message);
-        // 继续上传到下一个服务器，不中断流程
+        failedServers.push(serverUrl);
       }
+    }
+
+    if (failedServers.length > 0) {
+      throw new Error(`Upload failed for ${failedServers.length} server(s): ${failedServers.join(', ')}`);
     }
 
     console.log("All servers sync completed!");
