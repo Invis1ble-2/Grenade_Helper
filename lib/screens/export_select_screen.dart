@@ -26,6 +26,10 @@ class ExportSelectScreen extends ConsumerStatefulWidget {
 class _ExportSelectScreenState extends ConsumerState<ExportSelectScreen> {
   bool _isLoading = true;
   bool _isExporting = false;
+  bool _isEstimating = false;
+  int _estimateRequestId = 0;
+  ExportPackageEstimate? _exportEstimate;
+  String? _estimateError;
 
   // 地图列表
   List<GameMap> _maps = [];
@@ -93,6 +97,7 @@ class _ExportSelectScreenState extends ConsumerState<ExportSelectScreen> {
       _grenadesByMap = grenadesByMap;
       _isLoading = false;
     });
+    _refreshExportEstimate();
   }
 
   List<Grenade> _getCurrentGrenades() {
@@ -112,7 +117,7 @@ class _ExportSelectScreenState extends ConsumerState<ExportSelectScreen> {
     final allSelected =
         currentIds.every((id) => _selectedGrenadeIds.contains(id));
 
-    setState(() {
+    _updateSelectionState(() {
       if (allSelected) {
         _selectedGrenadeIds.removeAll(currentIds);
       } else {
@@ -126,7 +131,7 @@ class _ExportSelectScreenState extends ConsumerState<ExportSelectScreen> {
     final allSelected =
         allMaps.every((name) => _selectedMapNames.contains(name));
 
-    setState(() {
+    _updateSelectionState(() {
       if (allSelected) {
         _selectedMapNames.clear();
       } else {
@@ -135,43 +140,100 @@ class _ExportSelectScreenState extends ConsumerState<ExportSelectScreen> {
     });
   }
 
-  Future<void> _doExport() async {
-    setState(() => _isExporting = true);
+  void _updateSelectionState(VoidCallback change) {
+    setState(change);
+    _refreshExportEstimate();
+  }
 
-    // 延时更新UI
-    await Future.delayed(const Duration(milliseconds: 50));
-    if (!mounted) return;
+  List<Grenade> _getSelectedGrenadesForExport() {
+    final result = <Grenade>[];
+    if (widget.mode == 1) {
+      for (final mapName in _selectedMapNames) {
+        result.addAll(_grenadesByMap[mapName] ?? const <Grenade>[]);
+      }
+      return result;
+    }
+    for (final grenades in _grenadesByMap.values) {
+      result.addAll(
+        grenades.where((g) => _selectedGrenadeIds.contains(g.id)),
+      );
+    }
+    return result;
+  }
+
+  Future<void> _refreshExportEstimate() async {
+    final grenades = _getSelectedGrenadesForExport();
+    final requestId = ++_estimateRequestId;
+
+    if (grenades.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _isEstimating = false;
+        _exportEstimate = null;
+        _estimateError = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _isEstimating = true;
+      _estimateError = null;
+    });
 
     try {
-      final isar = ref.read(isarProvider);
-      final dataService = DataService(isar);
+      final dataService = DataService(ref.read(isarProvider));
+      final estimate = await dataService.estimateExportPackage(grenades);
+      if (!mounted || requestId != _estimateRequestId) return;
+      setState(() {
+        _isEstimating = false;
+        _exportEstimate = estimate;
+      });
+    } catch (e) {
+      if (!mounted || requestId != _estimateRequestId) return;
+      setState(() {
+        _isEstimating = false;
+        _exportEstimate = null;
+        _estimateError = '无法估算导出包体';
+      });
+    }
+  }
 
-      List<Grenade> grenadesToExport = [];
-
-      if (widget.mode == 1) {
-        // 导出多地图
-        for (final mapName in _selectedMapNames) {
-          grenadesToExport.addAll(_grenadesByMap[mapName] ?? []);
-        }
-      } else {
-        // 导出道具
-        for (final grenades in _grenadesByMap.values) {
-          grenadesToExport.addAll(
-            grenades.where((g) => _selectedGrenadeIds.contains(g.id)),
-          );
-        }
-      }
-
+  Future<void> _doExport() async {
+    try {
+      final grenadesToExport = _getSelectedGrenadesForExport();
       if (grenadesToExport.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-                content: Text("未选择任何道具"), backgroundColor: Colors.orange),
+              content: Text("未选择任何道具"),
+              backgroundColor: Colors.orange,
+            ),
           );
-          setState(() => _isExporting = false);
         }
         return;
       }
+
+      if ((_exportEstimate?.exceedsLimit ?? false) && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '预计导出包体 ${DataService.formatBytes(_exportEstimate!.estimatedPackageBytes)}，'
+              '已超过上限 ${DataService.formatBytes(_exportEstimate!.limitBytes)}',
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      setState(() => _isExporting = true);
+
+      // 延时更新UI
+      await Future.delayed(const Duration(milliseconds: 50));
+      if (!mounted) return;
+
+      final isar = ref.read(isarProvider);
+      final dataService = DataService(isar);
 
       // 执行导出
       await dataService.exportSelectedGrenades(context, grenadesToExport);
@@ -258,7 +320,7 @@ class _ExportSelectScreenState extends ConsumerState<ExportSelectScreen> {
                     leading: Checkbox(
                       value: isSelected,
                       onChanged: (val) {
-                        setState(() {
+                        _updateSelectionState(() {
                           if (val == true) {
                             _selectedMapNames.add(map.name);
                           } else {
@@ -284,7 +346,7 @@ class _ExportSelectScreenState extends ConsumerState<ExportSelectScreen> {
                       child: Text("$count 个道具"),
                     ),
                     onTap: () {
-                      setState(() {
+                      _updateSelectionState(() {
                         if (isSelected) {
                           _selectedMapNames.remove(map.name);
                         } else {
@@ -330,7 +392,7 @@ class _ExportSelectScreenState extends ConsumerState<ExportSelectScreen> {
                   value: allSelected,
                   tristate: _selectedGrenadeIds.isNotEmpty && !allSelected,
                   onChanged: (_) {
-                    setState(() {
+                    _updateSelectionState(() {
                       if (allSelected) {
                         _selectedGrenadeIds.clear();
                       } else {
@@ -370,7 +432,7 @@ class _ExportSelectScreenState extends ConsumerState<ExportSelectScreen> {
                       value: allInMapSelected,
                       tristate: selectedInMap > 0 && !allInMapSelected,
                       onChanged: (val) {
-                        setState(() {
+                        _updateSelectionState(() {
                           if (allInMapSelected) {
                             _selectedGrenadeIds
                                 .removeAll(grenades.map((g) => g.id));
@@ -527,7 +589,7 @@ class _ExportSelectScreenState extends ConsumerState<ExportSelectScreen> {
         leading: Checkbox(
           value: isSelected,
           onChanged: (val) {
-            setState(() {
+            _updateSelectionState(() {
               if (val == true) {
                 _selectedGrenadeIds.add(grenade.id);
               } else {
@@ -569,7 +631,7 @@ class _ExportSelectScreenState extends ConsumerState<ExportSelectScreen> {
         ),
         dense: true,
         onTap: () {
-          setState(() {
+          _updateSelectionState(() {
             if (isSelected) {
               _selectedGrenadeIds.remove(grenade.id);
             } else {
@@ -590,6 +652,11 @@ class _ExportSelectScreenState extends ConsumerState<ExportSelectScreen> {
       count = _selectedGrenadeIds.length;
     }
 
+    final estimate = _exportEstimate;
+    final isOverLimit = estimate?.exceedsLimit ?? false;
+    final buttonEnabled =
+        enabled && !_isExporting && !_isEstimating && !isOverLimit;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -602,30 +669,101 @@ class _ExportSelectScreenState extends ConsumerState<ExportSelectScreen> {
           ),
         ],
       ),
-      child: SizedBox(
-        width: double.infinity,
-        child: ElevatedButton(
-          onPressed: !enabled || _isExporting ? null : _doExport,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.orange,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            disabledBackgroundColor: Colors.grey,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (enabled) _buildEstimateHint(),
+          if (enabled) const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: buttonEnabled ? _doExport : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                disabledBackgroundColor: Colors.grey,
+              ),
+              child: _isExporting
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(
+                          color: Colors.white, strokeWidth: 2),
+                    )
+                  : Text(
+                      "分享 ($count 个道具)",
+                      style: const TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+            ),
           ),
-          child: _isExporting
-              ? const SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(
-                      color: Colors.white, strokeWidth: 2),
-                )
-              : Text(
-                  "分享 ($count 个道具)",
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-        ),
+        ],
       ),
+    );
+  }
+
+  Widget _buildEstimateHint() {
+    if (_isEstimating) {
+      return Row(
+        children: [
+          const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '正在估算导出包体...',
+            style: TextStyle(color: Colors.grey[600], fontSize: 12),
+          ),
+        ],
+      );
+    }
+
+    if (_estimateError != null) {
+      return Text(
+        _estimateError!,
+        style: TextStyle(color: Colors.orange[700], fontSize: 12),
+      );
+    }
+
+    final estimate = _exportEstimate;
+    if (estimate == null) {
+      return Text(
+        '选择道具后将显示预计导出包体',
+        style: TextStyle(color: Colors.grey[600], fontSize: 12),
+      );
+    }
+
+    final infoColor =
+        estimate.exceedsLimit ? Colors.red[700] : Colors.grey[700];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '预计导出包体 ${DataService.formatBytes(estimate.estimatedPackageBytes)}'
+          ' / 上限 ${DataService.formatBytes(estimate.limitBytes)}',
+          style: TextStyle(
+            color: infoColor,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '包含 ${estimate.mediaFileCount} 个媒体文件，体积为预估值，实际结果可能略有波动',
+          style: TextStyle(color: Colors.grey[600], fontSize: 12),
+        ),
+        if (estimate.exceedsLimit) ...[
+          const SizedBox(height: 4),
+          Text(
+            '已超过导出上限，请减少媒体文件或分批导出',
+            style: TextStyle(color: Colors.red[700], fontSize: 12),
+          ),
+        ],
+      ],
     );
   }
 

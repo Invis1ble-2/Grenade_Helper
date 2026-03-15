@@ -12,8 +12,15 @@ import 'grenade_preview_screen.dart';
 /// 导入预览
 class ImportPreviewScreen extends ConsumerStatefulWidget {
   final String filePath;
+  final ImportPackageMode importMode;
+  final bool requireTrustedPackage;
 
-  const ImportPreviewScreen({super.key, required this.filePath});
+  const ImportPreviewScreen({
+    super.key,
+    required this.filePath,
+    this.importMode = ImportPackageMode.normal,
+    this.requireTrustedPackage = false,
+  });
 
   @override
   ConsumerState<ImportPreviewScreen> createState() =>
@@ -58,11 +65,16 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
     try {
       final isar = ref.read(isarProvider);
       final dataService = DataService(isar);
-      final preview = await dataService.previewPackage(widget.filePath);
+      final preview = await dataService.previewPackage(
+        widget.filePath,
+        mode: widget.importMode,
+        requireTrustedPackage: widget.requireTrustedPackage,
+      );
 
       if (preview == null) {
         setState(() {
-          _error = "无法解析道具包";
+          _error =
+              widget.requireTrustedPackage ? "无法解析道具包，或包未通过安全校验" : "无法解析道具包";
           _isLoading = false;
         });
         return;
@@ -83,11 +95,14 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
         }
       }
 
-      final localTombstoneItems = preview.grenadeTombstones.isEmpty
-          ? const <String, GrenadePreviewItem>{}
-          : await dataService.loadLocalGrenadePreviewItemsByUniqueIds(
-              preview.grenadeTombstones.map((e) => e.uniqueId),
-            );
+      final localTombstoneItems =
+          widget.importMode != ImportPackageMode.lanSync ||
+                  !preview.canApplyTombstones ||
+                  preview.grenadeTombstones.isEmpty
+              ? const <String, GrenadePreviewItem>{}
+              : await dataService.loadLocalGrenadePreviewItemsByUniqueIds(
+                  preview.grenadeTombstones.map((e) => e.uniqueId),
+                );
 
       setState(() {
         _preview = preview;
@@ -117,7 +132,11 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
   }
 
   List<PackageGrenadeTombstoneData> _getCurrentTombstones() {
-    if (_preview == null) return const [];
+    if (_preview == null ||
+        widget.importMode != ImportPackageMode.lanSync ||
+        !_preview!.canApplyTombstones) {
+      return const [];
+    }
     final selectedMap = _selectedMap;
     final tombstones = _preview!.grenadeTombstones.where((item) {
       if (selectedMap == null) return true;
@@ -128,7 +147,11 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
   }
 
   List<PackageEntityTombstoneData> _getCurrentEntityTombstones() {
-    if (_preview == null) return const [];
+    if (_preview == null ||
+        widget.importMode != ImportPackageMode.lanSync ||
+        !_preview!.canApplyTombstones) {
+      return const [];
+    }
     final selectedMap = _selectedMap;
     final tombstones = _preview!.entityTombstones.where((item) {
       if (selectedMap == null) return true;
@@ -167,8 +190,9 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
     if (_preview == null) return;
     if (_selectedIds.isEmpty &&
         _metadataChangeCount() == 0 &&
-        _preview!.grenadeTombstones.isEmpty &&
-        _preview!.entityTombstones.isEmpty) {
+        (widget.importMode != ImportPackageMode.lanSync ||
+            (_preview!.grenadeTombstones.isEmpty &&
+                _preview!.entityTombstones.isEmpty))) {
       return;
     }
 
@@ -178,7 +202,10 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
       final isar = ref.read(isarProvider);
       final dataService = DataService(isar);
       final conflictNotice = await dataService.collectImportConflictNotice(
-          _preview!, _selectedIds);
+        _preview!,
+        _selectedIds,
+        mode: widget.importMode,
+      );
       if (conflictNotice.hasConflicts) {
         if (!mounted) return;
         final continueImport = await _showConflictNoticeDialog(conflictNotice);
@@ -257,6 +284,7 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
         _selectedIds,
         tagResolutions: tagResolutions,
         areaResolutions: areaResolutions,
+        mode: widget.importMode,
       );
 
       if (mounted) {
@@ -504,7 +532,9 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
       );
     }
 
-    if (_preview!.totalCount == 0 &&
+    if (widget.importMode == ImportPackageMode.lanSync &&
+        _preview!.canApplyTombstones &&
+        _preview!.totalCount == 0 &&
         (_preview!.grenadeTombstones.isNotEmpty ||
             _preview!.entityTombstones.isNotEmpty)) {
       return _buildTombstoneOnlyScreen();
@@ -526,6 +556,7 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
       appBar: AppBar(title: const Text("删除同步预览")),
       body: Column(
         children: [
+          _buildLegacyPackageNotice(),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -548,6 +579,7 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
       appBar: AppBar(title: const Text("选择地图")),
       body: Column(
         children: [
+          _buildLegacyPackageNotice(),
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.all(16),
@@ -624,6 +656,7 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
       ),
       body: Column(
         children: [
+          _buildLegacyPackageNotice(),
           // 类型筛选
           if (grenades.isNotEmpty) _buildTypeFilter(),
           // 全选栏
@@ -766,6 +799,35 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
     );
   }
 
+  Widget _buildLegacyPackageNotice() {
+    if (_preview == null || !_preview!.isLegacyPackage) {
+      return const SizedBox.shrink();
+    }
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.orange.withValues(alpha: 0.35)),
+      ),
+      child: const Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.warning_amber_rounded, color: Colors.orange),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '这是旧版道具包，未包含新版完整性校验。建议仅在信任来源下导入。',
+              style: TextStyle(fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildTypeFilter() {
     const types = [
       (null, "全部", Icons.apps),
@@ -885,6 +947,9 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
                 builder: (_) => GrenadePreviewScreen(
                   grenade: grenade,
                   memoryImages: _preview!.memoryImages,
+                  packageFilePath: _preview!.filePath,
+                  packageFileHashes: _preview!.packageFileHashes,
+                  packageFileSizes: _preview!.packageFileSizes,
                 ),
               ),
             );
@@ -959,8 +1024,11 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
   Widget _buildImportButton() {
     final grenadeCount = _selectedIds.length;
     final metadataCount = _metadataChangeCount();
-    final tombstoneCount = (_preview?.grenadeTombstones.length ?? 0) +
-        (_preview?.entityTombstones.length ?? 0);
+    final tombstoneCount = widget.importMode == ImportPackageMode.lanSync &&
+            _preview!.canApplyTombstones
+        ? (_preview?.grenadeTombstones.length ?? 0) +
+            (_preview?.entityTombstones.length ?? 0)
+        : 0;
     final canImport =
         grenadeCount > 0 || metadataCount > 0 || tombstoneCount > 0;
     final labelParts = <String>[

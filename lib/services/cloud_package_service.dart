@@ -8,6 +8,7 @@ import '../models/cloud_package.dart';
 
 /// 云端道具包服务
 class CloudPackageService {
+  static const int _maxRemotePackageSizeBytes = 1024 * 1024 * 1024;
   // ===== 索引源 (GitHub) =====
   // GitHub
   static const String kGitHubIndexUrl =
@@ -91,8 +92,14 @@ class CloudPackageService {
 
       if (response.statusCode == 200) {
         final contentLength = response.contentLength ?? 0;
+        if (contentLength > _maxRemotePackageSizeBytes) {
+          debugPrint('下载失败，文件超过上限');
+          return null;
+        }
         final tempDir = await getTemporaryDirectory();
-        final fileName = url.split('/').last;
+        final fileName = url.split('/').last.isNotEmpty
+            ? url.split('/').last
+            : 'package.cs2pkg';
         final filePath = '${tempDir.path}/$fileName';
 
         final file = File(filePath);
@@ -100,6 +107,14 @@ class CloudPackageService {
         int received = 0;
 
         await for (final chunk in response.stream) {
+          if (received + chunk.length > _maxRemotePackageSizeBytes) {
+            await sink.close();
+            try {
+              await file.delete();
+            } catch (_) {}
+            debugPrint('下载失败，文件超过上限');
+            return null;
+          }
           sink.add(chunk);
           received += chunk.length;
           onProgress?.call(received, contentLength);
@@ -123,22 +138,7 @@ class CloudPackageService {
 
   /// URL导入
   static Future<String?> downloadFromUrl(String url) async {
-    try {
-      final uri = Uri.parse(url);
-      final response = await http.get(uri);
-      if (response.statusCode == 200) {
-        final tempDir = await getTemporaryDirectory();
-        final fileName = url.split('/').last.isNotEmpty
-            ? url.split('/').last
-            : 'package.cs2pkg';
-        final filePath = '${tempDir.path}/$fileName';
-        await File(filePath).writeAsBytes(response.bodyBytes);
-        return filePath;
-      }
-    } catch (e) {
-      debugPrint('下载失败: $e');
-    }
-    return null;
+    return _downloadFromUrl(url, originalUrl: url);
   }
 
   /// 检查更新

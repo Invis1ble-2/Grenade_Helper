@@ -293,7 +293,9 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       if (localIps.isEmpty) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('未获取到本机局域网 IP，无法进行网段探测'), duration: Duration(seconds: 1)),
+          const SnackBar(
+              content: Text('未获取到本机局域网 IP，无法进行网段探测'),
+              duration: Duration(seconds: 1)),
         );
         return;
       }
@@ -320,7 +322,9 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('发现 ${results.length} 台设备'), duration: Duration(seconds: 1)),
+        SnackBar(
+            content: Text('发现 ${results.length} 台设备'),
+            duration: Duration(seconds: 1)),
       );
     } catch (e) {
       await _appendHistory(
@@ -331,7 +335,10 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('网段探测失败: $e'), backgroundColor: Colors.red, duration: Duration(seconds: 1)),
+        SnackBar(
+            content: Text('网段探测失败: $e'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 1)),
       );
     } finally {
       if (mounted) {
@@ -831,14 +838,20 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
 
     if (_sendScope == _LanSendScope.map && _selectedMapForSend == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先选择地图'), backgroundColor: Colors.orange, duration: Duration(seconds: 1)),
+        const SnackBar(
+            content: Text('请先选择地图'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 1)),
       );
       return;
     }
     if (_sendScope == _LanSendScope.grenades &&
         _selectedGrenadesForSend.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先选择道具'), backgroundColor: Colors.orange, duration: Duration(seconds: 1)),
+        const SnackBar(
+            content: Text('请先选择道具'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 1)),
       );
       return;
     }
@@ -1174,14 +1187,13 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            _sendMode == _LanSyncMode.incremental
-                ? '增量同步完成（已收到导入确认）'
-                : '全量同步完成（已收到导入确认）',
-          ),
-          backgroundColor: Colors.green,
-          duration: Duration(seconds: 1)
-        ),
+            content: Text(
+              _sendMode == _LanSyncMode.incremental
+                  ? '增量同步完成（已收到导入确认）'
+                  : '全量同步完成（已收到导入确认）',
+            ),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 1)),
       );
     } catch (e) {
       await _appendHistory(
@@ -1192,7 +1204,10 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('发送失败: $e'), backgroundColor: Colors.red, duration: Duration(seconds: 1)),
+        SnackBar(
+            content: Text('发送失败: $e'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 1)),
       );
     } finally {
       if (packagePath != null) {
@@ -1226,7 +1241,10 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
         );
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error), backgroundColor: Colors.red, duration: Duration(seconds: 1)),
+          SnackBar(
+              content: Text(error),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 1)),
         );
       } else if (_receiveController.isRunning) {
         await _appendHistory(
@@ -1497,7 +1515,9 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('文件不存在，无法导入'), backgroundColor: Colors.red, duration: Duration(seconds: 1)),
+            content: Text('文件不存在，无法导入'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 1)),
       );
       return;
     }
@@ -1518,14 +1538,20 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
     try {
       final isar = ref.read(isarProvider);
       final dataService = DataService(isar);
-      final preview = await dataService.previewPackage(task.filePath);
+      final preview = await dataService.previewPackage(
+        task.filePath,
+        mode: ImportPackageMode.lanSync,
+      );
       if (preview == null) {
         throw StateError('文件格式错误或无数据');
       }
 
       final selectedIds = _buildSilentImportSelectedIds(preview);
-      final conflictNotice =
-          await dataService.collectImportConflictNotice(preview, selectedIds);
+      final conflictNotice = await dataService.collectImportConflictNotice(
+        preview,
+        selectedIds,
+        mode: ImportPackageMode.lanSync,
+      );
       if (conflictNotice.hasConflicts) {
         if (!mounted) return;
         final continueImport =
@@ -1639,6 +1665,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
         selectedIds,
         tagResolutions: tagResolutions,
         areaResolutions: areaResolutions,
+        mode: ImportPackageMode.lanSync,
       );
 
       await _receiveController.markTaskStatus(
@@ -1749,7 +1776,10 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       final importResult = await Navigator.push<String>(
         context,
         MaterialPageRoute(
-          builder: (_) => ImportPreviewScreen(filePath: task.filePath),
+          builder: (_) => ImportPreviewScreen(
+            filePath: task.filePath,
+            importMode: ImportPackageMode.lanSync,
+          ),
         ),
       );
 

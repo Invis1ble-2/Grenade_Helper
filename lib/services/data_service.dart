@@ -17,6 +17,248 @@ import '../models/grenade_tag.dart';
 import 'favorite_folder_service.dart';
 import 'lan_sync/lan_sync_local_store.dart';
 
+const int _maxImportPackageSizeBytes = 1024 * 1024 * 1024;
+const int _maxImportPackageFileCount = 1000;
+const int _maxImportPackageEntrySizeBytes = 300 * 1024 * 1024;
+const int _maxImportPackageExpandedSizeBytes = 4 * 1024 * 1024 * 1024;
+const int _maxExportPackageSizeBytes = 1024 * 1024 * 1024;
+const int _estimatedArchiveBaseOverheadBytes = 2048;
+const int _estimatedArchiveEntryOverheadBytes = 256;
+const String _packageManifestFileName = 'manifest.json';
+const String _packageDataFileName = 'data.json';
+const String _packageTypeExport = 'export';
+const String _packageTypeLanSync = 'lan_sync';
+const int _packageManifestVersion = 1;
+const String _placeholderSha256Hex =
+    '0000000000000000000000000000000000000000000000000000000000000000';
+final String _cs2PackagePassword = String.fromCharCodes(
+  _obfuscatedCs2PackagePassword
+      .map((value) => value ^ _cs2PackagePasswordXorKey),
+);
+const int _cs2PackagePasswordXorKey = 73;
+const List<int> _obfuscatedCs2PackagePassword = [
+  14,
+  59,
+  44,
+  39,
+  40,
+  45,
+  44,
+  1,
+  44,
+  37,
+  57,
+  44,
+  59,
+  100,
+  10,
+  26,
+  123,
+  25,
+  34,
+  46,
+];
+const int _exportArchiveCompressionLevel = DeflateLevel.bestCompression;
+const Set<String> _alreadyCompressedArchiveExtensions = {
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.gif',
+  '.webp',
+  '.heic',
+  '.heif',
+  '.mp4',
+  '.mov',
+  '.m4v',
+  '.avi',
+  '.mkv',
+  '.webm',
+};
+final List<int> _cs2PackageIntegrityKey =
+    sha256.convert(utf8.encode(_cs2PackagePassword)).bytes;
+
+int _compressionLevelForArchiveEntry(String filePath) {
+  final extension = p.extension(filePath).toLowerCase();
+  if (_alreadyCompressedArchiveExtensions.contains(extension)) {
+    return DeflateLevel.none;
+  }
+  return _exportArchiveCompressionLevel;
+}
+
+Object? _canonicalizePackageJsonValue(Object? value) {
+  if (value is Map) {
+    final entries = value.entries.toList()
+      ..sort((a, b) => a.key.toString().compareTo(b.key.toString()));
+    final normalized = <String, Object?>{};
+    for (final entry in entries) {
+      normalized[entry.key.toString()] =
+          _canonicalizePackageJsonValue(entry.value);
+    }
+    return normalized;
+  }
+  if (value is List) {
+    return value.map(_canonicalizePackageJsonValue).toList(growable: false);
+  }
+  return value;
+}
+
+String _sha256BytesHex(List<int> bytes) {
+  return sha256.convert(bytes).toString();
+}
+
+String _computePackageContentHmac({
+  required int schemaVersion,
+  required String packageType,
+  required int createdAtMs,
+  required List<Map<String, dynamic>> files,
+}) {
+  final canonical = _canonicalizePackageJsonValue({
+    'manifestVersion': _packageManifestVersion,
+    'schemaVersion': schemaVersion,
+    'packageType': packageType,
+    'createdAt': createdAtMs,
+    'files': files,
+  });
+  final encoded = utf8.encode(jsonEncode(canonical));
+  return Hmac(sha256, _cs2PackageIntegrityKey).convert(encoded).toString();
+}
+
+Archive? _openCs2PackageArchiveFromFile(String filePath) {
+  for (final password in [_cs2PackagePassword, null]) {
+    final input = InputFileStream(filePath);
+    try {
+      return ZipDecoder().decodeStream(input, password: password);
+    } catch (_) {
+      input.closeSync();
+    }
+  }
+  return null;
+}
+
+ArchiveFile? _findArchiveFileByNameOrBasename(
+    Archive archive, String fileName) {
+  final direct = archive.find(fileName);
+  if (direct != null) {
+    return direct;
+  }
+  for (final entry in archive) {
+    if (!entry.isFile) continue;
+    if (p.basename(entry.name) == fileName) {
+      return entry;
+    }
+  }
+  return null;
+}
+
+enum ImportPackageMode { normal, lanSync }
+
+class PackageManifestFileEntry {
+  final String path;
+  final String kind;
+  final int sizeBytes;
+  final String sha256;
+
+  const PackageManifestFileEntry({
+    required this.path,
+    required this.kind,
+    required this.sizeBytes,
+    required this.sha256,
+  });
+
+  factory PackageManifestFileEntry.fromJson(Map<String, dynamic> json) {
+    return PackageManifestFileEntry(
+      path: (json['path'] as String? ?? '').trim(),
+      kind: (json['kind'] as String? ?? '').trim(),
+      sizeBytes: json['sizeBytes'] as int? ?? 0,
+      sha256: (json['sha256'] as String? ?? '').trim().toLowerCase(),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'path': path,
+        'kind': kind,
+        'sizeBytes': sizeBytes,
+        'sha256': sha256,
+      };
+}
+
+class PackageManifestData {
+  final int manifestVersion;
+  final int schemaVersion;
+  final String packageType;
+  final int createdAt;
+  final List<PackageManifestFileEntry> files;
+  final String contentHmac;
+
+  const PackageManifestData({
+    required this.manifestVersion,
+    required this.schemaVersion,
+    required this.packageType,
+    required this.createdAt,
+    required this.files,
+    required this.contentHmac,
+  });
+
+  factory PackageManifestData.fromJson(Map<String, dynamic> json) {
+    final filesRaw = json['files'];
+    final files = <PackageManifestFileEntry>[];
+    if (filesRaw is List) {
+      for (final raw in filesRaw) {
+        if (raw is! Map<String, dynamic>) continue;
+        files.add(PackageManifestFileEntry.fromJson(raw));
+      }
+    }
+    return PackageManifestData(
+      manifestVersion: json['manifestVersion'] as int? ?? 0,
+      schemaVersion: json['schemaVersion'] as int? ?? 1,
+      packageType: (json['packageType'] as String? ?? '').trim(),
+      createdAt:
+          json['createdAt'] as int? ?? DateTime.now().millisecondsSinceEpoch,
+      files: files,
+      contentHmac: (json['contentHmac'] as String? ?? '').trim().toLowerCase(),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'manifestVersion': manifestVersion,
+        'schemaVersion': schemaVersion,
+        'packageType': packageType,
+        'createdAt': createdAt,
+        'files': files.map((entry) => entry.toJson()).toList(growable: false),
+        'contentHmac': contentHmac,
+      };
+
+  bool get isValid =>
+      manifestVersion == _packageManifestVersion &&
+      schemaVersion > 0 &&
+      (packageType == _packageTypeExport ||
+          packageType == _packageTypeLanSync) &&
+      files.isNotEmpty &&
+      contentHmac.isNotEmpty;
+}
+
+class ExportPackageEstimate {
+  final int grenadeCount;
+  final int mediaFileCount;
+  final int mediaBytes;
+  final int dataJsonBytes;
+  final int manifestJsonBytes;
+  final int estimatedPackageBytes;
+  final int limitBytes;
+
+  const ExportPackageEstimate({
+    required this.grenadeCount,
+    required this.mediaFileCount,
+    required this.mediaBytes,
+    required this.dataJsonBytes,
+    required this.manifestJsonBytes,
+    required this.estimatedPackageBytes,
+    this.limitBytes = _maxExportPackageSizeBytes,
+  });
+
+  bool get exceedsLimit => estimatedPackageBytes > limitBytes;
+}
+
 /// 导入状态
 enum ImportStatus { newItem, update, skip }
 
@@ -51,6 +293,12 @@ class PackagePreviewResult {
   final String filePath;
   final Map<String, List<int>> memoryImages;
   final int schemaVersion;
+  final String packageType;
+  final bool isTrustedPackage;
+  final bool isLegacyPackage;
+  final Map<String, String> packageFileHashes;
+  final Map<String, int> packageFileSizes;
+  final Set<String> availablePackageFiles;
   final Map<String, PackageTagData> tagsByUuid;
   final List<PackageAreaData> areas;
   final List<PackageFavoriteFolderData> favoriteFolders;
@@ -63,6 +311,12 @@ class PackagePreviewResult {
     required this.filePath,
     required this.memoryImages,
     this.schemaVersion = 1,
+    this.packageType = _packageTypeExport,
+    this.isTrustedPackage = false,
+    this.isLegacyPackage = true,
+    this.packageFileHashes = const {},
+    this.packageFileSizes = const {},
+    this.availablePackageFiles = const <String>{},
     this.tagsByUuid = const {},
     this.areas = const [],
     this.favoriteFolders = const [],
@@ -72,6 +326,8 @@ class PackagePreviewResult {
   });
 
   bool get isMultiMap => mapNames.length > 1;
+  bool get canApplyTombstones =>
+      isTrustedPackage && packageType == _packageTypeLanSync;
 
   int get totalCount =>
       grenadesByMap.values.fold(0, (sum, list) => sum + list.length);
@@ -517,12 +773,16 @@ class _PackageParams {
   final String zipPath;
   final String jsonData;
   final List<String> filesToCopy;
+  final int schemaVersion;
+  final String packageType;
 
   _PackageParams({
     required this.exportDirPath,
     required this.zipPath,
     required this.jsonData,
     required this.filesToCopy,
+    required this.schemaVersion,
+    required this.packageType,
   });
 }
 
@@ -645,13 +905,14 @@ class _LanSyncExportBundle {
 /// 在 isolate 中执行文件复制和压缩（顶层函数）
 Future<void> _packageFilesInIsolate(_PackageParams params) async {
   final exportDir = Directory(params.exportDirPath);
+  final createdAtMs = DateTime.now().millisecondsSinceEpoch;
 
   // 清理并创建目录
   if (exportDir.existsSync()) exportDir.deleteSync(recursive: true);
   exportDir.createSync(recursive: true);
 
   // 写入 data.json
-  final jsonFile = File(p.join(exportDir.path, "data.json"));
+  final jsonFile = File(p.join(exportDir.path, _packageDataFileName));
   jsonFile.writeAsStringSync(params.jsonData);
 
   // 复制媒体文件
@@ -662,11 +923,65 @@ Future<void> _packageFilesInIsolate(_PackageParams params) async {
     }
   }
 
+  final manifestFiles = <Map<String, dynamic>>[];
+  final stagedFiles = <File>[jsonFile];
+  for (final filePath in params.filesToCopy) {
+    final stagedFile = File(p.join(exportDir.path, p.basename(filePath)));
+    if (stagedFile.existsSync()) {
+      stagedFiles.add(stagedFile);
+    }
+  }
+  stagedFiles.sort((a, b) => p.basename(a.path).compareTo(p.basename(b.path)));
+  for (final stagedFile in stagedFiles) {
+    final bytes = stagedFile.readAsBytesSync();
+    final archiveName = p.basename(stagedFile.path);
+    manifestFiles.add({
+      'path': archiveName,
+      'kind': archiveName == _packageDataFileName ? 'data' : 'media',
+      'sizeBytes': bytes.length,
+      'sha256': _sha256BytesHex(bytes),
+    });
+  }
+
+  final manifest = PackageManifestData(
+    manifestVersion: _packageManifestVersion,
+    schemaVersion: params.schemaVersion,
+    packageType: params.packageType,
+    createdAt: createdAtMs,
+    files: manifestFiles
+        .map((raw) => PackageManifestFileEntry.fromJson(raw))
+        .toList(growable: false),
+    contentHmac: _computePackageContentHmac(
+      schemaVersion: params.schemaVersion,
+      packageType: params.packageType,
+      createdAtMs: createdAtMs,
+      files: manifestFiles,
+    ),
+  );
+  final manifestJson =
+      jsonEncode(_canonicalizePackageJsonValue(manifest.toJson()));
+
   // 压缩为 .cs2pkg
-  final encoder = ZipFileEncoder();
-  encoder.create(params.zipPath);
-  // archive 4.x 的 addDirectory/close 是异步方法，必须等待完成，否则会生成空包/半成品包
-  await encoder.addDirectory(exportDir, includeDirName: false);
+  final encoder = ZipFileEncoder(password: _cs2PackagePassword);
+  // archive 4.x 默认使用 bestSpeed(1)，这里显式切到最高压缩，
+  // 同时避免对已压缩媒体再次做无效压缩。
+  encoder.create(params.zipPath, level: _exportArchiveCompressionLevel);
+  await encoder.addFile(
+    jsonFile,
+    _packageDataFileName,
+    _exportArchiveCompressionLevel,
+  );
+  encoder.addArchiveFile(
+      ArchiveFile.string(_packageManifestFileName, manifestJson));
+  for (final filePath in params.filesToCopy) {
+    final archivedFile = File(p.join(exportDir.path, p.basename(filePath)));
+    if (!archivedFile.existsSync()) continue;
+    await encoder.addFile(
+      archivedFile,
+      p.basename(filePath),
+      _compressionLevelForArchiveEntry(filePath),
+    );
+  }
   await encoder.close();
 }
 
@@ -691,11 +1006,160 @@ class DataService {
     '.webm',
   };
 
+  static int get maxExportPackageSizeBytes => _maxExportPackageSizeBytes;
+
+  static String formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    double size = bytes.toDouble();
+    var unitIndex = -1;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex++;
+    }
+    final fractionDigits = size >= 100 ? 0 : 1;
+    return '${size.toStringAsFixed(fractionDigits)} ${units[unitIndex]}';
+  }
+
   static String normalizeMediaPath(String rawPath) {
     final trimmed = rawPath.trim();
     if (trimmed.isEmpty) return '';
     final normalized = p.normalize(File(trimmed).absolute.path);
     return Platform.isWindows ? normalized.toLowerCase() : normalized;
+  }
+
+  Future<ExportPackageEstimate> estimateExportPackage(
+    List<Grenade> grenades,
+  ) async {
+    if (grenades.isEmpty) {
+      return const ExportPackageEstimate(
+        grenadeCount: 0,
+        mediaFileCount: 0,
+        mediaBytes: 0,
+        dataJsonBytes: 0,
+        manifestJsonBytes: 0,
+        estimatedPackageBytes: 0,
+      );
+    }
+    final exportBundle = await _buildExportBundle(grenades);
+    return _estimateExportPackageFromBundle(
+      exportBundle,
+      grenadeCount: grenades.length,
+      schemaVersion: 2,
+      packageType: _packageTypeExport,
+    );
+  }
+
+  Future<ExportPackageEstimate> _estimateExportPackageFromBundle(
+    _ExportBundle exportBundle, {
+    required int grenadeCount,
+    required int schemaVersion,
+    required String packageType,
+  }) async {
+    final dataJson = jsonEncode(exportBundle.toJson());
+    final dataJsonBytes = utf8.encode(dataJson).length;
+    final manifestFiles = <Map<String, dynamic>>[
+      {
+        'path': _packageDataFileName,
+        'kind': 'data',
+        'sizeBytes': dataJsonBytes,
+        'sha256': _placeholderSha256Hex,
+      },
+    ];
+
+    int mediaBytes = 0;
+    int mediaFileCount = 0;
+    final addedNames = <String>{_packageDataFileName};
+    for (final filePath in exportBundle.filesToZip) {
+      final file = File(filePath);
+      if (!await file.exists()) continue;
+      final fileName = p.basename(filePath);
+      if (!addedNames.add(fileName)) continue;
+      final sizeBytes = await file.length();
+      mediaBytes += sizeBytes;
+      mediaFileCount++;
+      manifestFiles.add({
+        'path': fileName,
+        'kind': 'media',
+        'sizeBytes': sizeBytes,
+        'sha256': _placeholderSha256Hex,
+      });
+    }
+
+    final manifest = PackageManifestData(
+      manifestVersion: _packageManifestVersion,
+      schemaVersion: schemaVersion,
+      packageType: packageType,
+      createdAt: DateTime.now().millisecondsSinceEpoch,
+      files: manifestFiles
+          .map((raw) => PackageManifestFileEntry.fromJson(raw))
+          .toList(growable: false),
+      contentHmac: _placeholderSha256Hex,
+    );
+    final manifestJson =
+        jsonEncode(_canonicalizePackageJsonValue(manifest.toJson()));
+    final manifestJsonBytes = utf8.encode(manifestJson).length;
+    final estimatedPackageBytes = mediaBytes +
+        dataJsonBytes +
+        manifestJsonBytes +
+        _estimatedArchiveBaseOverheadBytes +
+        (manifestFiles.length + 1) * _estimatedArchiveEntryOverheadBytes;
+
+    return ExportPackageEstimate(
+      grenadeCount: grenadeCount,
+      mediaFileCount: mediaFileCount,
+      mediaBytes: mediaBytes,
+      dataJsonBytes: dataJsonBytes,
+      manifestJsonBytes: manifestJsonBytes,
+      estimatedPackageBytes: estimatedPackageBytes,
+    );
+  }
+
+  void _assertExportEstimateWithinLimit(ExportPackageEstimate estimate) {
+    if (!estimate.exceedsLimit) return;
+    throw StateError(
+      '预计导出包体 ${formatBytes(estimate.estimatedPackageBytes)}，'
+      '已超过上限 ${formatBytes(estimate.limitBytes)}，请减少媒体或分批导出',
+    );
+  }
+
+  static Future<List<int>?> readPackageMediaBytes({
+    required String packageFilePath,
+    required String packageMediaPath,
+    String? expectedSha256,
+    int? expectedSizeBytes,
+  }) async {
+    final fileName = p.basename(packageMediaPath.trim());
+    if (fileName.isEmpty) return null;
+    final extension = p.extension(fileName).toLowerCase();
+    if (!_trackedMediaExtensions.contains(extension)) {
+      return null;
+    }
+
+    final archive = _openCs2PackageArchiveFromFile(packageFilePath);
+    if (archive == null) return null;
+    try {
+      final archiveFile = _findArchiveFileByNameOrBasename(archive, fileName);
+      if (archiveFile == null || !archiveFile.isFile) {
+        return null;
+      }
+      if (archiveFile.size < 0 ||
+          archiveFile.size > _maxImportPackageEntrySizeBytes) {
+        return null;
+      }
+      final bytes = archiveFile.content;
+      if (expectedSizeBytes != null && expectedSizeBytes != bytes.length) {
+        return null;
+      }
+      if (expectedSha256 != null &&
+          expectedSha256.isNotEmpty &&
+          _sha256BytesHex(bytes) != expectedSha256) {
+        return null;
+      }
+      return bytes;
+    } finally {
+      archive.clearSync();
+    }
   }
 
   /// 删除媒体文件（静态方法，可在其他地方调用）
@@ -932,224 +1396,355 @@ class DataService {
   }
 
   /// 预览包
-  Future<PackagePreviewResult?> previewPackage(String filePath) async {
+  Future<PackagePreviewResult?> previewPackage(
+    String filePath, {
+    ImportPackageMode mode = ImportPackageMode.normal,
+    bool requireTrustedPackage = false,
+  }) async {
     if (!filePath.toLowerCase().endsWith('.cs2pkg')) {
       return null;
     }
 
     final file = File(filePath);
     if (!file.existsSync()) return null;
-
-    // 解压
-    final bytes = file.readAsBytesSync();
-    final archive = ZipDecoder().decodeBytes(bytes);
-
-    List<dynamic> grenadesData = [];
-    int schemaVersion = 1;
-    final tagsByUuid = <String, PackageTagData>{};
-    final areas = <PackageAreaData>[];
-    final favoriteFolders = <PackageFavoriteFolderData>[];
-    final impactGroups = <PackageImpactGroupData>[];
-    final grenadeTombstones = <PackageGrenadeTombstoneData>[];
-    final entityTombstones = <PackageEntityTombstoneData>[];
-    final Map<String, List<int>> memoryImages = {};
-
-    for (var archiveFile in archive) {
-      final fileName = p.basename(archiveFile.name);
-      if (fileName == "data.json") {
-        final decoded =
-            jsonDecode(utf8.decode(archiveFile.content as List<int>));
-        if (decoded is Map<String, dynamic>) {
-          schemaVersion = decoded['schemaVersion'] as int? ?? 1;
-          final grenadesRaw = decoded['grenades'];
-          if (grenadesRaw is List) {
-            grenadesData = grenadesRaw;
-          }
-          final tagsRaw = decoded['tags'];
-          if (tagsRaw is List) {
-            for (final raw in tagsRaw) {
-              if (raw is! Map<String, dynamic>) continue;
-              final tag = PackageTagData.fromJson(raw);
-              if (tag.tagUuid.isEmpty) continue;
-              tagsByUuid[tag.tagUuid] = tag;
-            }
-          }
-          final areasRaw = decoded['areas'];
-          if (areasRaw is List) {
-            for (final raw in areasRaw) {
-              if (raw is! Map<String, dynamic>) continue;
-              final area = PackageAreaData.fromJson(raw);
-              if (area.tagUuid.isEmpty) continue;
-              areas.add(area);
-            }
-          }
-          final favoriteFoldersRaw = decoded['favoriteFolders'];
-          if (favoriteFoldersRaw is List) {
-            for (final raw in favoriteFoldersRaw) {
-              if (raw is! Map<String, dynamic>) continue;
-              final folder = PackageFavoriteFolderData.fromJson(raw);
-              if (folder.mapName.isEmpty || folder.nameKey.isEmpty) continue;
-              favoriteFolders.add(folder);
-            }
-          }
-          final impactGroupsRaw = decoded['impactGroups'];
-          if (impactGroupsRaw is List) {
-            for (final raw in impactGroupsRaw) {
-              if (raw is! Map<String, dynamic>) continue;
-              final group = PackageImpactGroupData.fromJson(raw);
-              if (group.mapName.isEmpty ||
-                  group.layerName.isEmpty ||
-                  group.name.isEmpty) {
-                continue;
-              }
-              impactGroups.add(group);
-            }
-          }
-          final grenadeTombstonesRaw = decoded['grenadeTombstones'];
-          if (grenadeTombstonesRaw is List) {
-            for (final raw in grenadeTombstonesRaw) {
-              if (raw is! Map<String, dynamic>) continue;
-              final tombstone = PackageGrenadeTombstoneData.fromJson(raw);
-              if (tombstone.uniqueId.isEmpty || tombstone.mapName.isEmpty) {
-                continue;
-              }
-              grenadeTombstones.add(tombstone);
-            }
-          }
-          final entityTombstonesRaw = decoded['entityTombstones'];
-          if (entityTombstonesRaw is List) {
-            for (final raw in entityTombstonesRaw) {
-              if (raw is! Map<String, dynamic>) continue;
-              final tombstone = PackageEntityTombstoneData.fromJson(raw);
-              if (!LanSyncEntityTombstoneType.values
-                      .contains(tombstone.entityType) ||
-                  tombstone.entityKey.isEmpty ||
-                  tombstone.mapName.isEmpty) {
-                continue;
-              }
-              entityTombstones.add(tombstone);
-            }
-          }
-        } else if (decoded is List) {
-          grenadesData = decoded;
-          schemaVersion = 1;
-        }
-      } else {
-        if (archiveFile.isFile) {
-          memoryImages[fileName] = archiveFile.content as List<int>;
-        }
-      }
-    }
-
-    if (grenadesData.isEmpty &&
-        tagsByUuid.isEmpty &&
-        areas.isEmpty &&
-        favoriteFolders.isEmpty &&
-        impactGroups.isEmpty &&
-        grenadeTombstones.isEmpty &&
-        entityTombstones.isEmpty) {
+    if (file.lengthSync() > _maxImportPackageSizeBytes) {
       return null;
     }
 
-    // 按地图分组
-    final Map<String, List<GrenadePreviewItem>> grenadesByMap = {};
+    final archive = _openCs2PackageArchiveFromFile(filePath);
+    if (archive == null) return null;
+    try {
+      final archiveFiles =
+          archive.where((entry) => entry.isFile).toList(growable: false);
 
-    for (var item in grenadesData) {
-      final mapName = item['mapName'] as String? ?? 'Unknown';
-      final layerName = item['layerName'] as String? ?? 'Default';
-      final title = item['title'] as String? ?? '';
-      final type = item['type'] as int? ?? 0;
-      final author = item['author'] as String?;
-      final importedUniqueId = item['uniqueId'] as String?;
-      final xRatio = (item['x'] as num?)?.toDouble() ?? 0.0;
-      final yRatio = (item['y'] as num?)?.toDouble() ?? 0.0;
-      final importedUpdatedAt = item['updatedAt'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(item['updatedAt'])
-          : DateTime.now();
-
-      // 生成临时 uniqueId（如果没有）
-      final uniqueId =
-          importedUniqueId ?? '${mapName}_${title}_${xRatio}_$yRatio';
-
-      // 计算导入状态
-      ImportStatus status = ImportStatus.newItem;
-
-      // 查找地图
-      final map = await isar.gameMaps.filter().nameEqualTo(mapName).findFirst();
-      if (map != null) {
-        await map.layers.load();
-        MapLayer? layer;
-        for (var l in map.layers) {
-          if (l.name == layerName) {
-            layer = l;
-            break;
-          }
+      final archiveFilesByName = <String, ArchiveFile>{};
+      var expandedSize = 0;
+      for (final archiveFile in archiveFiles) {
+        final fileName = p.basename(archiveFile.name).trim();
+        if (fileName.isEmpty) return null;
+        if (archiveFilesByName.containsKey(fileName)) {
+          return null;
         }
-        layer ??= map.layers.isNotEmpty ? map.layers.first : null;
+        if (archiveFile.size < 0 ||
+            archiveFile.size > _maxImportPackageEntrySizeBytes) {
+          return null;
+        }
+        expandedSize += archiveFile.size;
+        if (expandedSize > _maxImportPackageExpandedSizeBytes) {
+          return null;
+        }
+        archiveFilesByName[fileName] = archiveFile;
+      }
+      final importableFileCount = archiveFilesByName.keys
+          .where((name) =>
+              name != _packageDataFileName && name != _packageManifestFileName)
+          .length;
+      if (importableFileCount > _maxImportPackageFileCount) {
+        return null;
+      }
 
-        if (layer != null) {
-          // 查找已有道具
-          Grenade? existing;
+      List<int>? dataBytes;
+      var packageType = _packageTypeExport;
+      var schemaVersion = 1;
+      var isTrustedPackage = false;
+      var isLegacyPackage = true;
+      final availablePackageFiles = <String>{};
+      final packageFileHashes = <String, String>{};
+      final packageFileSizes = <String, int>{};
 
-          if (importedUniqueId != null && importedUniqueId.isNotEmpty) {
-            final allGrenades = await isar.grenades.where().findAll();
-            existing = allGrenades
-                .where((g) => g.uniqueId == importedUniqueId)
-                .firstOrNull;
+      final manifestArchiveFile = archiveFilesByName[_packageManifestFileName];
+      if (manifestArchiveFile != null) {
+        final manifestDecoded =
+            jsonDecode(utf8.decode(manifestArchiveFile.content));
+        if (manifestDecoded is! Map<String, dynamic>) {
+          return null;
+        }
+        final manifest = PackageManifestData.fromJson(manifestDecoded);
+        if (!manifest.isValid) return null;
+
+        final manifestNames = manifest.files.map((entry) => entry.path).toSet();
+        final actualNames = archiveFilesByName.keys
+            .where((name) => name != _packageManifestFileName)
+            .toSet();
+        if (manifest.files.length != manifestNames.length) {
+          return null;
+        }
+        if (actualNames.length != manifestNames.length ||
+            !actualNames.containsAll(manifestNames) ||
+            !manifestNames.containsAll(actualNames)) {
+          return null;
+        }
+
+        final manifestFilesJson = <Map<String, dynamic>>[];
+        for (final entry in manifest.files) {
+          final archiveFile = archiveFilesByName[entry.path];
+          if (archiveFile == null) return null;
+          if (archiveFile.size != entry.sizeBytes) {
+            return null;
           }
-
-          if (existing == null && importedUniqueId == null) {
-            await layer.grenades.load();
-            existing = layer.grenades
-                .where((g) =>
-                    g.title == title &&
-                    (g.xRatio - xRatio).abs() < 0.01 &&
-                    (g.yRatio - yRatio).abs() < 0.01)
-                .firstOrNull;
+          final contentBytes = archiveFile.content;
+          final digest = _sha256BytesHex(contentBytes);
+          if (digest != entry.sha256) {
+            return null;
           }
-
-          if (existing != null) {
-            if (await _shouldImportGrenadeOverLocal(
-              existing,
-              item,
-              memoryImages,
-            )) {
-              status = ImportStatus.update;
-            } else {
-              status = ImportStatus.skip;
-            }
+          manifestFilesJson.add(entry.toJson());
+          if (entry.path == _packageDataFileName) {
+            dataBytes = contentBytes;
+          } else {
+            availablePackageFiles.add(entry.path);
+            packageFileHashes[entry.path] = digest;
+            packageFileSizes[entry.path] = entry.sizeBytes;
           }
+          archiveFile.clear();
+        }
+
+        if (dataBytes == null) {
+          return null;
+        }
+
+        final expectedHmac = _computePackageContentHmac(
+          schemaVersion: manifest.schemaVersion,
+          packageType: manifest.packageType,
+          createdAtMs: manifest.createdAt,
+          files: manifestFilesJson,
+        );
+        if (expectedHmac != manifest.contentHmac) {
+          return null;
+        }
+
+        schemaVersion = manifest.schemaVersion;
+        packageType = manifest.packageType;
+        isTrustedPackage = true;
+        isLegacyPackage = false;
+      } else {
+        if (requireTrustedPackage) {
+          return null;
+        }
+        final dataArchiveFile = archiveFilesByName[_packageDataFileName];
+        if (dataArchiveFile == null) {
+          return null;
+        }
+        dataBytes = dataArchiveFile.content;
+        for (final entry in archiveFilesByName.entries) {
+          if (entry.key == _packageDataFileName) continue;
+          if (entry.key == _packageManifestFileName) continue;
+          availablePackageFiles.add(entry.key);
+          packageFileSizes[entry.key] = entry.value.size;
+          final entryBytes = entry.value.content;
+          packageFileHashes[entry.key] = _sha256BytesHex(entryBytes);
+          entry.value.clear();
         }
       }
 
-      final previewItem = GrenadePreviewItem(
-        rawData: item,
-        uniqueId: uniqueId,
-        title: title,
-        type: type,
-        mapName: mapName,
-        layerName: layerName,
-        author: author,
-        status: status,
-        updatedAt: importedUpdatedAt,
+      if (requireTrustedPackage && !isTrustedPackage) {
+        return null;
+      }
+
+      List<dynamic> grenadesData = [];
+      final tagsByUuid = <String, PackageTagData>{};
+      final areas = <PackageAreaData>[];
+      final favoriteFolders = <PackageFavoriteFolderData>[];
+      final impactGroups = <PackageImpactGroupData>[];
+      final grenadeTombstones = <PackageGrenadeTombstoneData>[];
+      final entityTombstones = <PackageEntityTombstoneData>[];
+      final decoded = jsonDecode(utf8.decode(dataBytes));
+      if (decoded is Map<String, dynamic>) {
+        schemaVersion = decoded['schemaVersion'] as int? ?? schemaVersion;
+        final grenadesRaw = decoded['grenades'];
+        if (grenadesRaw is List) {
+          grenadesData = grenadesRaw;
+        }
+        final tagsRaw = decoded['tags'];
+        if (tagsRaw is List) {
+          for (final raw in tagsRaw) {
+            if (raw is! Map<String, dynamic>) continue;
+            final tag = PackageTagData.fromJson(raw);
+            if (tag.tagUuid.isEmpty) continue;
+            tagsByUuid[tag.tagUuid] = tag;
+          }
+        }
+        final areasRaw = decoded['areas'];
+        if (areasRaw is List) {
+          for (final raw in areasRaw) {
+            if (raw is! Map<String, dynamic>) continue;
+            final area = PackageAreaData.fromJson(raw);
+            if (area.tagUuid.isEmpty) continue;
+            areas.add(area);
+          }
+        }
+        final favoriteFoldersRaw = decoded['favoriteFolders'];
+        if (favoriteFoldersRaw is List) {
+          for (final raw in favoriteFoldersRaw) {
+            if (raw is! Map<String, dynamic>) continue;
+            final folder = PackageFavoriteFolderData.fromJson(raw);
+            if (folder.mapName.isEmpty || folder.nameKey.isEmpty) continue;
+            favoriteFolders.add(folder);
+          }
+        }
+        final impactGroupsRaw = decoded['impactGroups'];
+        if (impactGroupsRaw is List) {
+          for (final raw in impactGroupsRaw) {
+            if (raw is! Map<String, dynamic>) continue;
+            final group = PackageImpactGroupData.fromJson(raw);
+            if (group.mapName.isEmpty ||
+                group.layerName.isEmpty ||
+                group.name.isEmpty) {
+              continue;
+            }
+            impactGroups.add(group);
+          }
+        }
+        final allowTombstonesInPreview =
+            mode == ImportPackageMode.lanSync && isTrustedPackage;
+        final grenadeTombstonesRaw = decoded['grenadeTombstones'];
+        if (allowTombstonesInPreview && grenadeTombstonesRaw is List) {
+          for (final raw in grenadeTombstonesRaw) {
+            if (raw is! Map<String, dynamic>) continue;
+            final tombstone = PackageGrenadeTombstoneData.fromJson(raw);
+            if (tombstone.uniqueId.isEmpty || tombstone.mapName.isEmpty) {
+              continue;
+            }
+            grenadeTombstones.add(tombstone);
+          }
+        }
+        final entityTombstonesRaw = decoded['entityTombstones'];
+        if (allowTombstonesInPreview && entityTombstonesRaw is List) {
+          for (final raw in entityTombstonesRaw) {
+            if (raw is! Map<String, dynamic>) continue;
+            final tombstone = PackageEntityTombstoneData.fromJson(raw);
+            if (!LanSyncEntityTombstoneType.values
+                    .contains(tombstone.entityType) ||
+                tombstone.entityKey.isEmpty ||
+                tombstone.mapName.isEmpty) {
+              continue;
+            }
+            entityTombstones.add(tombstone);
+          }
+        }
+      } else if (decoded is List) {
+        grenadesData = decoded;
+        schemaVersion = 1;
+      }
+
+      if (grenadesData.isEmpty &&
+          tagsByUuid.isEmpty &&
+          areas.isEmpty &&
+          favoriteFolders.isEmpty &&
+          impactGroups.isEmpty &&
+          grenadeTombstones.isEmpty &&
+          entityTombstones.isEmpty) {
+        return null;
+      }
+
+      // 按地图分组
+      final Map<String, List<GrenadePreviewItem>> grenadesByMap = {};
+
+      for (var item in grenadesData) {
+        final mapName = item['mapName'] as String? ?? 'Unknown';
+        final layerName = item['layerName'] as String? ?? 'Default';
+        final title = item['title'] as String? ?? '';
+        final type = item['type'] as int? ?? 0;
+        final author = item['author'] as String?;
+        final importedUniqueId = item['uniqueId'] as String?;
+        final xRatio = (item['x'] as num?)?.toDouble() ?? 0.0;
+        final yRatio = (item['y'] as num?)?.toDouble() ?? 0.0;
+        final importedUpdatedAt = item['updatedAt'] != null
+            ? DateTime.fromMillisecondsSinceEpoch(item['updatedAt'])
+            : DateTime.now();
+
+        // 生成临时 uniqueId（如果没有）
+        final uniqueId =
+            importedUniqueId ?? '${mapName}_${title}_${xRatio}_$yRatio';
+
+        // 计算导入状态
+        ImportStatus status = ImportStatus.newItem;
+
+        // 查找地图
+        final map =
+            await isar.gameMaps.filter().nameEqualTo(mapName).findFirst();
+        if (map != null) {
+          await map.layers.load();
+          MapLayer? layer;
+          for (var l in map.layers) {
+            if (l.name == layerName) {
+              layer = l;
+              break;
+            }
+          }
+          layer ??= map.layers.isNotEmpty ? map.layers.first : null;
+
+          if (layer != null) {
+            // 查找已有道具
+            Grenade? existing;
+
+            if (importedUniqueId != null && importedUniqueId.isNotEmpty) {
+              final allGrenades = await isar.grenades.where().findAll();
+              existing = allGrenades
+                  .where((g) => g.uniqueId == importedUniqueId)
+                  .firstOrNull;
+            }
+
+            if (existing == null && importedUniqueId == null) {
+              await layer.grenades.load();
+              existing = layer.grenades
+                  .where((g) =>
+                      g.title == title &&
+                      (g.xRatio - xRatio).abs() < 0.01 &&
+                      (g.yRatio - yRatio).abs() < 0.01)
+                  .firstOrNull;
+            }
+
+            if (existing != null) {
+              if (await _shouldImportGrenadeOverLocal(
+                existing,
+                item,
+                packageFileHashes,
+              )) {
+                status = ImportStatus.update;
+              } else {
+                status = ImportStatus.skip;
+              }
+            }
+          }
+        }
+
+        final previewItem = GrenadePreviewItem(
+          rawData: item,
+          uniqueId: uniqueId,
+          title: title,
+          type: type,
+          mapName: mapName,
+          layerName: layerName,
+          author: author,
+          status: status,
+          updatedAt: importedUpdatedAt,
+        );
+
+        grenadesByMap.putIfAbsent(mapName, () => []);
+        grenadesByMap[mapName]!.add(previewItem);
+      }
+
+      return PackagePreviewResult(
+        grenadesByMap: grenadesByMap,
+        filePath: filePath,
+        memoryImages: const {},
+        schemaVersion: schemaVersion,
+        packageType: packageType,
+        isTrustedPackage: isTrustedPackage,
+        isLegacyPackage: isLegacyPackage,
+        packageFileHashes: packageFileHashes,
+        packageFileSizes: packageFileSizes,
+        availablePackageFiles: availablePackageFiles,
+        tagsByUuid: tagsByUuid,
+        areas: areas,
+        favoriteFolders: favoriteFolders,
+        impactGroups: impactGroups,
+        grenadeTombstones: grenadeTombstones,
+        entityTombstones: entityTombstones,
       );
-
-      grenadesByMap.putIfAbsent(mapName, () => []);
-      grenadesByMap[mapName]!.add(previewItem);
+    } finally {
+      archive.clearSync();
     }
-
-    return PackagePreviewResult(
-      grenadesByMap: grenadesByMap,
-      filePath: filePath,
-      memoryImages: memoryImages,
-      schemaVersion: schemaVersion,
-      tagsByUuid: tagsByUuid,
-      areas: areas,
-      favoriteFolders: favoriteFolders,
-      impactGroups: impactGroups,
-      grenadeTombstones: grenadeTombstones,
-      entityTombstones: entityTombstones,
-    );
   }
 
   // --- 导出 (分享) ---
@@ -1914,6 +2509,8 @@ class DataService {
         zipPath: zipPath,
         jsonData: jsonEncode(syncBundle.toJson()),
         filesToCopy: syncBundle.filesToZip.toList(),
+        schemaVersion: 6,
+        packageType: _packageTypeLanSync,
       ),
     );
 
@@ -2118,6 +2715,13 @@ class DataService {
     if (grenades.isEmpty) return;
 
     final exportBundle = await _buildExportBundle(grenades);
+    final exportEstimate = await _estimateExportPackageFromBundle(
+      exportBundle,
+      grenadeCount: grenades.length,
+      schemaVersion: 2,
+      packageType: _packageTypeExport,
+    );
+    _assertExportEstimateWithinLimit(exportEstimate);
 
     // 获取临时目录路径
     final tempDir = await getTemporaryDirectory();
@@ -2132,8 +2736,24 @@ class DataService {
         zipPath: zipPath,
         jsonData: jsonEncode(exportBundle.toJson()),
         filesToCopy: exportBundle.filesToZip.toList(),
+        schemaVersion: 2,
+        packageType: _packageTypeExport,
       ),
     );
+
+    final exportedFile = File(zipPath);
+    if (await exportedFile.exists()) {
+      final actualSize = await exportedFile.length();
+      if (actualSize > _maxExportPackageSizeBytes) {
+        try {
+          await exportedFile.delete();
+        } catch (_) {}
+        throw StateError(
+          '导出包体 ${formatBytes(actualSize)} 已超过上限 '
+          '${formatBytes(_maxExportPackageSizeBytes)}，请减少媒体或分批导出',
+        );
+      }
+    }
 
     if (!context.mounted) return;
 
@@ -2212,6 +2832,13 @@ class DataService {
     if (grenades.isEmpty) return;
 
     final exportBundle = await _buildExportBundle(grenades);
+    final exportEstimate = await _estimateExportPackageFromBundle(
+      exportBundle,
+      grenadeCount: grenades.length,
+      schemaVersion: 2,
+      packageType: _packageTypeExport,
+    );
+    _assertExportEstimateWithinLimit(exportEstimate);
 
     // 3. 获取临时目录路径
     final tempDir = await getTemporaryDirectory();
@@ -2226,8 +2853,24 @@ class DataService {
         zipPath: zipPath,
         jsonData: jsonEncode(exportBundle.toJson()),
         filesToCopy: exportBundle.filesToZip.toList(),
+        schemaVersion: 2,
+        packageType: _packageTypeExport,
       ),
     );
+
+    final exportedFile = File(zipPath);
+    if (await exportedFile.exists()) {
+      final actualSize = await exportedFile.length();
+      if (actualSize > _maxExportPackageSizeBytes) {
+        try {
+          await exportedFile.delete();
+        } catch (_) {}
+        throw StateError(
+          '导出包体 ${formatBytes(actualSize)} 已超过上限 '
+          '${formatBytes(_maxExportPackageSizeBytes)}，请减少媒体或分批导出',
+        );
+      }
+    }
 
     if (!context.mounted) return;
 
@@ -2332,10 +2975,6 @@ class DataService {
     return contentDifferent;
   }
 
-  String _sha256BytesHex(List<int> bytes) {
-    return sha256.convert(bytes).toString();
-  }
-
   Map<String, dynamic> _normalizeGrenadePayloadForSync(
     Map<String, dynamic> value,
   ) {
@@ -2389,7 +3028,7 @@ class DataService {
 
   String _buildSharedGrenadeDigest(
     Map<String, dynamic> item,
-    Map<String, List<int>> memoryImages,
+    Map<String, String> packageFileHashes,
   ) {
     final normalized = _normalizeGrenadePayloadForSync(item);
     final sharedSteps = ((normalized['steps'] as List?) ?? const [])
@@ -2403,8 +3042,8 @@ class DataService {
         final mediaMap = Map<String, dynamic>.from(media as Map);
         final fileName = (mediaMap['path'] as String? ?? '').trim();
         final mediaHash =
-            fileName.isNotEmpty && memoryImages.containsKey(fileName)
-                ? _sha256BytesHex(memoryImages[fileName]!)
+            fileName.isNotEmpty && packageFileHashes.containsKey(fileName)
+                ? packageFileHashes[fileName]!
                 : '';
         normalizedMedias.add({
           'type': mediaMap['type'],
@@ -2420,14 +3059,14 @@ class DataService {
   Future<bool> _shouldImportGrenadeOverLocal(
     Grenade local,
     Map<String, dynamic> shared,
-    Map<String, List<int>> memoryImages,
+    Map<String, String> packageFileHashes,
   ) async {
     final sharedUpdatedAtMs = shared['updatedAt'] as int? ?? 0;
     final localUpdatedAtMs = local.updatedAt.millisecondsSinceEpoch;
     if (sharedUpdatedAtMs > localUpdatedAtMs) return true;
     if (sharedUpdatedAtMs < localUpdatedAtMs) return false;
     final localDigest = await _buildLocalGrenadeDigest(local);
-    final sharedDigest = _buildSharedGrenadeDigest(shared, memoryImages);
+    final sharedDigest = _buildSharedGrenadeDigest(shared, packageFileHashes);
     return localDigest != sharedDigest;
   }
 
@@ -2660,9 +3299,10 @@ class DataService {
   }
 
   Future<ImportConflictNotice> collectImportConflictNotice(
-    PackagePreviewResult preview,
-    Set<String> selectedUniqueIds,
-  ) async {
+      PackagePreviewResult preview, Set<String> selectedUniqueIds,
+      {ImportPackageMode mode = ImportPackageMode.normal}) async {
+    final allowAppliedTombstones =
+        mode == ImportPackageMode.lanSync && preview.canApplyTombstones;
     final newerLocalGrenades = <GrenadePreviewItem>[];
     for (final mapItems in preview.grenadesByMap.values) {
       for (final item in mapItems) {
@@ -2674,7 +3314,7 @@ class DataService {
     }
 
     final newerLocalDeleteConflicts = <GrenadePreviewItem>[];
-    if (preview.grenadeTombstones.isNotEmpty) {
+    if (allowAppliedTombstones && preview.grenadeTombstones.isNotEmpty) {
       final localItems = await loadLocalGrenadePreviewItemsByUniqueIds(
         preview.grenadeTombstones.map((e) => e.uniqueId),
       );
@@ -2690,9 +3330,12 @@ class DataService {
     }
 
     final newerLocalFavoriteFolderDeletes = <String>[];
-    final favoriteFolderTombstones = preview.entityTombstones
-        .where((e) => e.entityType == LanSyncEntityTombstoneType.favoriteFolder)
-        .toList(growable: false);
+    final favoriteFolderTombstones = allowAppliedTombstones
+        ? preview.entityTombstones
+            .where((e) =>
+                e.entityType == LanSyncEntityTombstoneType.favoriteFolder)
+            .toList(growable: false)
+        : const <PackageEntityTombstoneData>[];
     if (favoriteFolderTombstones.isNotEmpty) {
       final mapNames =
           favoriteFolderTombstones.map((e) => e.mapName).toSet().toList();
@@ -2778,24 +3421,34 @@ class DataService {
     Set<String> selectedUniqueIds, {
     Map<String, ImportTagConflictResolution> tagResolutions = const {},
     Map<String, ImportAreaConflictResolution> areaResolutions = const {},
+    ImportPackageMode mode = ImportPackageMode.normal,
   }) async {
+    final allowAppliedTombstones =
+        mode == ImportPackageMode.lanSync && preview.canApplyTombstones;
     final hasGrenadeSelection = selectedUniqueIds.isNotEmpty;
     final hasMetadataChanges = preview.tagsByUuid.isNotEmpty ||
         preview.areas.isNotEmpty ||
         preview.favoriteFolders.isNotEmpty ||
         preview.impactGroups.isNotEmpty;
-    final hasTombstones = preview.grenadeTombstones.isNotEmpty ||
-        preview.entityTombstones.isNotEmpty;
+    final hasTombstones = allowAppliedTombstones &&
+        (preview.grenadeTombstones.isNotEmpty ||
+            preview.entityTombstones.isNotEmpty);
     if (!hasGrenadeSelection && !hasMetadataChanges && !hasTombstones) {
       return "未选择任何道具";
     }
 
     final importFileName = p.basename(preview.filePath);
     final dataPath = isar.directory ?? '';
-    final memoryImages = preview.memoryImages;
 
-    final tombstoneResult = await _applyGrenadeTombstones(preview);
-    final entityTombstoneResult = await _applyEntityTombstones(preview);
+    final tombstoneResult = allowAppliedTombstones
+        ? await _applyGrenadeTombstones(preview)
+        : (deletedCount: 0, skippedCount: 0);
+    final entityTombstoneResult = allowAppliedTombstones
+        ? await _applyEntityTombstones(preview)
+        : const EntityTombstoneApplyResult(
+            deletedCount: 0,
+            skippedCount: 0,
+          );
 
     final selectedTagUuids = _collectImportTagUuids(preview, selectedUniqueIds);
     final tagIdByUuid = await _upsertTagsForImport(
@@ -2820,91 +3473,107 @@ class DataService {
     int updatedCount = 0;
     int skippedCount = 0;
     final importedGrenades = <Grenade>[];
+    final importedMediaPathCache = <String, String>{};
+    Archive? packageArchive;
 
-    if (hasGrenadeSelection) {
-      for (final mapGrenades in preview.grenadesByMap.values) {
-        for (final previewItem in mapGrenades) {
-          if (!selectedUniqueIds.contains(previewItem.uniqueId)) continue;
+    try {
+      if (hasGrenadeSelection) {
+        packageArchive = _openCs2PackageArchiveFromFile(preview.filePath);
+        if (packageArchive == null) {
+          return "文件格式错误或无数据";
+        }
+        for (final mapGrenades in preview.grenadesByMap.values) {
+          for (final previewItem in mapGrenades) {
+            if (!selectedUniqueIds.contains(previewItem.uniqueId)) continue;
 
-          final item = previewItem.rawData;
-          final mapName = item['mapName'];
-          final layerName = item['layerName'];
+            final item = previewItem.rawData;
+            final mapName = item['mapName'];
+            final layerName = item['layerName'];
 
-          final map =
-              await isar.gameMaps.filter().nameEqualTo(mapName).findFirst();
-          if (map == null) continue;
+            final map =
+                await isar.gameMaps.filter().nameEqualTo(mapName).findFirst();
+            if (map == null) continue;
 
-          await map.layers.load();
-          MapLayer? layer;
-          for (final l in map.layers) {
-            if (l.name == layerName) {
-              layer = l;
-              break;
+            await map.layers.load();
+            MapLayer? layer;
+            for (final l in map.layers) {
+              if (l.name == layerName) {
+                layer = l;
+                break;
+              }
             }
-          }
-          layer ??= map.layers.isNotEmpty ? map.layers.first : null;
-          if (layer == null) continue;
+            layer ??= map.layers.isNotEmpty ? map.layers.first : null;
+            if (layer == null) continue;
 
-          final importedUniqueId = item['uniqueId'] as String?;
-          final title = item['title'] as String;
-          final xRatio = (item['x'] as num).toDouble();
-          final yRatio = (item['y'] as num).toDouble();
-          final tagUuids = _readTagUuids(item);
+            final importedUniqueId = item['uniqueId'] as String?;
+            final title = item['title'] as String;
+            final xRatio = (item['x'] as num).toDouble();
+            final yRatio = (item['y'] as num).toDouble();
+            final tagUuids = _readTagUuids(item);
 
-          Grenade? existing;
-          if (importedUniqueId != null && importedUniqueId.isNotEmpty) {
-            final allGrenades = await isar.grenades.where().findAll();
-            existing = allGrenades
-                .where((g) => g.uniqueId == importedUniqueId)
-                .firstOrNull;
-          }
-          if (existing == null && importedUniqueId == null) {
-            await layer.grenades.load();
-            existing = layer.grenades
-                .where((g) =>
-                    g.title == title &&
-                    (g.xRatio - xRatio).abs() < 0.01 &&
-                    (g.yRatio - yRatio).abs() < 0.01)
-                .firstOrNull;
-          }
+            Grenade? existing;
+            if (importedUniqueId != null && importedUniqueId.isNotEmpty) {
+              final allGrenades = await isar.grenades.where().findAll();
+              existing = allGrenades
+                  .where((g) => g.uniqueId == importedUniqueId)
+                  .firstOrNull;
+            }
+            if (existing == null && importedUniqueId == null) {
+              await layer.grenades.load();
+              existing = layer.grenades
+                  .where((g) =>
+                      g.title == title &&
+                      (g.xRatio - xRatio).abs() < 0.01 &&
+                      (g.yRatio - yRatio).abs() < 0.01)
+                  .firstOrNull;
+            }
 
-          if (existing != null) {
-            if (await _shouldImportGrenadeOverLocal(
-              existing,
-              item,
-              memoryImages,
-            )) {
-              await _updateExistingGrenade(
-                  existing, item, memoryImages, dataPath);
-              await _replaceGrenadeTags(existing.id, tagUuids, tagIdByUuid);
-              await _applyLanSyncRefsToGrenade(
+            if (existing != null) {
+              if (await _shouldImportGrenadeOverLocal(
                 existing,
+                item,
+                preview.packageFileHashes,
+              )) {
+                await _updateExistingGrenade(
+                  existing,
+                  item,
+                  preview,
+                  packageArchive,
+                  dataPath,
+                  importedMediaPathCache,
+                );
+                await _replaceGrenadeTags(existing.id, tagUuids, tagIdByUuid);
+                await _applyLanSyncRefsToGrenade(
+                  existing,
+                  item,
+                  favoriteFolderIdByRef: favoriteFolderIdByRef,
+                  impactGroupIdByRef: impactGroupIdByRef,
+                );
+                importedGrenades.add(existing);
+                updatedCount++;
+              } else {
+                skippedCount++;
+              }
+            } else {
+              final newGrenade = await _createNewGrenade(
+                item,
+                preview,
+                packageArchive,
+                dataPath,
+                layer,
+                importedUniqueId,
+                importedMediaPathCache,
+              );
+              await _replaceGrenadeTags(newGrenade.id, tagUuids, tagIdByUuid);
+              await _applyLanSyncRefsToGrenade(
+                newGrenade,
                 item,
                 favoriteFolderIdByRef: favoriteFolderIdByRef,
                 impactGroupIdByRef: impactGroupIdByRef,
               );
-              importedGrenades.add(existing);
-              updatedCount++;
-            } else {
-              skippedCount++;
+              importedGrenades.add(newGrenade);
+              newCount++;
             }
-          } else {
-            final newGrenade = await _createNewGrenade(
-              item,
-              memoryImages,
-              dataPath,
-              layer,
-              importedUniqueId,
-            );
-            await _replaceGrenadeTags(newGrenade.id, tagUuids, tagIdByUuid);
-            await _applyLanSyncRefsToGrenade(
-              newGrenade,
-              item,
-              favoriteFolderIdByRef: favoriteFolderIdByRef,
-              impactGroupIdByRef: impactGroupIdByRef,
-            );
-            importedGrenades.add(newGrenade);
-            newCount++;
           }
         }
       }
@@ -2927,6 +3596,8 @@ class DataService {
           await history.grenades.save();
         });
       }
+    } finally {
+      packageArchive?.clearSync();
     }
 
     final List<String> messages = [];
@@ -3919,12 +4590,69 @@ class DataService {
     });
   }
 
+  Future<String?> _materializePackageMediaFile({
+    required PackagePreviewResult preview,
+    required Archive? packageArchive,
+    required String packageMediaPath,
+    required String dataPath,
+    required Map<String, String> importedMediaPathCache,
+  }) async {
+    final fileName = p.basename(packageMediaPath.trim());
+    if (fileName.isEmpty) return null;
+    final extension = p.extension(fileName).toLowerCase();
+    if (!_trackedMediaExtensions.contains(extension)) {
+      return null;
+    }
+    if (!preview.availablePackageFiles.contains(fileName)) {
+      return null;
+    }
+
+    final cachedPath = importedMediaPathCache[fileName];
+    if (cachedPath != null && await File(cachedPath).exists()) {
+      return cachedPath;
+    }
+
+    if (packageArchive == null) {
+      return null;
+    }
+
+    final archiveFile =
+        _findArchiveFileByNameOrBasename(packageArchive, fileName);
+    if (archiveFile == null || !archiveFile.isFile) {
+      return null;
+    }
+    if (archiveFile.size < 0 ||
+        archiveFile.size > _maxImportPackageEntrySizeBytes) {
+      return null;
+    }
+
+    final bytes = archiveFile.content;
+    final expectedSize = preview.packageFileSizes[fileName];
+    if (expectedSize != null && expectedSize != bytes.length) {
+      return null;
+    }
+    final expectedHash = preview.packageFileHashes[fileName];
+    if (expectedHash != null &&
+        expectedHash.isNotEmpty &&
+        _sha256BytesHex(bytes) != expectedHash) {
+      return null;
+    }
+
+    final savePath = p.join(dataPath, '${const Uuid().v4()}$extension');
+    await File(savePath).writeAsBytes(bytes, flush: true);
+    importedMediaPathCache[fileName] = savePath;
+    archiveFile.clear();
+    return savePath;
+  }
+
   /// 更新
   Future<void> _updateExistingGrenade(
     Grenade existing,
     Map<String, dynamic> item,
-    Map<String, List<int>> memoryImages,
+    PackagePreviewResult preview,
+    Archive? packageArchive,
     String dataPath,
+    Map<String, String> importedMediaPathCache,
   ) async {
     // 更新信息
     existing.title = item['title'];
@@ -3982,11 +4710,14 @@ class DataService {
       final mediasToCreate = <StepMedia>[];
       for (var mItem in mediasList) {
         final fileName = mItem['path'];
-        if (memoryImages.containsKey(fileName)) {
-          final savePath = p.join(
-              dataPath, "${DateTime.now().millisecondsSinceEpoch}_$fileName");
-          await File(savePath).writeAsBytes(memoryImages[fileName]!);
-
+        final savePath = await _materializePackageMediaFile(
+          preview: preview,
+          packageArchive: packageArchive,
+          packageMediaPath: fileName as String? ?? '',
+          dataPath: dataPath,
+          importedMediaPathCache: importedMediaPathCache,
+        );
+        if (savePath != null) {
           mediasToCreate
               .add(StepMedia(localPath: savePath, type: mItem['type']));
         }
@@ -4013,10 +4744,12 @@ class DataService {
   /// 创建新道具
   Future<Grenade> _createNewGrenade(
     Map<String, dynamic> item,
-    Map<String, List<int>> memoryImages,
+    PackagePreviewResult preview,
+    Archive? packageArchive,
     String dataPath,
     MapLayer layer,
     String? uniqueId,
+    Map<String, String> importedMediaPathCache,
   ) async {
     final g = Grenade(
       title: item['title'],
@@ -4063,11 +4796,14 @@ class DataService {
       final mediasToCreate = <StepMedia>[];
       for (var mItem in mediasList) {
         final fileName = mItem['path'];
-        if (memoryImages.containsKey(fileName)) {
-          final savePath = p.join(
-              dataPath, "${DateTime.now().millisecondsSinceEpoch}_$fileName");
-          await File(savePath).writeAsBytes(memoryImages[fileName]!);
-
+        final savePath = await _materializePackageMediaFile(
+          preview: preview,
+          packageArchive: packageArchive,
+          packageMediaPath: fileName as String? ?? '',
+          dataPath: dataPath,
+          importedMediaPathCache: importedMediaPathCache,
+        );
+        if (savePath != null) {
           mediasToCreate
               .add(StepMedia(localPath: savePath, type: mItem['type']));
         }

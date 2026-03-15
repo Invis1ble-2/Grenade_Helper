@@ -159,7 +159,10 @@ class _ImportScreenState extends ConsumerState<ImportScreen>
       final importResult = await Navigator.push<String>(
         context,
         MaterialPageRoute(
-          builder: (_) => ImportPreviewScreen(filePath: filePath),
+          builder: (_) => ImportPreviewScreen(
+            filePath: filePath,
+            requireTrustedPackage: true,
+          ),
         ),
       );
 

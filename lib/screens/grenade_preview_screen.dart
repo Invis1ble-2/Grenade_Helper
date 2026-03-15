@@ -8,11 +8,17 @@ import '../services/data_service.dart';
 class GrenadePreviewScreen extends StatelessWidget {
   final GrenadePreviewItem grenade;
   final Map<String, List<int>> memoryImages;
+  final String? packageFilePath;
+  final Map<String, String> packageFileHashes;
+  final Map<String, int> packageFileSizes;
 
   const GrenadePreviewScreen({
     super.key,
     required this.grenade,
     required this.memoryImages,
+    this.packageFilePath,
+    this.packageFileHashes = const {},
+    this.packageFileSizes = const {},
   });
 
   @override
@@ -176,6 +182,74 @@ class GrenadePreviewScreen extends StatelessWidget {
                 },
               ),
             ),
+          );
+        }
+        if (packageFilePath != null) {
+          return FutureBuilder<List<int>?>(
+            future: DataService.readPackageMediaBytes(
+              packageFilePath: packageFilePath!,
+              packageMediaPath: path,
+              expectedSha256: packageFileHashes[path],
+              expectedSizeBytes: packageFileSizes[path],
+            ),
+            builder: (context, snapshot) {
+              final packageImageBytes = snapshot.data;
+              if (packageImageBytes != null && packageImageBytes.isNotEmpty) {
+                return Container(
+                  margin:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.memory(
+                      Uint8List.fromList(packageImageBytes),
+                      fit: BoxFit.contain,
+                      width: double.infinity,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Container(
+                          height: 200,
+                          color: Colors.grey[800],
+                          child: const Center(
+                            child: Icon(Icons.broken_image,
+                                size: 48, color: Colors.grey),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                );
+              }
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return Container(
+                  height: 200,
+                  margin:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[850],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Center(child: CircularProgressIndicator()),
+                );
+              }
+              return Container(
+                height: 200,
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.grey[800],
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.image_not_supported,
+                          size: 48, color: Colors.grey),
+                      SizedBox(height: 8),
+                      Text("无法加载媒体", style: TextStyle(color: Colors.grey)),
+                    ],
+                  ),
+                ),
+              );
+            },
           );
         }
       }
