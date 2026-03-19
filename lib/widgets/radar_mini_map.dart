@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import '../models.dart';
+import '../services/grenade_cluster_service.dart';
 
 /// 雷达小地图
 class RadarMiniMap extends StatefulWidget {
@@ -180,56 +181,23 @@ class _RadarMiniMapState extends State<RadarMiniMap>
     );
   }
 
-  /// 聚合阈值
-  static const double _clusterThreshold = 0.03;
-
-  /// 聚合道具
-  List<List<Grenade>> _clusterGrenades(List<Grenade> grenades) {
-    if (grenades.isEmpty) return [];
-
-    final List<List<Grenade>> clusters = [];
-    final used = <int>{};
-
-    for (int i = 0; i < grenades.length; i++) {
-      if (used.contains(i)) continue;
-
-      final cluster = <Grenade>[grenades[i]];
-      used.add(i);
-
-      for (int j = i + 1; j < grenades.length; j++) {
-        if (used.contains(j)) continue;
-
-        final dx = (grenades[i].xRatio - grenades[j].xRatio).abs();
-        final dy = (grenades[i].yRatio - grenades[j].yRatio).abs();
-        if (dx * dx + dy * dy < _clusterThreshold * _clusterThreshold) {
-          cluster.add(grenades[j]);
-          used.add(j);
-        }
-      }
-
-      clusters.add(cluster);
-    }
-
-    return clusters;
-  }
-
   List<Widget> _buildOtherPoints(double centerX, double centerY) {
     // 地图尺寸
     final mapSize = widget.width > widget.height ? widget.width : widget.height;
 
     // 聚合点位
-    var clusters = _clusterGrenades(widget.allGrenades);
+    var clusters = GrenadeClusterService.buildClusters(widget.allGrenades);
 
     // 过滤当前
     if (widget.isSnapped && widget.currentGrenade != null) {
       clusters = clusters.where((cluster) {
-        return !cluster.any((g) => g.id == widget.currentGrenade!.id);
+        return !cluster.containsGrenade(widget.currentGrenade!.id);
       }).toList();
     }
 
     return clusters.map((cluster) {
       // 确定中心
-      final centerGrenade = cluster.first;
+      final centerGrenade = cluster.anchor;
       final relX =
           (centerGrenade.xRatio - centerX) * mapSize * widget.zoomLevel;
       final relY =
@@ -247,9 +215,9 @@ class _RadarMiniMapState extends State<RadarMiniMap>
         return const SizedBox.shrink();
       }
 
-      final count = cluster.length;
+      final count = cluster.members.length;
       // 确定颜色
-      final types = cluster.map((g) => g.type).toSet();
+      final types = cluster.members.map((g) => g.type).toSet();
       final color = types.length == 1
           ? _getGrenadeColor(types.first)
           : Colors.white.withValues(alpha: 0.8);
