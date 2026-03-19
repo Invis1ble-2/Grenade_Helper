@@ -43,6 +43,10 @@ class OverlayStateService extends ChangeNotifier {
   int? _suppressedSnapGrenadeId;
   Timer? _suppressedSnapTimer;
   DateTime? _lastNavigationActivityAt;
+  _SnapState _snapState = _SnapState.free;
+  int? _candidateClusterAnchorId;
+  DateTime? _candidateSince;
+  int? _lockedClusterAnchorId;
 
   // 移动常量
   static const int _moveIntervalMs = 16; // 约60fps
@@ -65,6 +69,9 @@ class OverlayStateService extends ChangeNotifier {
     0.03,
   ];
   static const double _snapReleaseMultiplier = 1.18;
+  static const double _snapAcquireRadiusMultiplier = 0.92;
+  static const double _snapLockedReleaseMultiplier = 1.55;
+  static const Duration _snapCandidateDuration = Duration(milliseconds: 72);
 
   // 当前档位
   int _navSpeedLevel = 3;
@@ -191,6 +198,7 @@ class OverlayStateService extends ChangeNotifier {
   @override
   void dispose() {
     _moveTimer?.cancel();
+    _heartbeatTimer?.cancel();
     _snapConfirmTimer?.cancel();
     _suppressedSnapTimer?.cancel();
     _grenadeSubscription?.cancel();
@@ -296,8 +304,7 @@ class OverlayStateService extends ChangeNotifier {
     _clusters = const [];
     _currentGrenadeIndex = 0;
     _currentStepIndex = 0;
-    _suppressedSnapGrenadeId = null;
-    _suppressedSnapTimer?.cancel();
+    _resetSnapState();
     _lastNavigationActivityAt = null;
     notifyListeners();
   }
@@ -350,14 +357,14 @@ class OverlayStateService extends ChangeNotifier {
     // 保存当前选中的道具 ID（用于恢复位置）
     final currentGrenadeId = currentGrenade?.id;
 
-    _filteredGrenades =
-        GrenadeClusterService.sortGrenades(
+    _filteredGrenades = GrenadeClusterService.sortGrenades(
       _allGrenades.where((g) => _activeFilters.contains(g.type)),
     );
     _clusters = GrenadeClusterService.buildClusters(
       _filteredGrenades,
       threshold: _clusterThreshold,
     );
+    _syncSnapStateWithClusters();
 
     if (_filteredGrenades.isEmpty) {
       _currentGrenadeIndex = 0;
@@ -467,123 +474,72 @@ class OverlayStateService extends ChangeNotifier {
   /// [ignoreCurrent] - 如果为 true，则忽略当前 cluster（用于逃离吸附）
   void _checkAndSnapToPointEx({bool ignoreCurrent = false}) {
     if (_filteredGrenades.isEmpty) {
-      _isSnapped = false;
-      _suppressedSnapGrenadeId = null;
-      _suppressedSnapTimer?.cancel();
+      _resetSnapState();
       return;
     }
 
     final clusters = _clusters;
     if (clusters.isEmpty) {
-      _isSnapped = false;
-      _suppressedSnapGrenadeId = null;
-      _suppressedSnapTimer?.cancel();
+      _resetSnapState();
       return;
     }
 
-    final currentGrenadeId = currentGrenade?.id;
-    GrenadeCluster? nearestCluster;
-    double minDist = double.infinity;
-    double nearestSnapThresholdSq = _snapThreshold * _snapThreshold;
+    _syncSnapStateWithClusters();
+    _updateSuppressedClusterState();
 
-    for (final cluster in clusters) {
-      // 使用 cluster 第一个元素作为中心（与 _clusterGrenades 的构建逻辑和 RadarMiniMap 的显示逻辑保持一致）
-      // 之前使用平均值会导致吸附点（first）与引力中心（average）不重合，导致移动时可能反而更靠近引力中心而无法逃离
-      final centerPoint = cluster.anchor;
-      final centerX = centerPoint.xRatio;
-      final centerY = centerPoint.yRatio;
-      final isCurrentCluster = currentGrenadeId != null &&
-          cluster.containsGrenade(currentGrenadeId);
-      final clusterSnapThreshold =
-          isCurrentCluster && _suppressedSnapGrenadeId == null
-              ? _snapThreshold * _snapReleaseMultiplier
-              : _snapThreshold;
-      final clusterSnapThresholdSq =
-          clusterSnapThreshold * clusterSnapThreshold;
-
-      if (_suppressedSnapGrenadeId != null &&
-          cluster.containsGrenade(_suppressedSnapGrenadeId!)) {
-        final dx = centerX - _crosshairX;
-        final dy = centerY - _crosshairY;
-        final dist = dx * dx + dy * dy;
-        if (dist < clusterSnapThresholdSq) {
-          continue;
-        }
-      }
-
-      // 如果要求忽略当前 cluster，检查是否是当前所在的 cluster
-      if (ignoreCurrent &&
-          _suppressedSnapGrenadeId == null &&
-          isCurrentCluster) {
-          continue; // 跳过当前 cluster
-      }
-
-      // 计算准星到 cluster 中心的距离
-      final dx = centerX - _crosshairX;
-      final dy = centerY - _crosshairY;
-      final dist = dx * dx + dy * dy;
-
-      if (dist < minDist) {
-        minDist = dist;
-        nearestCluster = cluster;
-        nearestSnapThresholdSq = clusterSnapThresholdSq;
+    final lockedCluster = _findClusterByAnchorId(_lockedClusterAnchorId);
+    if (lockedCluster != null &&
+        !_isClusterSuppressed(lockedCluster) &&
+        _distanceSqToCluster(lockedCluster) <= _snapLockedReleaseRadiusSq) {
+      _applyLockedCluster(lockedCluster, preserveCurrentSelection: true);
+      return;
+    }
+    if (lockedCluster == null ||
+        _distanceSqToCluster(lockedCluster) > _snapLockedReleaseRadiusSq) {
+      _lockedClusterAnchorId = null;
+      if (_snapState == _SnapState.locked) {
+        _setUnsnappedState(_SnapState.free);
       }
     }
 
-    if (_suppressedSnapGrenadeId != null) {
-      final suppressedGrenade = _filteredGrenades
-          .where((g) => g.id == _suppressedSnapGrenadeId)
-          .cast<Grenade?>()
-          .firstWhere(
-            (_) => true,
-            orElse: () => null,
-          );
-      if (suppressedGrenade == null) {
-        _suppressedSnapGrenadeId = null;
-        _suppressedSnapTimer?.cancel();
-      } else {
-        final dx = suppressedGrenade.xRatio - _crosshairX;
-        final dy = suppressedGrenade.yRatio - _crosshairY;
-        final releaseThreshold = _snapThreshold * _snapReleaseMultiplier;
-        if (dx * dx + dy * dy > releaseThreshold * releaseThreshold) {
-          _suppressedSnapGrenadeId = null;
-          _suppressedSnapTimer?.cancel();
-        }
-      }
+    final nearestResult =
+        _findNearestEligibleCluster(ignoreCurrent: ignoreCurrent);
+    if (nearestResult == null) {
+      _setUnsnappedState(_SnapState.free);
+      return;
     }
 
-    // 检查是否在吸附范围内
-    if (nearestCluster != null && minDist < nearestSnapThresholdSq) {
-      // 吸附到 cluster 的第一个道具（作为代表）
-      final nearest = nearestCluster.anchor;
-      final wasSnapped = _isSnapped;
-      final previousGrenadeId = currentGrenade?.id;
-
-      _crosshairX = nearest.xRatio;
-      _crosshairY = nearest.yRatio;
-      _currentGrenadeIndex = _filteredGrenades.indexOf(nearest);
-      _currentStepIndex = 0;
-      _isSnapped = true;
-      _suppressedSnapGrenadeId = null;
-      _suppressedSnapTimer?.cancel();
-
-      // 如果是新吸附到不同的道具，重置确认状态并启动延迟确认定时器
-      if (!wasSnapped || previousGrenadeId != nearest.id) {
-        _isSnapConfirmed = false;
-        _snapConfirmTimer?.cancel();
-        _snapConfirmTimer = Timer(const Duration(milliseconds: 100), () {
-          if (_isSnapped && currentGrenade?.id == nearest.id) {
-            _isSnapConfirmed = true;
-            notifyListeners();
-          }
-        });
-      }
-    } else {
-      // 未吸附，取消确认状态
-      _isSnapped = false;
-      _isSnapConfirmed = false;
-      _snapConfirmTimer?.cancel();
+    final nearestCluster = nearestResult.cluster;
+    final nearestDistSq = nearestResult.distanceSq;
+    if (nearestDistSq > _snapAcquireRadiusSq) {
+      _setUnsnappedState(_SnapState.free);
+      return;
     }
+
+    final requiredCandidateDuration =
+        _activeDirections.isNotEmpty ? _snapCandidateDuration : Duration.zero;
+    final anchorId = nearestCluster.anchor.id;
+
+    if (requiredCandidateDuration == Duration.zero) {
+      _applyLockedCluster(nearestCluster);
+      return;
+    }
+
+    final now = DateTime.now();
+    if (_candidateClusterAnchorId != anchorId) {
+      _candidateClusterAnchorId = anchorId;
+      _candidateSince = now;
+      _setUnsnappedState(_SnapState.candidate);
+      return;
+    }
+
+    final candidateSince = _candidateSince ?? now;
+    if (now.difference(candidateSince) < requiredCandidateDuration) {
+      _setUnsnappedState(_SnapState.candidate);
+      return;
+    }
+
+    _applyLockedCluster(nearestCluster);
   }
 
   /// 开始移动
@@ -809,9 +765,13 @@ class OverlayStateService extends ChangeNotifier {
   }
 
   void _markCurrentSnapAsSuppressed() {
-    final grenade = currentGrenade;
-    if (grenade == null) return;
-    _suppressedSnapGrenadeId = grenade.id;
+    final cluster = _currentCluster;
+    if (cluster == null) return;
+    _suppressedSnapGrenadeId = cluster.anchor.id;
+    _lockedClusterAnchorId = null;
+    if (_snapState == _SnapState.locked) {
+      _setUnsnappedState(_SnapState.free);
+    }
     _scheduleSuppressedSnapReset();
   }
 
@@ -854,6 +814,179 @@ class OverlayStateService extends ChangeNotifier {
     notifyListeners();
   }
 
+  GrenadeCluster? get _currentCluster =>
+      GrenadeClusterService.findClusterForGrenade(_clusters, currentGrenade) ??
+      _findClusterByAnchorId(_lockedClusterAnchorId);
+
+  GrenadeCluster? _findClusterByAnchorId(int? anchorId) {
+    if (anchorId == null) return null;
+    for (final cluster in _clusters) {
+      if (cluster.anchor.id == anchorId) {
+        return cluster;
+      }
+    }
+    return null;
+  }
+
+  ({GrenadeCluster cluster, double distanceSq})? _findNearestEligibleCluster({
+    required bool ignoreCurrent,
+  }) {
+    final currentClusterAnchorId = _currentCluster?.anchor.id;
+    ({GrenadeCluster cluster, double distanceSq})? nearest;
+
+    for (final cluster in _clusters) {
+      if (ignoreCurrent &&
+          _suppressedSnapGrenadeId == null &&
+          currentClusterAnchorId == cluster.anchor.id) {
+        continue;
+      }
+      if (_isClusterSuppressed(cluster)) {
+        continue;
+      }
+
+      final distanceSq = _distanceSqToCluster(cluster);
+      if (nearest == null || distanceSq < nearest.distanceSq) {
+        nearest = (cluster: cluster, distanceSq: distanceSq);
+      }
+    }
+
+    return nearest;
+  }
+
+  double _distanceSqToCluster(GrenadeCluster cluster) {
+    final dx = cluster.anchor.xRatio - _crosshairX;
+    final dy = cluster.anchor.yRatio - _crosshairY;
+    return dx * dx + dy * dy;
+  }
+
+  double get _snapAcquireRadiusSq {
+    final radius = _snapThreshold * _snapAcquireRadiusMultiplier;
+    return radius * radius;
+  }
+
+  double get _snapLockedReleaseRadiusSq {
+    final radius = _snapThreshold * _snapLockedReleaseMultiplier;
+    return radius * radius;
+  }
+
+  bool _isClusterSuppressed(GrenadeCluster cluster) {
+    if (_suppressedSnapGrenadeId == null) return false;
+    final distanceSq = _distanceSqToCluster(cluster);
+    final releaseRadius = _snapThreshold * _snapReleaseMultiplier;
+    return cluster.anchor.id == _suppressedSnapGrenadeId &&
+        distanceSq < releaseRadius * releaseRadius;
+  }
+
+  void _updateSuppressedClusterState() {
+    if (_suppressedSnapGrenadeId == null) return;
+    final suppressedCluster = _findClusterByAnchorId(_suppressedSnapGrenadeId);
+    if (suppressedCluster == null) {
+      _suppressedSnapGrenadeId = null;
+      _suppressedSnapTimer?.cancel();
+      return;
+    }
+
+    final releaseRadius = _snapThreshold * _snapReleaseMultiplier;
+    if (_distanceSqToCluster(suppressedCluster) >
+        releaseRadius * releaseRadius) {
+      _suppressedSnapGrenadeId = null;
+      _suppressedSnapTimer?.cancel();
+    }
+  }
+
+  void _applyLockedCluster(
+    GrenadeCluster cluster, {
+    bool preserveCurrentSelection = false,
+  }) {
+    final wasSnapped = _isSnapped;
+    final previousGrenadeId = currentGrenade?.id;
+
+    _crosshairX = cluster.anchor.xRatio;
+    _crosshairY = cluster.anchor.yRatio;
+    _lockedClusterAnchorId = cluster.anchor.id;
+    _candidateClusterAnchorId = null;
+    _candidateSince = null;
+    _snapState = _SnapState.locked;
+
+    final current = currentGrenade;
+    final targetGrenade = preserveCurrentSelection &&
+            current != null &&
+            cluster.containsGrenade(current.id)
+        ? current
+        : cluster.anchor;
+    final globalIdx = _filteredGrenades
+        .indexWhere((grenade) => grenade.id == targetGrenade.id);
+    if (globalIdx >= 0) {
+      _currentGrenadeIndex = globalIdx;
+    }
+    _currentStepIndex = 0;
+    _isSnapped = true;
+    _suppressedSnapGrenadeId = null;
+    _suppressedSnapTimer?.cancel();
+
+    if (!wasSnapped || previousGrenadeId != targetGrenade.id) {
+      _isSnapConfirmed = false;
+      _snapConfirmTimer?.cancel();
+      _snapConfirmTimer = Timer(const Duration(milliseconds: 100), () {
+        if (_isSnapped && _lockedClusterAnchorId == cluster.anchor.id) {
+          _isSnapConfirmed = true;
+          notifyListeners();
+        }
+      });
+    }
+  }
+
+  void _setUnsnappedState(_SnapState state) {
+    _snapState = state;
+    if (state != _SnapState.candidate) {
+      _candidateClusterAnchorId = null;
+      _candidateSince = null;
+    }
+    _isSnapped = false;
+    _isSnapConfirmed = false;
+    _snapConfirmTimer?.cancel();
+  }
+
+  void _resetSnapState() {
+    _snapState = _SnapState.free;
+    _candidateClusterAnchorId = null;
+    _candidateSince = null;
+    _lockedClusterAnchorId = null;
+    _suppressedSnapGrenadeId = null;
+    _suppressedSnapTimer?.cancel();
+    _isSnapped = false;
+    _isSnapConfirmed = false;
+    _snapConfirmTimer?.cancel();
+  }
+
+  void _syncSnapStateWithClusters() {
+    final currentCluster = _currentCluster;
+    if (_suppressedSnapGrenadeId != null &&
+        _findClusterByAnchorId(_suppressedSnapGrenadeId) == null) {
+      _suppressedSnapGrenadeId = null;
+      _suppressedSnapTimer?.cancel();
+    }
+    if (_candidateClusterAnchorId != null &&
+        _findClusterByAnchorId(_candidateClusterAnchorId) == null) {
+      _candidateClusterAnchorId = null;
+      _candidateSince = null;
+      if (_snapState == _SnapState.candidate) {
+        _setUnsnappedState(_SnapState.free);
+      }
+    }
+    if (_lockedClusterAnchorId != null &&
+        _findClusterByAnchorId(_lockedClusterAnchorId) == null) {
+      _lockedClusterAnchorId = null;
+      if (_snapState == _SnapState.locked) {
+        _setUnsnappedState(_SnapState.free);
+      }
+    }
+    if (_isSnapped && currentCluster != null) {
+      _lockedClusterAnchorId = currentCluster.anchor.id;
+      _snapState = _SnapState.locked;
+    }
+  }
+
   /// 设置索引
   void setGrenadeIndex(int index) {
     if (index >= 0 && index < _filteredGrenades.length) {
@@ -865,3 +998,5 @@ class OverlayStateService extends ChangeNotifier {
 }
 
 enum NavigationDirection { up, down, left, right }
+
+enum _SnapState { free, candidate, locked }
