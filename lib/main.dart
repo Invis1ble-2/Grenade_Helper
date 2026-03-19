@@ -436,11 +436,33 @@ Future<void> _runOverlayWindow(
 
   // 创建 OverlayWindowApp 的 key，以便在 IPC 中访问其状态
   final overlayAppKey = GlobalKey<OverlayWindowAppState>();
+  const overlayMinimumSize = Size(300, 400);
+  const softHiddenVisiblePixels = 1.0;
+  final launchSoftHidden = args?['launch_soft_hidden'] == true;
+  Rect? lastVisibleWindowBounds = () {
+    final savedX = args?['x'] as double?;
+    final savedY = args?['y'] as double?;
+    final savedSize = settingsService.getOverlaySizePixels();
+    return Rect.fromLTWH(
+      savedX ?? 100.0,
+      savedY ?? 100.0,
+      savedSize.$1,
+      savedSize.$2,
+    );
+  }();
+  bool isOverlayLogicallyVisible = false;
 
-  Future<void> persistOverlayPosition() async {
+  Future<void> persistOverlayBounds() async {
     final preferredPosition = overlayAppKey
         .currentState?.overlayWindowKey.currentState?.persistedWindowPosition;
-    final position = preferredPosition ?? await windowManager.getPosition();
+    final bounds = await windowManager.getBounds();
+    final position = preferredPosition ?? bounds.topLeft;
+    lastVisibleWindowBounds = Rect.fromLTWH(
+      position.dx,
+      position.dy,
+      bounds.width,
+      bounds.height,
+    );
     await settingsService.setOverlayPosition(position.dx, position.dy);
   }
 
@@ -453,6 +475,48 @@ Future<void> _runOverlayWindow(
     return overlayAppKey.currentState?.overlayWindowKey.currentState
             ?.blocksDirectionalNavigation ==
         true;
+  }
+
+  Future<void> softHideOverlay({bool persistPosition = true}) async {
+    if (!await windowManager.isVisible()) {
+      await windowManager.show(inactive: true);
+    }
+    await pauseOverlayVideoPlayback();
+    if (persistPosition) {
+      await persistOverlayBounds();
+    }
+    overlayState.stopAllNavigation();
+    isOverlayLogicallyVisible = false;
+
+    final parkedBounds = Rect.fromLTWH(
+      softHiddenVisiblePixels - (lastVisibleWindowBounds?.width ?? 1),
+      softHiddenVisiblePixels - (lastVisibleWindowBounds?.height ?? 1),
+      lastVisibleWindowBounds?.width ?? overlayMinimumSize.width,
+      lastVisibleWindowBounds?.height ?? overlayMinimumSize.height,
+    );
+
+    await windowManager.setMinimumSize(overlayMinimumSize);
+    await windowManager.setIgnoreMouseEvents(true);
+    await windowManager.setOpacity(1.0);
+    await windowManager.setBounds(parkedBounds);
+  }
+
+  Future<void> showOverlayWindow() async {
+    final targetBounds = lastVisibleWindowBounds ??
+        Rect.fromLTWH(
+          100.0,
+          100.0,
+          settingsService.getOverlaySizePixels().$1,
+          settingsService.getOverlaySizePixels().$2,
+        );
+    if (!await windowManager.isVisible()) {
+      await windowManager.show(inactive: true);
+    }
+    await windowManager.setMinimumSize(overlayMinimumSize);
+    await windowManager.setBounds(targetBounds);
+    await windowManager.setOpacity(1.0);
+    await windowManager.setIgnoreMouseEvents(false);
+    isOverlayLogicallyVisible = true;
   }
 
   // 设置窗口方法处理器（接收主窗口的命令）
@@ -477,13 +541,14 @@ Future<void> _runOverlayWindow(
       case 'close':
         // 保存位置
         await pauseOverlayVideoPlayback();
-        await persistOverlayPosition();
+        await persistOverlayBounds();
         await windowManager.close();
         return 'ok';
       case 'hide_overlay':
-        await pauseOverlayVideoPlayback();
-        await persistOverlayPosition();
-        await windowManager.hide();
+        await softHideOverlay();
+        return 'ok';
+      case 'show_overlay':
+        await showOverlayWindow();
         return 'ok';
       // === 悬浮窗操作命令（由全局热键触发）===
       case 'prev_grenade':
@@ -643,12 +708,17 @@ Future<void> _runOverlayWindow(
         return 'ok';
       // 获取悬浮窗可见状态（供主窗口轮询）
       case 'get_visibility':
-        final isVisible = await windowManager.isVisible();
-        return isVisible ? 'visible' : 'hidden';
+        return isOverlayLogicallyVisible ? 'visible' : 'hidden';
       default:
         return null;
     }
   });
+
+  if (launchSoftHidden) {
+    await softHideOverlay(persistPosition: false);
+  } else {
+    await showOverlayWindow();
+  }
 
   runApp(
     ProviderScope(
@@ -668,20 +738,12 @@ Future<void> _runOverlayWindow(
           settingsService: settingsService,
           overlayState: overlayState,
           onClose: () async {
-            await pauseOverlayVideoPlayback();
-            await persistOverlayPosition();
-            // 直接隐藏悬浮窗
-            // 注意：由于 desktop_multi_window 的限制，子窗口无法向主窗口发送消息
-            // 热键将在用户下次按 Alt+G 时自动注销
             debugPrint('[Overlay] Hiding overlay window');
-            await windowManager.hide();
+            await softHideOverlay();
           },
           onMinimize: () async {
-            await pauseOverlayVideoPlayback();
-            await persistOverlayPosition();
-            // 直接隐藏悬浮窗
             debugPrint('[Overlay] Minimizing overlay window');
-            await windowManager.hide();
+            await softHideOverlay();
           },
         ),
       ),
@@ -1010,6 +1072,7 @@ class _MainAppState extends ConsumerState<MainApp> {
         hiddenAtLaunch: true, // 启动时隐藏
         arguments: jsonEncode({
           'type': WindowType.overlay,
+          'launch_soft_hidden': true,
           'x': savedX,
           'y': savedY,
           'map_id': currentMap?.id,
@@ -1018,8 +1081,7 @@ class _MainAppState extends ConsumerState<MainApp> {
       ),
     );
 
-    // 延迟后同步地图状态
-    await Future.delayed(const Duration(milliseconds: 500));
+    await _waitForOverlayReady();
     _syncMapToOverlay();
   }
 
@@ -1028,13 +1090,16 @@ class _MainAppState extends ConsumerState<MainApp> {
   }
 
   Future<void> _showOverlay() async {
+    var overlayJustCreated = false;
     if (overlayWindowController == null) {
       // 如果还没加载（比如刚启动就按快捷键），则现在加载并显示
       await _preloadOverlay();
+      overlayJustCreated = true;
     }
-    // 优先使用无焦点显示，避免抢占游戏焦点
-    // 显示并聚焦
-    await overlayWindowController!.show();
+    if (overlayJustCreated) {
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    await overlayWindowController!.invokeMethod('show_overlay');
     // 设置状态（用于轮询检测）
     if (globalWindowService != null) {
       globalWindowService!.isOverlayVisible = true;
@@ -1049,6 +1114,19 @@ class _MainAppState extends ConsumerState<MainApp> {
     await globalWindowsNavigationService?.stop();
     // 让悬浮窗自己先暂停媒体，再保存位置并隐藏
     await overlayWindowController!.invokeMethod('hide_overlay');
+  }
+
+  Future<void> _waitForOverlayReady() async {
+    if (overlayWindowController == null) return;
+
+    for (var i = 0; i < 30; i++) {
+      try {
+        await overlayWindowController!.invokeMethod('get_visibility');
+        return;
+      } catch (_) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
   }
 
   /// 同步地图信息到悬浮窗

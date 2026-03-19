@@ -299,8 +299,8 @@ class OverlayStateService extends ChangeNotifier {
 
     _currentMap = null;
     _currentLayer = null;
-    _allGrenades.clear();
-    _filteredGrenades.clear();
+    _allGrenades = [];
+    _filteredGrenades = [];
     _clusters = const [];
     _currentGrenadeIndex = 0;
     _currentStepIndex = 0;
@@ -328,8 +328,8 @@ class OverlayStateService extends ChangeNotifier {
   /// 加载道具
   void _loadGrenades({bool notify = false}) {
     if (_currentLayer == null) {
-      _allGrenades.clear();
-      _filteredGrenades.clear();
+      _allGrenades = [];
+      _filteredGrenades = [];
       _clusters = const [];
       return;
     }

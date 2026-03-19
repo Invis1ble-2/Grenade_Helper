@@ -26,7 +26,7 @@ class GrenadeClusterService {
   }
 
   static List<Grenade> sortGrenades(Iterable<Grenade> grenades) {
-    final sorted = grenades.toList(growable: false);
+    final sorted = grenades.toList();
     sorted.sort(compareGrenades);
     return sorted;
   }
