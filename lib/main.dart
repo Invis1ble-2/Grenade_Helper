@@ -477,8 +477,11 @@ Future<void> _runOverlayWindow(
         true;
   }
 
-  Future<void> softHideOverlay({bool persistPosition = true}) async {
-    if (!await windowManager.isVisible()) {
+  Future<void> softHideOverlay({
+    bool persistPosition = true,
+    bool ensureWindowVisible = true,
+  }) async {
+    if (ensureWindowVisible && !await windowManager.isVisible()) {
       await windowManager.show(inactive: true);
     }
     await pauseOverlayVideoPlayback();
@@ -715,7 +718,11 @@ Future<void> _runOverlayWindow(
   });
 
   if (launchSoftHidden) {
-    await softHideOverlay(persistPosition: false);
+    // 预加载时窗口本来就是 hiddenAtLaunch，避免为了“软隐藏”再闪现一次。
+    await softHideOverlay(
+      persistPosition: false,
+      ensureWindowVisible: false,
+    );
   } else {
     await showOverlayWindow();
   }
