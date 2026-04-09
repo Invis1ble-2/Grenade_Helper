@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:isar_community/isar.dart';
 import '../models.dart';
 import '../models/tag.dart';
 import '../providers.dart';
 import '../services/data_service.dart';
 import '../services/lan_sync/lan_sync_local_store.dart';
+import '../widgets/map_icon.dart';
 import 'grenade_preview_screen.dart';
 
 /// 导入预览
@@ -164,10 +164,7 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
   int _metadataChangeCount() {
     final preview = _preview;
     if (preview == null) return 0;
-    return preview.tagsByUuid.length +
-        preview.areas.length +
-        preview.favoriteFolders.length +
-        preview.impactGroups.length;
+    return preview.metadataChangeCount;
   }
 
   /// 切换全选
@@ -595,6 +592,13 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
                     .length;
                 final gameMap =
                     isar.gameMaps.filter().nameEqualTo(mapName).findFirstSync();
+                var packageIconPath = '';
+                for (final mapData in preview.maps) {
+                  if (mapData.mapName.trim() == mapName.trim()) {
+                    packageIconPath = mapData.iconPath;
+                    break;
+                  }
+                }
 
                 final subtitleParts = <String>['$count 个道具'];
                 if (tombstoneCount > 0) {
@@ -607,13 +611,10 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
                 return Card(
                   margin: const EdgeInsets.only(bottom: 12),
                   child: ListTile(
-                    leading: gameMap != null
-                        ? SvgPicture.asset(
-                            gameMap.iconPath,
-                            width: 40,
-                            height: 40,
-                          )
-                        : const Icon(Icons.map, color: Colors.orange, size: 40),
+                    leading: MapIcon(
+                      path: gameMap?.iconPath ?? packageIconPath,
+                      size: 40,
+                    ),
                     title: Text(
                       mapName,
                       style: const TextStyle(fontWeight: FontWeight.bold),
@@ -677,7 +678,7 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
                             leading: const Icon(Icons.sync_alt),
                             title: const Text('元数据变更'),
                             subtitle: Text(
-                              '标签 ${_preview!.tagsByUuid.length} · 区域 ${_preview!.areas.length} · 收藏夹 ${_preview!.favoriteFolders.length} · 爆点分组 ${_preview!.impactGroups.length}',
+                              '标签 ${_preview!.changedTagCount} · 区域 ${_preview!.changedAreaCount} · 地图 ${_preview!.changedMapCount} · 收藏夹 ${_preview!.changedFavoriteFolderCount} · 爆点分组 ${_preview!.changedImpactGroupCount}',
                             ),
                           ),
                         ),

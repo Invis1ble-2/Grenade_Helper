@@ -648,6 +648,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
         List<Map<String, dynamic>> grenadePayloads,
         List<Map<String, dynamic>> tagPayloads,
         List<Map<String, dynamic>> areaPayloads,
+        List<Map<String, dynamic>> mapPayloads,
         List<Map<String, dynamic>> favoriteFolderPayloads,
         List<Map<String, dynamic>> impactGroupPayloads,
         Set<String> filesToZip,
@@ -686,6 +687,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
     final grenadePayloads = <Map<String, dynamic>>[];
     final tagPayloads = <Map<String, dynamic>>[];
     final areaPayloads = <Map<String, dynamic>>[];
+    final mapPayloads = <Map<String, dynamic>>[];
     final favoriteFolderPayloads = <Map<String, dynamic>>[];
     final impactGroupPayloads = <Map<String, dynamic>>[];
     final filesToZip = <String>{};
@@ -708,6 +710,13 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       if (_shouldSendIncrementalItem(
           entry.value, manifestResp.areas[entry.key])) {
         areaPayloads.add(Map<String, dynamic>.from(entry.value.rawData));
+      }
+    }
+    for (final entry in localManifest.maps.entries) {
+      if (_shouldSendIncrementalItem(
+          entry.value, manifestResp.maps[entry.key])) {
+        mapPayloads.add(Map<String, dynamic>.from(entry.value.rawData));
+        filesToZip.addAll(entry.value.filesToZip);
       }
     }
     for (final entry in localManifest.favoriteFolders.entries) {
@@ -815,6 +824,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       grenadePayloads: grenadePayloads,
       tagPayloads: tagPayloads,
       areaPayloads: areaPayloads,
+      mapPayloads: mapPayloads,
       favoriteFolderPayloads: favoriteFolderPayloads,
       impactGroupPayloads: impactGroupPayloads,
       filesToZip: filesToZip,
@@ -864,6 +874,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
     List<Map<String, dynamic>> incrementalGrenadePayloads = const [];
     List<Map<String, dynamic>> incrementalTagPayloads = const [];
     List<Map<String, dynamic>> incrementalAreaPayloads = const [];
+    List<Map<String, dynamic>> incrementalMapPayloads = const [];
     List<Map<String, dynamic>> incrementalFavoriteFolderPayloads = const [];
     List<Map<String, dynamic>> incrementalImpactGroupPayloads = const [];
     Set<String> incrementalFilesToZip = const <String>{};
@@ -900,6 +911,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       incrementalGrenadePayloads = incremental.grenadePayloads;
       incrementalTagPayloads = incremental.tagPayloads;
       incrementalAreaPayloads = incremental.areaPayloads;
+      incrementalMapPayloads = incremental.mapPayloads;
       incrementalFavoriteFolderPayloads = incremental.favoriteFolderPayloads;
       incrementalImpactGroupPayloads = incremental.impactGroupPayloads;
       incrementalFilesToZip = incremental.filesToZip;
@@ -908,6 +920,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       if (incrementalGrenadePayloads.isEmpty &&
           incrementalTagPayloads.isEmpty &&
           incrementalAreaPayloads.isEmpty &&
+          incrementalMapPayloads.isEmpty &&
           incrementalFavoriteFolderPayloads.isEmpty &&
           incrementalImpactGroupPayloads.isEmpty &&
           incrementalTombstones.isEmpty &&
@@ -955,6 +968,12 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
                         .map((item) => Map<String, dynamic>.from(item.rawData))
                         .toList(growable: false) ??
                     const [],
+            explicitMapPayloads: _sendMode == _LanSyncMode.incremental
+                ? incrementalMapPayloads
+                : fullManifest?.maps.values
+                        .map((item) => Map<String, dynamic>.from(item.rawData))
+                        .toList(growable: false) ??
+                    const [],
             explicitFavoriteFolderPayloads: _sendMode ==
                     _LanSyncMode.incremental
                 ? incrementalFavoriteFolderPayloads
@@ -970,10 +989,16 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
                     const [],
             explicitFilesToZip: _sendMode == _LanSyncMode.incremental
                 ? incrementalFilesToZip
-                : fullManifest?.grenades.values
-                        .expand((item) => item.filesToZip)
-                        .toSet() ??
-                    const <String>{},
+                : {
+                    ...(fullManifest?.grenades.values
+                            .expand((item) => item.filesToZip)
+                            .toSet() ??
+                        const <String>{}),
+                    ...(fullManifest?.maps.values
+                            .expand((item) => item.filesToZip)
+                            .toSet() ??
+                        const <String>{}),
+                  },
             grenadeTombstones: incrementalTombstones,
             entityTombstones: incrementalEntityTombstones,
           );
@@ -1002,6 +1027,12 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
                         .map((item) => Map<String, dynamic>.from(item.rawData))
                         .toList(growable: false) ??
                     const [],
+            explicitMapPayloads: _sendMode == _LanSyncMode.incremental
+                ? incrementalMapPayloads
+                : fullManifest?.maps.values
+                        .map((item) => Map<String, dynamic>.from(item.rawData))
+                        .toList(growable: false) ??
+                    const [],
             explicitFavoriteFolderPayloads: _sendMode ==
                     _LanSyncMode.incremental
                 ? incrementalFavoriteFolderPayloads
@@ -1017,10 +1048,16 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
                     const [],
             explicitFilesToZip: _sendMode == _LanSyncMode.incremental
                 ? incrementalFilesToZip
-                : fullManifest?.grenades.values
-                        .expand((item) => item.filesToZip)
-                        .toSet() ??
-                    const <String>{},
+                : {
+                    ...(fullManifest?.grenades.values
+                            .expand((item) => item.filesToZip)
+                            .toSet() ??
+                        const <String>{}),
+                    ...(fullManifest?.maps.values
+                            .expand((item) => item.filesToZip)
+                            .toSet() ??
+                        const <String>{}),
+                  },
             grenadeTombstones: incrementalTombstones,
             entityTombstones: incrementalEntityTombstones,
           );
@@ -1066,7 +1103,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
         syncEnvelopeId: syncEnvelopeId,
         senderNodeId: _receiveController.localNodeId,
         receiverNodeId: peerNodeId.contains(':') ? '' : peerNodeId,
-        packageSchemaVersion: 6,
+        packageSchemaVersion: 7,
       );
       if (!reqResp.ok || reqResp.requestId.trim().isEmpty) {
         throw StateError(

@@ -318,6 +318,16 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       // 通知悬浮窗
       _updateOverlayState(defaultIndex);
     });
+    Future.microtask(_initializeSystemTagsForCurrentMap);
+  }
+
+  Future<void> _initializeSystemTagsForCurrentMap() async {
+    final isar = ref.read(isarProvider);
+    final tagService = TagService(isar);
+    await tagService.initializeSystemTags(
+      widget.gameMap.id,
+      widget.gameMap.name,
+    );
   }
 
   @override

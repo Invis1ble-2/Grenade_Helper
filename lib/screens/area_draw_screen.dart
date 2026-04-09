@@ -10,6 +10,7 @@ import '../models.dart';
 import '../providers.dart';
 import '../services/area_service.dart';
 import '../widgets/color_picker_widget.dart';
+import '../widgets/path_image_provider.dart';
 
 /// 区域绘制界面
 class AreaDrawScreen extends ConsumerStatefulWidget {
@@ -872,12 +873,23 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
                           key: _stackKey,
                           children: [
                             // 地图底图
-                            Image.asset(
-                              _selectedLayer.assetPath,
-                              width: constraints.maxWidth,
-                              height: constraints.maxHeight,
-                              fit: BoxFit.contain,
-                            ),
+                            Builder(builder: (context) {
+                              final provider = imageProviderFromPath(
+                                  _selectedLayer.assetPath);
+                              if (provider == null) {
+                                return Container(
+                                  width: constraints.maxWidth,
+                                  height: constraints.maxHeight,
+                                  color: Colors.black,
+                                );
+                              }
+                              return Image(
+                                image: provider,
+                                width: constraints.maxWidth,
+                                height: constraints.maxHeight,
+                                fit: BoxFit.contain,
+                              );
+                            }),
                             // 绘制层 - 移动模式时忽略绘图事件
                             Positioned.fill(
                               child: IgnorePointer(

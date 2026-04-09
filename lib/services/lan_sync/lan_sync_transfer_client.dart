@@ -87,6 +87,7 @@ class LanSyncRemoteManifestResponse {
   final Map<String, LanSyncRemoteManifestItem> grenades;
   final Map<String, LanSyncRemoteManifestItem> tags;
   final Map<String, LanSyncRemoteManifestItem> areas;
+  final Map<String, LanSyncRemoteManifestItem> maps;
   final Map<String, LanSyncRemoteManifestItem> favoriteFolders;
   final Map<String, LanSyncRemoteManifestItem> impactGroups;
 
@@ -99,6 +100,7 @@ class LanSyncRemoteManifestResponse {
     this.grenades = const {},
     this.tags = const {},
     this.areas = const {},
+    this.maps = const {},
     this.favoriteFolders = const {},
     this.impactGroups = const {},
   });
@@ -409,6 +411,9 @@ class LanSyncTransferClient {
             ),
             areas: _decodeManifestItemMap(
               entities['area'],
+            ),
+            maps: _decodeManifestItemMap(
+              entities['map'],
             ),
             favoriteFolders: _decodeManifestItemMap(
               entities['favoriteFolder'],

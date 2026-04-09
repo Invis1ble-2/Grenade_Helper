@@ -7,6 +7,7 @@ import '../models.dart';
 import '../models/map_area.dart';
 import '../providers.dart';
 import '../services/area_service.dart';
+import '../widgets/path_image_provider.dart';
 
 class AreaAutoTagPreviewScreen extends ConsumerStatefulWidget {
   final GameMap gameMap;
@@ -502,12 +503,22 @@ class _AreaAutoTagPreviewScreenState
             backgroundDecoration: const BoxDecoration(color: Colors.black),
             child: Stack(
               children: [
-                Image.asset(
-                  _layer!.assetPath,
-                  width: constraints.maxWidth,
-                  height: constraints.maxHeight,
-                  fit: BoxFit.contain,
-                ),
+                Builder(builder: (context) {
+                  final provider = imageProviderFromPath(_layer!.assetPath);
+                  if (provider == null) {
+                    return Container(
+                      width: constraints.maxWidth,
+                      height: constraints.maxHeight,
+                      color: Colors.black,
+                    );
+                  }
+                  return Image(
+                    image: provider,
+                    width: constraints.maxWidth,
+                    height: constraints.maxHeight,
+                    fit: BoxFit.contain,
+                  );
+                }),
                 Positioned.fill(
                   child: IgnorePointer(
                     child: CustomPaint(

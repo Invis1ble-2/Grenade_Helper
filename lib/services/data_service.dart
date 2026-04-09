@@ -29,6 +29,8 @@ const String _packageDataFileName = 'data.json';
 const String _packageTypeExport = 'export';
 const String _packageTypeLanSync = 'lan_sync';
 const int _packageManifestVersion = 1;
+const int _exportSchemaVersion = 3;
+const int _lanSyncSchemaVersion = 7;
 const String _placeholderSha256Hex =
     '0000000000000000000000000000000000000000000000000000000000000000';
 final String _cs2PackagePassword = String.fromCharCodes(
@@ -303,8 +305,14 @@ class PackagePreviewResult {
   final List<PackageAreaData> areas;
   final List<PackageFavoriteFolderData> favoriteFolders;
   final List<PackageImpactGroupData> impactGroups;
+  final List<PackageMapData> maps;
   final List<PackageGrenadeTombstoneData> grenadeTombstones;
   final List<PackageEntityTombstoneData> entityTombstones;
+  final int changedTagCount;
+  final int changedAreaCount;
+  final int changedFavoriteFolderCount;
+  final int changedImpactGroupCount;
+  final int changedMapCount;
 
   PackagePreviewResult({
     required this.grenadesByMap,
@@ -321,8 +329,14 @@ class PackagePreviewResult {
     this.areas = const [],
     this.favoriteFolders = const [],
     this.impactGroups = const [],
+    this.maps = const [],
     this.grenadeTombstones = const [],
     this.entityTombstones = const [],
+    this.changedTagCount = 0,
+    this.changedAreaCount = 0,
+    this.changedFavoriteFolderCount = 0,
+    this.changedImpactGroupCount = 0,
+    this.changedMapCount = 0,
   });
 
   bool get isMultiMap => mapNames.length > 1;
@@ -331,6 +345,13 @@ class PackagePreviewResult {
 
   int get totalCount =>
       grenadesByMap.values.fold(0, (sum, list) => sum + list.length);
+
+  int get metadataChangeCount =>
+      changedTagCount +
+      changedAreaCount +
+      changedFavoriteFolderCount +
+      changedImpactGroupCount +
+      changedMapCount;
 
   List<String> get mapNames {
     final ordered = <String>[];
@@ -367,6 +388,11 @@ class PackagePreviewResult {
     }
     for (final group in impactGroups) {
       final trimmed = group.mapName.trim();
+      if (trimmed.isEmpty || !seen.add(trimmed)) continue;
+      ordered.add(trimmed);
+    }
+    for (final map in maps) {
+      final trimmed = map.mapName.trim();
       if (trimmed.isEmpty || !seen.add(trimmed)) continue;
       ordered.add(trimmed);
     }
@@ -622,6 +648,74 @@ class PackageImpactGroupData {
       };
 }
 
+class PackageMapLayerData {
+  final String name;
+  final String assetPath;
+  final int sortOrder;
+
+  const PackageMapLayerData({
+    required this.name,
+    required this.assetPath,
+    required this.sortOrder,
+  });
+
+  factory PackageMapLayerData.fromJson(Map<String, dynamic> json) {
+    return PackageMapLayerData(
+      name: (json['name'] as String? ?? '').trim(),
+      assetPath: (json['assetPath'] as String? ?? '').trim(),
+      sortOrder: json['sortOrder'] as int? ?? 0,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'assetPath': assetPath,
+        'sortOrder': sortOrder,
+      };
+}
+
+class PackageMapData {
+  final String mapName;
+  final String backgroundPath;
+  final String iconPath;
+  final List<PackageMapLayerData> layers;
+
+  const PackageMapData({
+    required this.mapName,
+    required this.backgroundPath,
+    required this.iconPath,
+    required this.layers,
+  });
+
+  factory PackageMapData.fromJson(Map<String, dynamic> json) {
+    final layersRaw = json['layers'];
+    final layers = <PackageMapLayerData>[];
+    if (layersRaw is List) {
+      for (final raw in layersRaw) {
+        if (raw is! Map) continue;
+        final layer = PackageMapLayerData.fromJson(
+          Map<String, dynamic>.from(raw),
+        );
+        if (layer.name.isEmpty) continue;
+        layers.add(layer);
+      }
+    }
+    return PackageMapData(
+      mapName: (json['mapName'] as String? ?? '').trim(),
+      backgroundPath: (json['backgroundPath'] as String? ?? '').trim(),
+      iconPath: (json['iconPath'] as String? ?? '').trim(),
+      layers: layers,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'mapName': mapName,
+        'backgroundPath': backgroundPath,
+        'iconPath': iconPath,
+        'layers': layers.map((item) => item.toJson()).toList(growable: false),
+      };
+}
+
 class LanSyncManifestItem {
   final String key;
   final String mapName;
@@ -650,6 +744,7 @@ class LanSyncManifestBundle {
   final Map<String, LanSyncManifestItem> grenades;
   final Map<String, LanSyncManifestItem> tags;
   final Map<String, LanSyncManifestItem> areas;
+  final Map<String, LanSyncManifestItem> maps;
   final Map<String, LanSyncManifestItem> favoriteFolders;
   final Map<String, LanSyncManifestItem> impactGroups;
 
@@ -657,6 +752,7 @@ class LanSyncManifestBundle {
     this.grenades = const {},
     this.tags = const {},
     this.areas = const {},
+    this.maps = const {},
     this.favoriteFolders = const {},
     this.impactGroups = const {},
   });
@@ -679,6 +775,10 @@ class LanSyncManifestBundle {
         },
         LanSyncEntityTombstoneType.area: {
           for (final entry in areas.entries)
+            entry.key: entry.value.toManifestJson(),
+        },
+        'map': {
+          for (final entry in maps.entries)
             entry.key: entry.value.toManifestJson(),
         },
         LanSyncEntityTombstoneType.favoriteFolder: {
@@ -790,20 +890,29 @@ class _ExportBundle {
   final List<Map<String, dynamic>> grenades;
   final List<Map<String, dynamic>> tags;
   final List<Map<String, dynamic>> areas;
+  final List<Map<String, dynamic>> maps;
+  final List<Map<String, dynamic>> favoriteFolders;
+  final List<Map<String, dynamic>> impactGroups;
   final Set<String> filesToZip;
 
   const _ExportBundle({
     required this.grenades,
     required this.tags,
     required this.areas,
+    required this.maps,
+    required this.favoriteFolders,
+    required this.impactGroups,
     required this.filesToZip,
   });
 
   Map<String, dynamic> toJson() => {
-        'schemaVersion': 2,
+        'schemaVersion': _exportSchemaVersion,
         'grenades': grenades,
         'tags': tags,
         'areas': areas,
+        'maps': maps,
+        'favoriteFolders': favoriteFolders,
+        'impactGroups': impactGroups,
       };
 }
 
@@ -873,6 +982,7 @@ class _LanSyncExportBundle {
   final List<Map<String, dynamic>> grenades;
   final List<Map<String, dynamic>> tags;
   final List<Map<String, dynamic>> areas;
+  final List<Map<String, dynamic>> maps;
   final List<Map<String, dynamic>> favoriteFolders;
   final List<Map<String, dynamic>> impactGroups;
   final List<Map<String, dynamic>> grenadeTombstones;
@@ -883,6 +993,7 @@ class _LanSyncExportBundle {
     required this.grenades,
     required this.tags,
     required this.areas,
+    required this.maps,
     required this.favoriteFolders,
     required this.impactGroups,
     required this.grenadeTombstones,
@@ -891,15 +1002,32 @@ class _LanSyncExportBundle {
   });
 
   Map<String, dynamic> toJson() => {
-        'schemaVersion': 6,
+        'schemaVersion': _lanSyncSchemaVersion,
         'grenades': grenades,
         'tags': tags,
         'areas': areas,
+        'maps': maps,
         'favoriteFolders': favoriteFolders,
         'impactGroups': impactGroups,
         'grenadeTombstones': grenadeTombstones,
         'entityTombstones': entityTombstones,
       };
+}
+
+class _MetadataPreviewCounts {
+  final int tags;
+  final int areas;
+  final int favoriteFolders;
+  final int impactGroups;
+  final int maps;
+
+  const _MetadataPreviewCounts({
+    this.tags = 0,
+    this.areas = 0,
+    this.favoriteFolders = 0,
+    this.impactGroups = 0,
+    this.maps = 0,
+  });
 }
 
 /// 在 isolate 中执行文件复制和压缩（顶层函数）
@@ -996,6 +1124,7 @@ class DataService {
     '.gif',
     '.webp',
     '.bmp',
+    '.svg',
     '.heic',
     '.heif',
     '.mp4',
@@ -1045,7 +1174,7 @@ class DataService {
     return _estimateExportPackageFromBundle(
       exportBundle,
       grenadeCount: grenades.length,
-      schemaVersion: 2,
+      schemaVersion: _exportSchemaVersion,
       packageType: _packageTypeExport,
     );
   }
@@ -1545,6 +1674,7 @@ class DataService {
       final areas = <PackageAreaData>[];
       final favoriteFolders = <PackageFavoriteFolderData>[];
       final impactGroups = <PackageImpactGroupData>[];
+      final maps = <PackageMapData>[];
       final grenadeTombstones = <PackageGrenadeTombstoneData>[];
       final entityTombstones = <PackageEntityTombstoneData>[];
       final decoded = jsonDecode(utf8.decode(dataBytes));
@@ -1594,6 +1724,19 @@ class DataService {
             impactGroups.add(group);
           }
         }
+        final mapsRaw = decoded['maps'];
+        if (mapsRaw is List) {
+          final byName = <String, PackageMapData>{};
+          for (final raw in mapsRaw) {
+            if (raw is! Map) continue;
+            final mapData = PackageMapData.fromJson(
+              Map<String, dynamic>.from(raw),
+            );
+            if (mapData.mapName.isEmpty) continue;
+            byName[mapData.mapName] = mapData;
+          }
+          maps.addAll(byName.values);
+        }
         final allowTombstonesInPreview =
             mode == ImportPackageMode.lanSync && isTrustedPackage;
         final grenadeTombstonesRaw = decoded['grenadeTombstones'];
@@ -1631,6 +1774,7 @@ class DataService {
           areas.isEmpty &&
           favoriteFolders.isEmpty &&
           impactGroups.isEmpty &&
+          maps.isEmpty &&
           grenadeTombstones.isEmpty &&
           entityTombstones.isEmpty) {
         return null;
@@ -1724,6 +1868,15 @@ class DataService {
         grenadesByMap[mapName]!.add(previewItem);
       }
 
+      final metadataPreviewCounts = await _buildMetadataPreviewCounts(
+        tagsByUuid: tagsByUuid,
+        areas: areas,
+        favoriteFolders: favoriteFolders,
+        impactGroups: impactGroups,
+        maps: maps,
+        packageFileHashes: packageFileHashes,
+      );
+
       return PackagePreviewResult(
         grenadesByMap: grenadesByMap,
         filePath: filePath,
@@ -1739,8 +1892,14 @@ class DataService {
         areas: areas,
         favoriteFolders: favoriteFolders,
         impactGroups: impactGroups,
+        maps: maps,
         grenadeTombstones: grenadeTombstones,
         entityTombstones: entityTombstones,
+        changedTagCount: metadataPreviewCounts.tags,
+        changedAreaCount: metadataPreviewCounts.areas,
+        changedFavoriteFolderCount: metadataPreviewCounts.favoriteFolders,
+        changedImpactGroupCount: metadataPreviewCounts.impactGroups,
+        changedMapCount: metadataPreviewCounts.maps,
       );
     } finally {
       archive.clearSync();
@@ -1787,12 +1946,66 @@ class DataService {
     return toFix.length;
   }
 
+  bool _isAssetPath(String path) {
+    return path.trim().startsWith('assets/');
+  }
+
+  void _addMapFileToZipIfNeeded(String path, Set<String> filesToZip) {
+    final normalized = path.trim();
+    if (normalized.isEmpty || _isAssetPath(normalized)) return;
+    final file = File(normalized);
+    if (!file.existsSync()) return;
+    filesToZip.add(file.path);
+  }
+
+  Future<PackageMapData?> _buildPackageMapData(
+    GameMap map, {
+    Set<String>? filesToZip,
+  }) async {
+    final mapName = map.name.trim();
+    if (mapName.isEmpty) return null;
+    await map.layers.load();
+    final layers = map.layers.toList(growable: false)
+      ..sort((a, b) {
+        final orderCompare = a.sortOrder.compareTo(b.sortOrder);
+        if (orderCompare != 0) return orderCompare;
+        return a.name.compareTo(b.name);
+      });
+    final layerPayloads = <PackageMapLayerData>[];
+    for (final layer in layers) {
+      final layerName = layer.name.trim();
+      if (layerName.isEmpty) continue;
+      final assetPath = layer.assetPath.trim();
+      layerPayloads.add(PackageMapLayerData(
+        name: layerName,
+        assetPath: assetPath,
+        sortOrder: layer.sortOrder,
+      ));
+      if (filesToZip != null) {
+        _addMapFileToZipIfNeeded(assetPath, filesToZip);
+      }
+    }
+
+    final backgroundPath = map.backgroundPath.trim();
+    final iconPath = map.iconPath.trim();
+    if (filesToZip != null) {
+      _addMapFileToZipIfNeeded(backgroundPath, filesToZip);
+      _addMapFileToZipIfNeeded(iconPath, filesToZip);
+    }
+    return PackageMapData(
+      mapName: mapName,
+      backgroundPath: backgroundPath,
+      iconPath: iconPath,
+      layers: layerPayloads,
+    );
+  }
+
   Future<_ExportBundle> _buildExportBundle(List<Grenade> grenades) async {
     final exportList = <Map<String, dynamic>>[];
-    final exportTagIdsByIndex = <Set<int>>[];
     final filesToZip = <String>{};
-    final usedTagIds = <int>{};
     final usedMapIds = <int>{};
+    final usedFolderIds = <int>{};
+    final usedImpactGroupIds = <int>{};
 
     for (final g in grenades) {
       g.layer.loadSync();
@@ -1815,12 +2028,14 @@ class DataService {
         });
       }
 
-      final grenadeTags =
-          await isar.grenadeTags.filter().grenadeIdEqualTo(g.id).findAll();
-      final tagIds = grenadeTags.map((gt) => gt.tagId).toSet();
-      usedTagIds.addAll(tagIds);
       if (g.layer.value?.map.value != null) {
         usedMapIds.add(g.layer.value!.map.value!.id);
+      }
+      if (g.isFavorite && g.favoriteFolderId != null) {
+        usedFolderIds.add(g.favoriteFolderId!);
+      }
+      if (g.impactGroupId != null) {
+        usedImpactGroupIds.add(g.impactGroupId!);
       }
 
       exportList.add({
@@ -1839,14 +2054,14 @@ class DataService {
         'impactY': g.impactYRatio,
         'impactAreaStrokes': g.impactAreaStrokes,
         'tagUuids': <String>[],
+        'isFavorite': g.isFavorite,
+        'favoriteFolderRef': null,
+        'impactGroupRef': null,
         'steps': stepsData,
         'createdAt': g.createdAt.millisecondsSinceEpoch,
         'updatedAt': g.updatedAt.millisecondsSinceEpoch,
       });
-      exportTagIdsByIndex.add(tagIds);
     }
-
-    await _ensureExportTagUuids(usedTagIds);
 
     final mapById = <int, GameMap>{};
     for (final id in usedMapIds) {
@@ -1856,6 +2071,16 @@ class DataService {
       }
     }
 
+    final usedTagIds = <int>{};
+    for (final map in mapById.values) {
+      final tags = await isar.tags.filter().mapIdEqualTo(map.id).findAll();
+      for (final tag in tags) {
+        usedTagIds.add(tag.id);
+      }
+    }
+
+    await _ensureExportTagUuids(usedTagIds);
+
     final tagById = <int, Tag>{};
     for (final id in usedTagIds) {
       final tag = await isar.tags.get(id);
@@ -1864,17 +2089,27 @@ class DataService {
       }
     }
 
-    // 反填 grenade 的 tagUuids
+    final grenadeTagIdsByGrenadeId = <int, Set<int>>{};
+    for (final g in grenades) {
+      final grenadeTags =
+          await isar.grenadeTags.filter().grenadeIdEqualTo(g.id).findAll();
+      grenadeTagIdsByGrenadeId[g.id] =
+          grenadeTags.map((gt) => gt.tagId).toSet();
+    }
+
+    // 反填 grenade 的 tagUuids / 收藏夹 / 爆点分组引用
     for (var i = 0; i < exportList.length; i++) {
       final item = exportList[i];
-      final tagIds = exportTagIdsByIndex[i];
+      final grenade = grenades[i];
+      final tagIds = grenadeTagIdsByGrenadeId[grenade.id] ?? const <int>{};
       final uuids = <String>[];
       for (final tagId in tagIds) {
         final tag = tagById[tagId];
         if (tag == null || tag.tagUuid.trim().isEmpty) continue;
         uuids.add(tag.tagUuid.trim());
       }
-      item['tagUuids'] = uuids.toSet().toList(growable: false);
+      final tagUuids = uuids.toSet().toList(growable: false)..sort();
+      item['tagUuids'] = tagUuids;
     }
 
     final tagsData = <Map<String, dynamic>>[];
@@ -1896,12 +2131,8 @@ class DataService {
       });
     }
 
-    final areaTagIdSet = tagById.values
-        .where((t) => t.dimension == TagDimension.area)
-        .map((t) => t.id)
-        .toSet();
     final areasData = <Map<String, dynamic>>[];
-    if (areaTagIdSet.isNotEmpty) {
+    if (mapById.isNotEmpty) {
       final mapLayerNameById = <int, String>{};
       final maps = mapById.values.toList();
       for (final map in maps) {
@@ -1913,7 +2144,7 @@ class DataService {
 
       final areas = await isar.mapAreas.where().findAll();
       for (final area in areas) {
-        if (!areaTagIdSet.contains(area.tagId)) continue;
+        if (!usedMapIds.contains(area.mapId)) continue;
         final tag = tagById[area.tagId];
         if (tag == null) continue;
         final tagUuid = tag.tagUuid.trim();
@@ -1935,10 +2166,123 @@ class DataService {
       }
     }
 
+    final mapsData = <Map<String, dynamic>>[];
+    final orderedMaps = mapById.values.toList(growable: false)
+      ..sort((a, b) => a.name.compareTo(b.name));
+    for (final map in orderedMaps) {
+      final payload = await _buildPackageMapData(map, filesToZip: filesToZip);
+      if (payload == null) continue;
+      mapsData.add(payload.toJson());
+    }
+
+    final neededFolderIds = <int>{...usedFolderIds};
+    for (final map in mapById.values) {
+      final folders =
+          await isar.favoriteFolders.filter().mapIdEqualTo(map.id).findAll();
+      for (final folder in folders) {
+        neededFolderIds.add(folder.id);
+      }
+    }
+
+    final favoriteFoldersData = <Map<String, dynamic>>[];
+    final folderRefById = <int, Map<String, dynamic>>{};
+    for (final folderId in neededFolderIds) {
+      final folder = await isar.favoriteFolders.get(folderId);
+      if (folder == null) continue;
+      final map =
+          mapById[folder.mapId] ?? await isar.gameMaps.get(folder.mapId);
+      if (map == null) continue;
+      mapById[folder.mapId] = map;
+      final nameKey = folder.nameKey.trim().isEmpty
+          ? _normalizeFolderNameKey(folder.name)
+          : _normalizeFolderNameKey(folder.nameKey);
+      final payload = PackageFavoriteFolderData(
+        mapName: map.name,
+        name: folder.name,
+        nameKey: nameKey,
+        sortOrder: folder.sortOrder,
+        createdAt: folder.createdAt.millisecondsSinceEpoch,
+        updatedAt: folder.updatedAt.millisecondsSinceEpoch,
+      ).toJson();
+      favoriteFoldersData.add(payload);
+      folderRefById[folder.id] = {
+        'mapName': map.name,
+        'nameKey': nameKey,
+      };
+    }
+
+    final neededImpactGroupIds = <int>{...usedImpactGroupIds};
+    for (final map in mapById.values) {
+      await map.layers.load();
+      for (final layer in map.layers) {
+        final groups =
+            await isar.impactGroups.filter().layerIdEqualTo(layer.id).findAll();
+        for (final group in groups) {
+          neededImpactGroupIds.add(group.id);
+        }
+      }
+    }
+
+    final impactGroupsData = <Map<String, dynamic>>[];
+    final impactGroupRefById = <int, Map<String, dynamic>>{};
+    final seenImpactGroupKeys = <String>{};
+    for (final groupId in neededImpactGroupIds) {
+      final group = await isar.impactGroups.get(groupId);
+      if (group == null) continue;
+      final layer = await isar.mapLayers.get(group.layerId);
+      if (layer == null) continue;
+      await layer.map.load();
+      final map = layer.map.value;
+      if (map == null) continue;
+      final payload = PackageImpactGroupData(
+        mapName: map.name,
+        layerName: layer.name,
+        name: group.name,
+        type: group.type,
+        impactXRatio: group.impactXRatio,
+        impactYRatio: group.impactYRatio,
+        createdAt: group.createdAt.millisecondsSinceEpoch,
+        updatedAt: group.updatedAt.millisecondsSinceEpoch,
+      );
+      final semanticKey = _impactGroupSemanticKey(
+        mapName: payload.mapName,
+        layerName: payload.layerName,
+        type: payload.type,
+        name: payload.name,
+        impactXRatio: payload.impactXRatio,
+        impactYRatio: payload.impactYRatio,
+      );
+      if (seenImpactGroupKeys.add(semanticKey)) {
+        impactGroupsData.add(payload.toJson());
+      }
+      impactGroupRefById[group.id] = {
+        'mapName': payload.mapName,
+        'layerName': payload.layerName,
+        'name': payload.name,
+        'type': payload.type,
+        'impactXRatio': payload.impactXRatio,
+        'impactYRatio': payload.impactYRatio,
+      };
+    }
+
+    for (var i = 0; i < exportList.length; i++) {
+      final item = exportList[i];
+      final grenade = grenades[i];
+      if (grenade.isFavorite && grenade.favoriteFolderId != null) {
+        item['favoriteFolderRef'] = folderRefById[grenade.favoriteFolderId!];
+      }
+      if (grenade.impactGroupId != null) {
+        item['impactGroupRef'] = impactGroupRefById[grenade.impactGroupId!];
+      }
+    }
+
     return _ExportBundle(
       grenades: exportList,
       tags: tagsData,
       areas: areasData,
+      maps: mapsData,
+      favoriteFolders: favoriteFoldersData,
+      impactGroups: impactGroupsData,
       filesToZip: filesToZip,
     );
   }
@@ -2171,6 +2515,33 @@ class DataService {
     return result;
   }
 
+  Future<Map<String, LanSyncManifestItem>> _buildMapManifestItems(
+    Map<String, GameMap> scopedMaps,
+  ) async {
+    if (scopedMaps.isEmpty) return const {};
+    final result = <String, LanSyncManifestItem>{};
+    for (final map in scopedMaps.values) {
+      final filesToZip = <String>{};
+      final packageMap = await _buildPackageMapData(
+        map,
+        filesToZip: filesToZip,
+      );
+      if (packageMap == null) continue;
+      final mapName = packageMap.mapName.trim();
+      if (mapName.isEmpty) continue;
+      final payload = packageMap.toJson();
+      result[mapName] = LanSyncManifestItem(
+        key: mapName,
+        mapName: mapName,
+        digest: _digestJsonValue(_normalizePayloadForSyncDigest(payload)),
+        updatedAtMs: 0,
+        rawData: payload,
+        filesToZip: filesToZip,
+      );
+    }
+    return result;
+  }
+
   Future<Map<String, LanSyncManifestItem>> _buildFavoriteFolderManifestItems(
     Map<String, GameMap> scopedMaps,
   ) async {
@@ -2266,6 +2637,7 @@ class DataService {
     final grenadeItems = await _buildGrenadeManifestItems(grenades);
     final tagItems = await _buildTagManifestItems(scopedMaps);
     final areaItems = await _buildAreaManifestItems(scopedMaps);
+    final mapItems = await _buildMapManifestItems(scopedMaps);
     final favoriteFolderItems =
         await _buildFavoriteFolderManifestItems(scopedMaps);
     final impactGroupItems = await _buildImpactGroupManifestItems(scopedMaps);
@@ -2273,6 +2645,7 @@ class DataService {
       grenades: grenadeItems,
       tags: tagItems,
       areas: areaItems,
+      maps: mapItems,
       favoriteFolders: favoriteFolderItems,
       impactGroups: impactGroupItems,
     );
@@ -2422,6 +2795,7 @@ class DataService {
       grenades: grenadeItems,
       tags: base.tags,
       areas: base.areas,
+      maps: base.maps,
       favoriteFolders: favoriteFoldersData,
       impactGroups: impactGroupsData,
       grenadeTombstones:
@@ -2432,7 +2806,7 @@ class DataService {
     );
   }
 
-  /// 构建局域网同步专用包（schemaVersion=5），包含局域网专用附加数据。
+  /// 构建局域网同步专用包（schemaVersion=7），包含局域网专用附加数据。
   /// 不影响普通分享/导出逻辑。
   Future<String> buildLanSyncPackageToTemp({
     required int scopeType,
@@ -2442,6 +2816,7 @@ class DataService {
     List<Map<String, dynamic>> explicitGrenadePayloads = const [],
     List<Map<String, dynamic>> explicitTagPayloads = const [],
     List<Map<String, dynamic>> explicitAreaPayloads = const [],
+    List<Map<String, dynamic>> explicitMapPayloads = const [],
     List<Map<String, dynamic>> explicitFavoriteFolderPayloads = const [],
     List<Map<String, dynamic>> explicitImpactGroupPayloads = const [],
     Set<String> explicitFilesToZip = const <String>{},
@@ -2451,6 +2826,7 @@ class DataService {
     final hasExplicitPayloads = explicitGrenadePayloads.isNotEmpty ||
         explicitTagPayloads.isNotEmpty ||
         explicitAreaPayloads.isNotEmpty ||
+        explicitMapPayloads.isNotEmpty ||
         explicitFavoriteFolderPayloads.isNotEmpty ||
         explicitImpactGroupPayloads.isNotEmpty ||
         grenadeTombstones.isNotEmpty ||
@@ -2475,6 +2851,7 @@ class DataService {
             grenades: explicitGrenadePayloads,
             tags: explicitTagPayloads,
             areas: explicitAreaPayloads,
+            maps: explicitMapPayloads,
             favoriteFolders: explicitFavoriteFolderPayloads,
             impactGroups: explicitImpactGroupPayloads,
             grenadeTombstones: grenadeTombstones
@@ -2492,6 +2869,7 @@ class DataService {
     if (syncBundle.grenades.isEmpty &&
         syncBundle.tags.isEmpty &&
         syncBundle.areas.isEmpty &&
+        syncBundle.maps.isEmpty &&
         syncBundle.favoriteFolders.isEmpty &&
         syncBundle.impactGroups.isEmpty &&
         grenadeTombstones.isEmpty &&
@@ -2509,7 +2887,7 @@ class DataService {
         zipPath: zipPath,
         jsonData: jsonEncode(syncBundle.toJson()),
         filesToCopy: syncBundle.filesToZip.toList(),
-        schemaVersion: 6,
+        schemaVersion: _lanSyncSchemaVersion,
         packageType: _packageTypeLanSync,
       ),
     );
@@ -2709,6 +3087,392 @@ class DataService {
             _normalizeStructuredJsonString(shared.strokes);
   }
 
+  Future<bool> _isLocalFileEquivalentToPackagePath({
+    required String localPath,
+    required String sharedRawPath,
+    required Map<String, String> packageFileHashes,
+  }) async {
+    final normalizedLocal = localPath.trim();
+    final normalizedShared = sharedRawPath.trim();
+    if (normalizedShared.isEmpty) return normalizedLocal.isEmpty;
+    if (_isAssetPath(normalizedShared)) {
+      return normalizedLocal == normalizedShared;
+    }
+    if (normalizedLocal.isEmpty) return false;
+    final expectedHash = packageFileHashes[p.basename(normalizedShared)] ?? '';
+    if (expectedHash.isEmpty) {
+      return normalizedLocal == normalizedShared;
+    }
+    final localHash = await _sha256FileHex(normalizedLocal);
+    return localHash.isNotEmpty && localHash == expectedHash;
+  }
+
+  Future<bool> _isSharedMapEquivalentToLocal(
+    PackageMapData shared,
+    GameMap local, {
+    required Map<String, String> packageFileHashes,
+  }) async {
+    if (!await _isLocalFileEquivalentToPackagePath(
+      localPath: local.backgroundPath,
+      sharedRawPath: shared.backgroundPath,
+      packageFileHashes: packageFileHashes,
+    )) {
+      return false;
+    }
+    if (!await _isLocalFileEquivalentToPackagePath(
+      localPath: local.iconPath,
+      sharedRawPath: shared.iconPath,
+      packageFileHashes: packageFileHashes,
+    )) {
+      return false;
+    }
+
+    await local.layers.load();
+    final localLayerByName = <String, MapLayer>{
+      for (final layer in local.layers)
+        if (layer.name.trim().isNotEmpty) layer.name.trim(): layer,
+    };
+    for (final sharedLayer in shared.layers) {
+      final layerName = sharedLayer.name.trim();
+      if (layerName.isEmpty) continue;
+      final localLayer = localLayerByName[layerName];
+      if (localLayer == null) return false;
+      if (localLayer.sortOrder != sharedLayer.sortOrder) return false;
+      if (!await _isLocalFileEquivalentToPackagePath(
+        localPath: localLayer.assetPath,
+        sharedRawPath: sharedLayer.assetPath,
+        packageFileHashes: packageFileHashes,
+      )) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  Future<_MetadataPreviewCounts> _buildMetadataPreviewCounts({
+    required Map<String, PackageTagData> tagsByUuid,
+    required List<PackageAreaData> areas,
+    required List<PackageFavoriteFolderData> favoriteFolders,
+    required List<PackageImpactGroupData> impactGroups,
+    required List<PackageMapData> maps,
+    required Map<String, String> packageFileHashes,
+  }) async {
+    final changedTags = await _countChangedPreviewTags(tagsByUuid);
+    final changedAreas = await _countChangedPreviewAreas(areas);
+    final changedFavoriteFolders =
+        await _countChangedPreviewFavoriteFolders(favoriteFolders);
+    final changedImpactGroups =
+        await _countChangedPreviewImpactGroups(impactGroups);
+    final changedMaps = await _countChangedPreviewMaps(
+      maps,
+      packageFileHashes: packageFileHashes,
+    );
+    return _MetadataPreviewCounts(
+      tags: changedTags,
+      areas: changedAreas,
+      favoriteFolders: changedFavoriteFolders,
+      impactGroups: changedImpactGroups,
+      maps: changedMaps,
+    );
+  }
+
+  Future<int> _countChangedPreviewTags(
+    Map<String, PackageTagData> tagsByUuid,
+  ) async {
+    if (tagsByUuid.isEmpty) return 0;
+    final mapNames = tagsByUuid.values
+        .map((e) => e.mapName.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet();
+    final context = await _buildLocalTagContext(mapNames);
+    var count = 0;
+    for (final shared in tagsByUuid.values) {
+      if (shared.tagUuid.trim().isEmpty || shared.mapName.trim().isEmpty) {
+        continue;
+      }
+      final map = context.mapByName[shared.mapName];
+      if (map == null) {
+        count++;
+        continue;
+      }
+      final localByUuid = context.localByUuid[shared.tagUuid];
+      if (localByUuid != null) {
+        final contentDifferent = _isTagDifferent(localByUuid, shared);
+        if (_requiresManualConflictResolution(
+              sharedUpdatedAtMs: shared.updatedAt,
+              localUpdatedAtMs: localByUuid.updatedAt.millisecondsSinceEpoch,
+              contentDifferent: contentDifferent,
+            ) ||
+            (shared.updatedAt > localByUuid.updatedAt.millisecondsSinceEpoch &&
+                contentDifferent)) {
+          count++;
+        }
+        continue;
+      }
+      final semanticTag = context.localBySemantic[
+          _semanticTagKey(map.id, shared.dimension, shared.name)];
+      if (semanticTag != null) {
+        final contentDifferent = _isTagDifferent(semanticTag, shared) ||
+            semanticTag.tagUuid != shared.tagUuid;
+        if (_requiresManualConflictResolution(
+              sharedUpdatedAtMs: shared.updatedAt,
+              localUpdatedAtMs: semanticTag.updatedAt.millisecondsSinceEpoch,
+              contentDifferent: contentDifferent,
+            ) ||
+            (shared.updatedAt > semanticTag.updatedAt.millisecondsSinceEpoch &&
+                contentDifferent)) {
+          count++;
+        }
+        continue;
+      }
+      count++;
+    }
+    return count;
+  }
+
+  Future<int> _countChangedPreviewAreas(
+    List<PackageAreaData> areas,
+  ) async {
+    if (areas.isEmpty) return 0;
+    final dedupedShared = <String, PackageAreaData>{};
+    for (final area in areas) {
+      final key = '${area.tagUuid}|${area.mapName}|${area.layerName}';
+      final previous = dedupedShared[key];
+      if (previous == null || area.updatedAt >= previous.updatedAt) {
+        dedupedShared[key] = area;
+      }
+    }
+
+    final mapNames = dedupedShared.values
+        .map((e) => e.mapName.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet();
+    final mapByName = <String, GameMap>{};
+    final layerIdByMapAndName = <String, int>{};
+    for (final name in mapNames) {
+      final map = await isar.gameMaps.filter().nameEqualTo(name).findFirst();
+      if (map == null) continue;
+      mapByName[name] = map;
+      await map.layers.load();
+      for (final layer in map.layers) {
+        layerIdByMapAndName['${map.name}|${layer.name}'] = layer.id;
+      }
+    }
+    final localTagByUuid = <String, Tag>{};
+    final allTags = await isar.tags.where().findAll();
+    for (final tag in allTags) {
+      final uuid = tag.tagUuid.trim();
+      if (uuid.isNotEmpty) {
+        localTagByUuid[uuid] = tag;
+      }
+    }
+
+    final existingAreasByMapAndTag = <String, List<MapArea>>{};
+    var count = 0;
+    for (final shared in dedupedShared.values) {
+      final map = mapByName[shared.mapName];
+      final localTag = localTagByUuid[shared.tagUuid];
+      final layerId =
+          layerIdByMapAndName['${shared.mapName}|${shared.layerName}'];
+      if (map == null ||
+          localTag == null ||
+          localTag.mapId != map.id ||
+          layerId == null) {
+        count++;
+        continue;
+      }
+      final cacheKey = '${map.id}|${localTag.id}';
+      final existing = existingAreasByMapAndTag[cacheKey] ??
+          await isar.mapAreas
+              .filter()
+              .mapIdEqualTo(map.id)
+              .tagIdEqualTo(localTag.id)
+              .findAll();
+      existingAreasByMapAndTag[cacheKey] = existing;
+      final sameLayer =
+          existing.where((a) => a.layerId == layerId).toList(growable: false);
+      if (sameLayer.isEmpty) {
+        count++;
+        continue;
+      }
+      sameLayer.sort((a, b) {
+        if (a.updatedAt.isAfter(b.updatedAt)) return -1;
+        if (a.updatedAt.isBefore(b.updatedAt)) return 1;
+        return b.id.compareTo(a.id);
+      });
+      final target = sameLayer.first;
+      final contentDifferent = !_isSharedAreaEquivalent(target, shared);
+      if (_requiresManualConflictResolution(
+            sharedUpdatedAtMs: shared.updatedAt,
+            localUpdatedAtMs: target.updatedAt.millisecondsSinceEpoch,
+            contentDifferent: contentDifferent,
+          ) ||
+          (shared.updatedAt > target.updatedAt.millisecondsSinceEpoch &&
+              contentDifferent)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  Future<int> _countChangedPreviewFavoriteFolders(
+    List<PackageFavoriteFolderData> favoriteFolders,
+  ) async {
+    if (favoriteFolders.isEmpty) return 0;
+    final sharedByKey = <String, PackageFavoriteFolderData>{};
+    for (final folder in favoriteFolders) {
+      final nameKey = folder.nameKey.trim().isEmpty
+          ? _normalizeFolderNameKey(folder.name)
+          : _normalizeFolderNameKey(folder.nameKey);
+      if (folder.mapName.trim().isEmpty || nameKey.isEmpty) continue;
+      final key = _favoriteFolderRefKey(
+        mapName: folder.mapName,
+        nameKey: nameKey,
+      );
+      final previous = sharedByKey[key];
+      if (previous == null || folder.updatedAt >= previous.updatedAt) {
+        sharedByKey[key] = folder;
+      }
+    }
+
+    final mapByName = <String, GameMap>{};
+    final localByMapIdAndNameKey = <String, FavoriteFolder>{};
+    for (final mapName in sharedByKey.values.map((e) => e.mapName).toSet()) {
+      final map = await isar.gameMaps.filter().nameEqualTo(mapName).findFirst();
+      if (map == null) continue;
+      mapByName[mapName] = map;
+      final folders =
+          await isar.favoriteFolders.filter().mapIdEqualTo(map.id).findAll();
+      for (final folder in folders) {
+        final nameKey = folder.nameKey.trim().isEmpty
+            ? _normalizeFolderNameKey(folder.name)
+            : _normalizeFolderNameKey(folder.nameKey);
+        localByMapIdAndNameKey['${map.id}|$nameKey'] = folder;
+      }
+    }
+
+    var count = 0;
+    for (final entry in sharedByKey.entries) {
+      final shared = entry.value;
+      final map = mapByName[shared.mapName];
+      if (map == null) {
+        count++;
+        continue;
+      }
+      final normalizedNameKey = shared.nameKey.trim().isEmpty
+          ? _normalizeFolderNameKey(shared.name)
+          : _normalizeFolderNameKey(shared.nameKey);
+      final local = localByMapIdAndNameKey['${map.id}|$normalizedNameKey'];
+      if (local == null) {
+        count++;
+        continue;
+      }
+      final nextName = shared.name.isEmpty ? local.name : shared.name;
+      final contentDifferent = local.name != nextName ||
+          local.nameKey != normalizedNameKey ||
+          local.sortOrder != shared.sortOrder;
+      if (contentDifferent &&
+          _shouldApplyIncomingUpdate(
+            sharedUpdatedAtMs: shared.updatedAt,
+            localUpdatedAtMs: local.updatedAt.millisecondsSinceEpoch,
+            contentDifferent: true,
+          )) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  Future<int> _countChangedPreviewImpactGroups(
+    List<PackageImpactGroupData> impactGroups,
+  ) async {
+    if (impactGroups.isEmpty) return 0;
+    final sharedByKey = <String, PackageImpactGroupData>{};
+    for (final group in impactGroups) {
+      final key = _impactGroupSemanticKey(
+        mapName: group.mapName,
+        layerName: group.layerName,
+        type: group.type,
+        name: group.name,
+        impactXRatio: group.impactXRatio,
+        impactYRatio: group.impactYRatio,
+      );
+      final previous = sharedByKey[key];
+      if (previous == null || group.updatedAt >= previous.updatedAt) {
+        sharedByKey[key] = group;
+      }
+    }
+
+    final layerByMapAndName = <String, MapLayer>{};
+    for (final shared in sharedByKey.values) {
+      final map =
+          await isar.gameMaps.filter().nameEqualTo(shared.mapName).findFirst();
+      if (map == null) continue;
+      await map.layers.load();
+      for (final layer in map.layers) {
+        layerByMapAndName['${map.name}|${layer.name}'] = layer;
+      }
+    }
+
+    final localBySemanticKey = <String, ImpactGroup>{};
+    final neededLayerIds = <int>{};
+    for (final shared in sharedByKey.values) {
+      final layer = layerByMapAndName['${shared.mapName}|${shared.layerName}'];
+      if (layer != null) neededLayerIds.add(layer.id);
+    }
+    for (final layerId in neededLayerIds) {
+      final groups =
+          await isar.impactGroups.filter().layerIdEqualTo(layerId).findAll();
+      final layer = await isar.mapLayers.get(layerId);
+      if (layer == null) continue;
+      await layer.map.load();
+      final map = layer.map.value;
+      if (map == null) continue;
+      for (final group in groups) {
+        final key = _impactGroupSemanticKey(
+          mapName: map.name,
+          layerName: layer.name,
+          type: group.type,
+          name: group.name,
+          impactXRatio: group.impactXRatio,
+          impactYRatio: group.impactYRatio,
+        );
+        localBySemanticKey[key] = group;
+      }
+    }
+
+    var count = 0;
+    for (final entry in sharedByKey.entries) {
+      final layer =
+          layerByMapAndName['${entry.value.mapName}|${entry.value.layerName}'];
+      if (layer == null || !localBySemanticKey.containsKey(entry.key)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  Future<int> _countChangedPreviewMaps(
+    List<PackageMapData> maps, {
+    required Map<String, String> packageFileHashes,
+  }) async {
+    if (maps.isEmpty) return 0;
+    var count = 0;
+    for (final shared in maps) {
+      final local =
+          await isar.gameMaps.filter().nameEqualTo(shared.mapName).findFirst();
+      if (local == null ||
+          !await _isSharedMapEquivalentToLocal(
+            shared,
+            local,
+            packageFileHashes: packageFileHashes,
+          )) {
+        count++;
+      }
+    }
+    return count;
+  }
+
   /// 导出列表
   Future<void> exportSelectedGrenades(
       BuildContext context, List<Grenade> grenades) async {
@@ -2718,7 +3482,7 @@ class DataService {
     final exportEstimate = await _estimateExportPackageFromBundle(
       exportBundle,
       grenadeCount: grenades.length,
-      schemaVersion: 2,
+      schemaVersion: _exportSchemaVersion,
       packageType: _packageTypeExport,
     );
     _assertExportEstimateWithinLimit(exportEstimate);
@@ -2736,7 +3500,7 @@ class DataService {
         zipPath: zipPath,
         jsonData: jsonEncode(exportBundle.toJson()),
         filesToCopy: exportBundle.filesToZip.toList(),
-        schemaVersion: 2,
+        schemaVersion: _exportSchemaVersion,
         packageType: _packageTypeExport,
       ),
     );
@@ -2835,7 +3599,7 @@ class DataService {
     final exportEstimate = await _estimateExportPackageFromBundle(
       exportBundle,
       grenadeCount: grenades.length,
-      schemaVersion: 2,
+      schemaVersion: _exportSchemaVersion,
       packageType: _packageTypeExport,
     );
     _assertExportEstimateWithinLimit(exportEstimate);
@@ -2853,7 +3617,7 @@ class DataService {
         zipPath: zipPath,
         jsonData: jsonEncode(exportBundle.toJson()),
         filesToCopy: exportBundle.filesToZip.toList(),
-        schemaVersion: 2,
+        schemaVersion: _exportSchemaVersion,
         packageType: _packageTypeExport,
       ),
     );
@@ -2992,11 +3756,19 @@ class DataService {
     return _sha256BytesHex(await file.readAsBytes());
   }
 
-  Future<String> _buildLocalGrenadeDigest(Grenade grenade) async {
+  Future<String> _buildLocalGrenadeDigest(
+    Grenade grenade, {
+    bool includeLanSyncRefs = true,
+  }) async {
     final bundle = await _buildLanSyncBundle([grenade]);
     if (bundle.grenades.isEmpty) return '';
     final raw = bundle.grenades.first;
     final normalized = _normalizeGrenadePayloadForSync(raw);
+    if (!includeLanSyncRefs) {
+      normalized.remove('isFavorite');
+      normalized.remove('favoriteFolderRef');
+      normalized.remove('impactGroupRef');
+    }
     await grenade.steps.load();
     final localSteps = grenade.steps.toList(growable: false);
     final sharedSteps = ((normalized['steps'] as List?) ?? const [])
@@ -3065,7 +3837,13 @@ class DataService {
     final localUpdatedAtMs = local.updatedAt.millisecondsSinceEpoch;
     if (sharedUpdatedAtMs > localUpdatedAtMs) return true;
     if (sharedUpdatedAtMs < localUpdatedAtMs) return false;
-    final localDigest = await _buildLocalGrenadeDigest(local);
+    final includeLanSyncRefs = shared.containsKey('isFavorite') ||
+        shared.containsKey('favoriteFolderRef') ||
+        shared.containsKey('impactGroupRef');
+    final localDigest = await _buildLocalGrenadeDigest(
+      local,
+      includeLanSyncRefs: includeLanSyncRefs,
+    );
     final sharedDigest = _buildSharedGrenadeDigest(shared, packageFileHashes);
     return localDigest != sharedDigest;
   }
@@ -3426,10 +4204,7 @@ class DataService {
     final allowAppliedTombstones =
         mode == ImportPackageMode.lanSync && preview.canApplyTombstones;
     final hasGrenadeSelection = selectedUniqueIds.isNotEmpty;
-    final hasMetadataChanges = preview.tagsByUuid.isNotEmpty ||
-        preview.areas.isNotEmpty ||
-        preview.favoriteFolders.isNotEmpty ||
-        preview.impactGroups.isNotEmpty;
+    final hasMetadataChanges = preview.metadataChangeCount > 0;
     final hasTombstones = allowAppliedTombstones &&
         (preview.grenadeTombstones.isNotEmpty ||
             preview.entityTombstones.isNotEmpty);
@@ -3449,39 +4224,55 @@ class DataService {
             deletedCount: 0,
             skippedCount: 0,
           );
-
     final selectedTagUuids = _collectImportTagUuids(preview, selectedUniqueIds);
-    final tagIdByUuid = await _upsertTagsForImport(
-      preview,
-      selectedTagUuids,
-      tagResolutions: tagResolutions,
-    );
-    await _upsertAreasForImport(
-      preview,
-      selectedTagUuids,
-      tagIdByUuid: tagIdByUuid,
-      areaResolutions: areaResolutions,
-    );
-    final favoriteFolderIdByRef = await _upsertFavoriteFoldersForImport(
-      preview,
-    );
-    final impactGroupIdByRef = await _upsertImpactGroupsForImport(
-      preview,
-    );
+    var tagIdByUuid = <String, int>{};
+    var favoriteFolderIdByRef = <String, int>{};
+    var impactGroupIdByRef = <String, int>{};
 
     int newCount = 0;
     int updatedCount = 0;
     int skippedCount = 0;
+    int syncedMapCount = 0;
     final importedGrenades = <Grenade>[];
     final importedMediaPathCache = <String, String>{};
     Archive? packageArchive;
 
     try {
-      if (hasGrenadeSelection) {
+      final shouldOpenPackageArchive =
+          hasGrenadeSelection || preview.changedMapCount > 0;
+      if (shouldOpenPackageArchive) {
         packageArchive = _openCs2PackageArchiveFromFile(preview.filePath);
         if (packageArchive == null) {
           return "文件格式错误或无数据";
         }
+      }
+
+      syncedMapCount = await _upsertMapsForImport(
+        preview,
+        packageArchive: packageArchive,
+        dataPath: dataPath,
+        importedMediaPathCache: importedMediaPathCache,
+      );
+
+      tagIdByUuid = await _upsertTagsForImport(
+        preview,
+        selectedTagUuids,
+        tagResolutions: tagResolutions,
+      );
+      await _upsertAreasForImport(
+        preview,
+        selectedTagUuids,
+        tagIdByUuid: tagIdByUuid,
+        areaResolutions: areaResolutions,
+      );
+      favoriteFolderIdByRef = await _upsertFavoriteFoldersForImport(
+        preview,
+      );
+      impactGroupIdByRef = await _upsertImpactGroupsForImport(
+        preview,
+      );
+
+      if (hasGrenadeSelection) {
         for (final mapGrenades in preview.grenadesByMap.values) {
           for (final previewItem in mapGrenades) {
             if (!selectedUniqueIds.contains(previewItem.uniqueId)) continue;
@@ -3633,18 +4424,21 @@ class DataService {
         messages.add('忽略 $count 条较新的${_entityTypeLabel(type)}删除');
       }
     }
+    if (syncedMapCount > 0) {
+      messages.add('地图同步 $syncedMapCount 张');
+    }
     if (!hasGrenadeSelection) {
-      if (selectedTagUuids.isNotEmpty) {
-        messages.add('标签同步 ${selectedTagUuids.length} 条');
+      if (preview.changedTagCount > 0) {
+        messages.add('标签同步 ${preview.changedTagCount} 条');
       }
-      if (preview.areas.isNotEmpty) {
-        messages.add('区域同步 ${preview.areas.length} 条');
+      if (preview.changedAreaCount > 0) {
+        messages.add('区域同步 ${preview.changedAreaCount} 条');
       }
-      if (preview.favoriteFolders.isNotEmpty) {
-        messages.add('收藏夹同步 ${preview.favoriteFolders.length} 条');
+      if (preview.changedFavoriteFolderCount > 0) {
+        messages.add('收藏夹同步 ${preview.changedFavoriteFolderCount} 条');
       }
-      if (preview.impactGroups.isNotEmpty) {
-        messages.add('爆点分组同步 ${preview.impactGroups.length} 条');
+      if (preview.changedImpactGroupCount > 0) {
+        messages.add('爆点分组同步 ${preview.changedImpactGroupCount} 条');
       }
     }
 
@@ -4643,6 +5437,195 @@ class DataService {
     importedMediaPathCache[fileName] = savePath;
     archiveFile.clear();
     return savePath;
+  }
+
+  Future<String?> _resolveImportedMapPath({
+    required PackagePreviewResult preview,
+    required Archive? packageArchive,
+    required String rawPath,
+    String currentLocalPath = '',
+    required String dataPath,
+    required Map<String, String> importedMediaPathCache,
+  }) async {
+    final normalized = rawPath.trim();
+    if (normalized.isEmpty) return '';
+    if (_isAssetPath(normalized)) return normalized;
+    if (await _isLocalFileEquivalentToPackagePath(
+      localPath: currentLocalPath,
+      sharedRawPath: normalized,
+      packageFileHashes: preview.packageFileHashes,
+    )) {
+      return currentLocalPath.trim();
+    }
+    if (dataPath.trim().isEmpty) return null;
+    return _materializePackageMediaFile(
+      preview: preview,
+      packageArchive: packageArchive,
+      packageMediaPath: normalized,
+      dataPath: dataPath,
+      importedMediaPathCache: importedMediaPathCache,
+    );
+  }
+
+  Future<int> _upsertMapsForImport(
+    PackagePreviewResult preview, {
+    required Archive? packageArchive,
+    required String dataPath,
+    required Map<String, String> importedMediaPathCache,
+  }) async {
+    if (preview.maps.isEmpty) return 0;
+    var changedCount = 0;
+    final localByName = <String, GameMap>{};
+
+    for (final shared in preview.maps) {
+      final mapName = shared.mapName.trim();
+      if (mapName.isEmpty) continue;
+      final existing = localByName[mapName] ??
+          await isar.gameMaps.filter().nameEqualTo(mapName).findFirst();
+
+      final nextBackgroundPath = await _resolveImportedMapPath(
+        preview: preview,
+        packageArchive: packageArchive,
+        rawPath: shared.backgroundPath,
+        currentLocalPath: existing?.backgroundPath ?? '',
+        dataPath: dataPath,
+        importedMediaPathCache: importedMediaPathCache,
+      );
+      final nextIconPath = await _resolveImportedMapPath(
+        preview: preview,
+        packageArchive: packageArchive,
+        rawPath: shared.iconPath,
+        currentLocalPath: existing?.iconPath ?? '',
+        dataPath: dataPath,
+        importedMediaPathCache: importedMediaPathCache,
+      );
+
+      if (existing == null) {
+        final created = GameMap(
+          name: mapName,
+          backgroundPath: nextBackgroundPath ?? '',
+          iconPath: nextIconPath ?? '',
+        );
+        final layersToCreate = <MapLayer>[];
+        final sharedLayers = shared.layers.toList(growable: false)
+          ..sort((a, b) {
+            final orderCompare = a.sortOrder.compareTo(b.sortOrder);
+            if (orderCompare != 0) return orderCompare;
+            return a.name.compareTo(b.name);
+          });
+        final seenLayerNames = <String>{};
+        for (final sharedLayer in sharedLayers) {
+          final layerName = sharedLayer.name.trim();
+          if (layerName.isEmpty || !seenLayerNames.add(layerName)) continue;
+          final nextAssetPath = await _resolveImportedMapPath(
+            preview: preview,
+            packageArchive: packageArchive,
+            rawPath: sharedLayer.assetPath,
+            currentLocalPath: '',
+            dataPath: dataPath,
+            importedMediaPathCache: importedMediaPathCache,
+          );
+          layersToCreate.add(MapLayer(
+            name: layerName,
+            assetPath: nextAssetPath ?? '',
+            sortOrder: sharedLayer.sortOrder,
+          ));
+        }
+
+        await isar.writeTxn(() async {
+          await isar.gameMaps.put(created);
+          if (layersToCreate.isNotEmpty) {
+            await isar.mapLayers.putAll(layersToCreate);
+            created.layers.addAll(layersToCreate);
+            await created.layers.save();
+          }
+        });
+        localByName[mapName] = created;
+        changedCount++;
+        continue;
+      }
+
+      localByName[mapName] = existing;
+      var mapChanged = false;
+      if (nextBackgroundPath != null &&
+          existing.backgroundPath != nextBackgroundPath) {
+        existing.backgroundPath = nextBackgroundPath;
+        mapChanged = true;
+      }
+      if (nextIconPath != null && existing.iconPath != nextIconPath) {
+        existing.iconPath = nextIconPath;
+        mapChanged = true;
+      }
+
+      await existing.layers.load();
+      final layerByName = <String, MapLayer>{
+        for (final layer in existing.layers)
+          if (layer.name.trim().isNotEmpty) layer.name.trim(): layer,
+      };
+      final toCreate = <MapLayer>[];
+      final toUpdate = <MapLayer>[];
+      final sharedLayers = shared.layers.toList(growable: false)
+        ..sort((a, b) {
+          final orderCompare = a.sortOrder.compareTo(b.sortOrder);
+          if (orderCompare != 0) return orderCompare;
+          return a.name.compareTo(b.name);
+        });
+      final seenLayerNames = <String>{};
+      for (final sharedLayer in sharedLayers) {
+        final layerName = sharedLayer.name.trim();
+        if (layerName.isEmpty || !seenLayerNames.add(layerName)) continue;
+        final localLayer = layerByName[layerName];
+        final nextAssetPath = await _resolveImportedMapPath(
+          preview: preview,
+          packageArchive: packageArchive,
+          rawPath: sharedLayer.assetPath,
+          currentLocalPath: localLayer?.assetPath ?? '',
+          dataPath: dataPath,
+          importedMediaPathCache: importedMediaPathCache,
+        );
+        if (localLayer == null) {
+          toCreate.add(MapLayer(
+            name: layerName,
+            assetPath: nextAssetPath ?? '',
+            sortOrder: sharedLayer.sortOrder,
+          ));
+          continue;
+        }
+        var layerChanged = false;
+        if (nextAssetPath != null && localLayer.assetPath != nextAssetPath) {
+          localLayer.assetPath = nextAssetPath;
+          layerChanged = true;
+        }
+        if (localLayer.sortOrder != sharedLayer.sortOrder) {
+          localLayer.sortOrder = sharedLayer.sortOrder;
+          layerChanged = true;
+        }
+        if (layerChanged) {
+          toUpdate.add(localLayer);
+        }
+      }
+
+      if (!mapChanged && toCreate.isEmpty && toUpdate.isEmpty) {
+        continue;
+      }
+
+      await isar.writeTxn(() async {
+        if (mapChanged) {
+          await isar.gameMaps.put(existing);
+        }
+        if (toCreate.isNotEmpty) {
+          await isar.mapLayers.putAll(toCreate);
+          existing.layers.addAll(toCreate);
+          await existing.layers.save();
+        }
+        if (toUpdate.isNotEmpty) {
+          await isar.mapLayers.putAll(toUpdate);
+        }
+      });
+      changedCount++;
+    }
+
+    return changedCount;
   }
 
   /// 更新

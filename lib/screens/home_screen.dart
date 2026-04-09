@@ -1,8 +1,11 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:isar_community/isar.dart';
 import 'package:path/path.dart' as p;
+import 'package:uuid/uuid.dart';
 import '../models.dart';
 import '../providers.dart';
 import '../main.dart';
@@ -167,6 +170,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     });
   }
 
+  Future<String> _copyCustomMapFileToDataDir(
+      Isar isar, String sourcePath) async {
+    final normalized = sourcePath.trim();
+    if (normalized.isEmpty) return '';
+    if (normalized.startsWith('assets/')) return normalized;
+
+    final sourceFile = File(normalized);
+    if (!await sourceFile.exists()) {
+      throw StateError('文件不存在：$normalized');
+    }
+
+    final dataPath = (isar.directory ?? '').trim();
+    if (dataPath.isEmpty) {
+      throw StateError('数据目录不可用');
+    }
+
+    final extension = p.extension(sourceFile.path);
+    final targetPath = p.join(dataPath, '${const Uuid().v4()}$extension');
+    await sourceFile.copy(targetPath);
+    return targetPath;
+  }
+
   Future<void> _showAddCustomMapDialog(
       BuildContext parentContext, Isar isar) async {
     final nameController = TextEditingController();
@@ -326,6 +351,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         .nameEqualTo(mapName, caseSensitive: false)
                         .findFirst();
                     if (!mounted) return;
+                    if (!parentContext.mounted) return;
                     if (existed != null) {
                       ScaffoldMessenger.of(parentContext).showSnackBar(
                         const SnackBar(content: Text('地图名称已存在')),
@@ -333,29 +359,47 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       return;
                     }
 
-                    await isar.writeTxn(() async {
-                      final mapBackgroundPath =
+                    try {
+                      final copiedRadarPath =
+                          await _copyCustomMapFileToDataDir(isar, radarPath!);
+                      final copiedBackgroundPath =
                           (backgroundPath?.trim().isNotEmpty ?? false)
-                              ? backgroundPath!.trim()
-                              : radarPath!;
-                      final newMap = GameMap(
-                        name: mapName,
-                        backgroundPath: mapBackgroundPath,
-                        iconPath: iconPath?.trim() ?? '',
-                      );
-                      await isar.gameMaps.put(newMap);
+                              ? await _copyCustomMapFileToDataDir(
+                                  isar, backgroundPath!)
+                              : copiedRadarPath;
+                      final copiedIconPath = (iconPath?.trim().isNotEmpty ??
+                              false)
+                          ? await _copyCustomMapFileToDataDir(isar, iconPath!)
+                          : '';
 
-                      final newLayer = MapLayer(
-                        name: 'Default',
-                        assetPath: radarPath!,
-                        sortOrder: 0,
+                      await isar.writeTxn(() async {
+                        final newMap = GameMap(
+                          name: mapName,
+                          backgroundPath: copiedBackgroundPath,
+                          iconPath: copiedIconPath,
+                        );
+                        await isar.gameMaps.put(newMap);
+
+                        final newLayer = MapLayer(
+                          name: 'Default',
+                          assetPath: copiedRadarPath,
+                          sortOrder: 0,
+                        );
+                        await isar.mapLayers.put(newLayer);
+                        newMap.layers.add(newLayer);
+                        await newMap.layers.save();
+                      });
+                    } catch (e) {
+                      if (!mounted) return;
+                      if (!parentContext.mounted) return;
+                      ScaffoldMessenger.of(parentContext).showSnackBar(
+                        SnackBar(content: Text('添加失败：$e')),
                       );
-                      await isar.mapLayers.put(newLayer);
-                      newMap.layers.add(newLayer);
-                      await newMap.layers.save();
-                    });
+                      return;
+                    }
 
                     if (!mounted) return;
+                    if (!parentContext.mounted) return;
                     Navigator.pop(dialogContext);
                     setState(() {});
                     ScaffoldMessenger.of(parentContext).showSnackBar(
@@ -405,10 +449,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                if (map.iconPath.trim().isNotEmpty) ...[
-                  MapIcon(path: map.iconPath, size: 40),
-                  const SizedBox(width: 16),
-                ],
+                MapIcon(path: map.iconPath, size: 40),
+                const SizedBox(width: 16),
                 Text(
                   map.name,
                   style: const TextStyle(

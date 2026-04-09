@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import '../models.dart';
 import '../services/grenade_cluster_service.dart';
+import 'path_image_provider.dart';
 
 /// 雷达小地图
 class RadarMiniMap extends StatefulWidget {
@@ -156,6 +157,7 @@ class _RadarMiniMapState extends State<RadarMiniMap>
     // 计算偏移
     final offsetX = (0.5 - centerX) * mapSize * widget.zoomLevel;
     final offsetY = (0.5 - centerY) * mapSize * widget.zoomLevel;
+    final mapImageProvider = imageProviderFromPath(widget.mapAssetPath);
 
     return SizedBox(
       width: widget.width,
@@ -166,15 +168,17 @@ class _RadarMiniMapState extends State<RadarMiniMap>
           maxHeight: mapSize * widget.zoomLevel,
           child: Transform.translate(
             offset: Offset(offsetX, offsetY),
-            child: Image.asset(
-              widget.mapAssetPath,
-              fit: BoxFit.cover,
-              width: mapSize * widget.zoomLevel,
-              height: mapSize * widget.zoomLevel,
-              errorBuilder: (_, __, ___) => Container(
-                color: Colors.grey[900],
-              ),
-            ),
+            child: mapImageProvider == null
+                ? Container(color: Colors.grey[900])
+                : Image(
+                    image: mapImageProvider,
+                    fit: BoxFit.cover,
+                    width: mapSize * widget.zoomLevel,
+                    height: mapSize * widget.zoomLevel,
+                    errorBuilder: (_, __, ___) => Container(
+                      color: Colors.grey[900],
+                    ),
+                  ),
           ),
         ),
       ),
