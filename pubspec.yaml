@@ -50,7 +50,6 @@ dependencies:
   provider: ^6.1.5+1
   
   # --- 桌面端功能 ---
-  hotkey_manager: ^0.2.3
   # 使用 fork 版本的 window_manager，支持多窗口
   window_manager:
     git:
