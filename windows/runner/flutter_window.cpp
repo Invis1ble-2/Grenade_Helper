@@ -69,7 +69,7 @@ bool FlutterWindow::OnCreate() {
           &flutter::StandardMethodCodec::GetInstance());
   navigation_channel_->SetMethodCallHandler(
       [this](const auto& call, auto result) {
-        HandleNavigationMethodCall(call, std::move(result));
+        HandleHotkeyMethodCall(call, std::move(result));
       });
 
   // Register the callback for sub-windows created by desktop_multi_window
@@ -97,7 +97,7 @@ void FlutterWindow::OnDestroy() {
     flutter_controller_ = nullptr;
   }
   navigation_channel_.reset();
-  ClearNavigationBindings();
+  ClearHotkeyBindings();
 
   Win32Window::OnDestroy();
 }
@@ -125,50 +125,48 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   return Win32Window::MessageHandler(hwnd, message, wparam, lparam);
 }
 
-void FlutterWindow::HandleNavigationMethodCall(
+void FlutterWindow::HandleHotkeyMethodCall(
     const flutter::MethodCall<flutter::EncodableValue>& method_call,
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
   const auto& method_name = method_call.method_name();
 
-  if (method_name == "setNavigationBindings") {
-    ClearNavigationBindings();
+  if (method_name == "setHotkeyBindings") {
+    ClearHotkeyBindings();
 
     const auto* args =
         std::get_if<flutter::EncodableMap>(method_call.arguments());
     if (args == nullptr) {
-      result->Error("invalid_args", "Expected a map of navigation bindings.");
+      result->Error("invalid_args", "Expected a map of hotkey bindings.");
       return;
     }
 
     for (const auto& entry : *args) {
-      const auto* direction = std::get_if<std::string>(&entry.first);
+      const auto* action = std::get_if<std::string>(&entry.first);
       const auto* payload = std::get_if<flutter::EncodableMap>(&entry.second);
-      if (direction == nullptr || payload == nullptr) {
+      if (action == nullptr || payload == nullptr) {
         continue;
       }
 
-      NavigationBinding* binding = GetBindingForDirection(*direction);
-      if (binding == nullptr) {
-        continue;
-      }
-
-      binding->virtual_key = GetEncodableInt(*payload, "virtualKey");
-      binding->requires_alt = GetEncodableBool(*payload, "requiresAlt");
-      binding->requires_ctrl = GetEncodableBool(*payload, "requiresCtrl");
-      binding->requires_shift = GetEncodableBool(*payload, "requiresShift");
+      HotkeyBinding binding;
+      binding.virtual_key = GetEncodableInt(*payload, "virtualKey");
+      binding.requires_alt = GetEncodableBool(*payload, "requiresAlt");
+      binding.requires_ctrl = GetEncodableBool(*payload, "requiresCtrl");
+      binding.requires_shift = GetEncodableBool(*payload, "requiresShift");
+      binding.requires_meta = GetEncodableBool(*payload, "requiresMeta");
+      hotkey_bindings_[*action] = binding;
     }
 
     result->Success();
     return;
   }
 
-  if (method_name == "readNavigationState") {
-    result->Success(flutter::EncodableValue(ReadNavigationState()));
+  if (method_name == "readHotkeyState") {
+    result->Success(flutter::EncodableValue(ReadHotkeyState()));
     return;
   }
 
-  if (method_name == "clearNavigationBindings") {
-    ClearNavigationBindings();
+  if (method_name == "clearHotkeyBindings") {
+    ClearHotkeyBindings();
     result->Success();
     return;
   }
@@ -176,58 +174,20 @@ void FlutterWindow::HandleNavigationMethodCall(
   result->NotImplemented();
 }
 
-void FlutterWindow::ClearNavigationBindings() {
-  up_binding_ = NavigationBinding{};
-  down_binding_ = NavigationBinding{};
-  left_binding_ = NavigationBinding{};
-  right_binding_ = NavigationBinding{};
+void FlutterWindow::ClearHotkeyBindings() {
+  hotkey_bindings_.clear();
 }
 
-FlutterWindow::NavigationBinding* FlutterWindow::GetBindingForDirection(
-    const std::string& direction) {
-  if (direction == "up") {
-    return &up_binding_;
-  }
-  if (direction == "down") {
-    return &down_binding_;
-  }
-  if (direction == "left") {
-    return &left_binding_;
-  }
-  if (direction == "right") {
-    return &right_binding_;
-  }
-  return nullptr;
-}
-
-const FlutterWindow::NavigationBinding* FlutterWindow::GetBindingForDirection(
-    const std::string& direction) const {
-  if (direction == "up") {
-    return &up_binding_;
-  }
-  if (direction == "down") {
-    return &down_binding_;
-  }
-  if (direction == "left") {
-    return &left_binding_;
-  }
-  if (direction == "right") {
-    return &right_binding_;
-  }
-  return nullptr;
-}
-
-flutter::EncodableMap FlutterWindow::ReadNavigationState() const {
+flutter::EncodableMap FlutterWindow::ReadHotkeyState() const {
   flutter::EncodableMap state;
-  for (const auto* direction : {"up", "down", "left", "right"}) {
-    const NavigationBinding* binding = GetBindingForDirection(direction);
-    state[flutter::EncodableValue(direction)] =
-        flutter::EncodableValue(binding != nullptr && IsBindingPressed(*binding));
+  for (const auto& entry : hotkey_bindings_) {
+    state[flutter::EncodableValue(entry.first)] =
+        flutter::EncodableValue(IsBindingPressed(entry.second));
   }
   return state;
 }
 
-bool FlutterWindow::IsBindingPressed(const NavigationBinding& binding) const {
+bool FlutterWindow::IsBindingPressed(const HotkeyBinding& binding) const {
   if (!binding.virtual_key.has_value()) {
     return false;
   }
@@ -243,6 +203,11 @@ bool FlutterWindow::IsBindingPressed(const NavigationBinding& binding) const {
     return false;
   }
   if (binding.requires_shift && !IsVirtualKeyPressed(VK_SHIFT)) {
+    return false;
+  }
+  if (binding.requires_meta &&
+      !IsVirtualKeyPressed(VK_LWIN) &&
+      !IsVirtualKeyPressed(VK_RWIN)) {
     return false;
   }
 

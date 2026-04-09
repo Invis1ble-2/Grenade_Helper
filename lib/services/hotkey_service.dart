@@ -11,6 +11,8 @@ class HotkeyService {
   final SettingsService _settings;
   final Map<HotkeyAction, HotKey> _registeredHotkeys = {};
   final Map<HotkeyAction, void Function()> _handlers = {};
+  final Map<HotkeyAction, void Function()> _keyUpHandlers = {};
+  WindowsHotkeyPollingService? _windowsHotkeyPollingService;
   static const Set<HotkeyAction> _coreActions = {
     HotkeyAction.toggleOverlay,
   };
@@ -24,6 +26,15 @@ class HotkeyService {
   /// 初始化
   Future<void> init() async {
     if (!SettingsService.isDesktop) return;
+    if (Platform.isWindows) {
+      _windowsHotkeyPollingService ??= WindowsHotkeyPollingService(
+        _settings,
+        onKeyDown: _dispatchKeyDown,
+        onKeyUp: _dispatchKeyUp,
+      );
+      await _windowsHotkeyPollingService!.init();
+      return;
+    }
     await _registerCoreHotkeys();
   }
 
@@ -32,9 +43,14 @@ class HotkeyService {
     _handlers[action] = handler;
   }
 
+  void registerKeyUpHandler(HotkeyAction action, void Function() handler) {
+    _keyUpHandlers[action] = handler;
+  }
+
   /// 移除Handler
   void unregisterHandler(HotkeyAction action) {
     _handlers.remove(action);
+    _keyUpHandlers.remove(action);
   }
 
   /// 注册核心键
@@ -58,13 +74,6 @@ class HotkeyService {
     return action == HotkeyAction.toggleOverlay;
   }
 
-  bool _shouldHandleNavigationWithPolling() {
-    if (!Platform.isWindows) return false;
-    return WindowsNavigationPollingService.supportsNavigationBindings(
-      _settings.getHotkeys(),
-    );
-  }
-
   bool _isNavigationAction(HotkeyAction action) {
     return action == HotkeyAction.navigateUp ||
         action == HotkeyAction.navigateDown ||
@@ -76,8 +85,15 @@ class HotkeyService {
   Future<void> registerOverlayHotkeys() async {
     if (_overlayHotkeysRegistered) return;
 
+    if (Platform.isWindows) {
+      await _windowsHotkeyPollingService?.setOverlayHotkeysEnabled(true);
+      _overlayHotkeysRegistered = true;
+      return;
+    }
+
     final hotkeys = _settings.getHotkeys();
     final overlayActions = [
+      HotkeyAction.hideOverlay,
       HotkeyAction.prevGrenade,
       HotkeyAction.nextGrenade,
       HotkeyAction.prevStep,
@@ -103,11 +119,7 @@ class HotkeyService {
       HotkeyAction.scrollDown,
     ];
 
-    final useNavigationPolling = _shouldHandleNavigationWithPolling();
     for (final action in overlayActions) {
-      if (useNavigationPolling && _isNavigationAction(action)) {
-        continue;
-      }
       final config = hotkeys[action];
       if (config != null) {
         await _registerHotkey(action, config, _overlayHotkeys,
@@ -123,6 +135,12 @@ class HotkeyService {
   Future<void> unregisterOverlayHotkeys() async {
     if (!_overlayHotkeysRegistered) return;
 
+    if (Platform.isWindows) {
+      await _windowsHotkeyPollingService?.setOverlayHotkeysEnabled(false);
+      _overlayHotkeysRegistered = false;
+      return;
+    }
+
     for (final hotKey in _overlayHotkeys.values) {
       try {
         await hotKeyManager.unregister(hotKey);
@@ -137,6 +155,12 @@ class HotkeyService {
 
   /// 从设置重新加载已注册的全局热键
   Future<void> reloadFromSettings() async {
+    if (Platform.isWindows) {
+      await _windowsHotkeyPollingService?.reloadBindings();
+      debugPrint('[HotkeyService] Hotkeys reloaded from settings');
+      return;
+    }
+
     for (final hotKey in _registeredHotkeys.values) {
       try {
         await hotKeyManager.unregister(hotKey);
@@ -153,6 +177,14 @@ class HotkeyService {
     }
 
     debugPrint('[HotkeyService] Hotkeys reloaded from settings');
+  }
+
+  void _dispatchKeyDown(HotkeyAction action) {
+    _handlers[action]?.call();
+  }
+
+  void _dispatchKeyUp(HotkeyAction action) {
+    _keyUpHandlers[action]?.call();
   }
 
   /// 注册单键
@@ -295,6 +327,11 @@ class HotkeyService {
   Future<void> updateHotkey(HotkeyAction action, HotkeyConfig config) async {
     await _settings.saveHotkey(action, config);
 
+    if (Platform.isWindows) {
+      await _windowsHotkeyPollingService?.reloadBindings();
+      return;
+    }
+
     // 检查是否是核心热键（如 toggleOverlay）
     if (_coreActions.contains(action)) {
       // 注销旧热键
@@ -328,11 +365,20 @@ class HotkeyService {
 
   /// 清理
   Future<void> dispose() async {
+    if (Platform.isWindows) {
+      await _windowsHotkeyPollingService?.dispose();
+      _handlers.clear();
+      _keyUpHandlers.clear();
+      _overlayHotkeysRegistered = false;
+      return;
+    }
+
     for (final hotKey in _registeredHotkeys.values) {
       await hotKeyManager.unregister(hotKey);
     }
     await unregisterOverlayHotkeys();
     _registeredHotkeys.clear();
     _handlers.clear();
+    _keyUpHandlers.clear();
   }
 }

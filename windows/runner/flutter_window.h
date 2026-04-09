@@ -6,6 +6,7 @@
 #include <flutter/method_channel.h>
 #include <flutter/standard_method_codec.h>
 
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -27,22 +28,20 @@ class FlutterWindow : public Win32Window {
                          LPARAM const lparam) noexcept override;
 
  private:
-  struct NavigationBinding {
+  struct HotkeyBinding {
     std::optional<int> virtual_key;
     bool requires_alt = false;
     bool requires_ctrl = false;
     bool requires_shift = false;
+    bool requires_meta = false;
   };
 
-  void HandleNavigationMethodCall(
+  void HandleHotkeyMethodCall(
       const flutter::MethodCall<flutter::EncodableValue>& method_call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
-  void ClearNavigationBindings();
-  NavigationBinding* GetBindingForDirection(const std::string& direction);
-  const NavigationBinding* GetBindingForDirection(
-      const std::string& direction) const;
-  flutter::EncodableMap ReadNavigationState() const;
-  bool IsBindingPressed(const NavigationBinding& binding) const;
+  void ClearHotkeyBindings();
+  flutter::EncodableMap ReadHotkeyState() const;
+  bool IsBindingPressed(const HotkeyBinding& binding) const;
 
   // The project to run.
   flutter::DartProject project_;
@@ -51,10 +50,7 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       navigation_channel_;
-  NavigationBinding up_binding_;
-  NavigationBinding down_binding_;
-  NavigationBinding left_binding_;
-  NavigationBinding right_binding_;
+  std::map<std::string, HotkeyBinding> hotkey_bindings_;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

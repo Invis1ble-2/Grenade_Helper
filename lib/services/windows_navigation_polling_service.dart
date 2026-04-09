@@ -6,202 +6,194 @@ import 'package:flutter/services.dart';
 
 import 'settings_service.dart';
 
-typedef OverlayCommandSender = void Function(
-  String command, [
-  Map<String, dynamic>? args,
-]);
+typedef HotkeyActionCallback = void Function(HotkeyAction action);
 
-class WindowsNavigationPollingService {
-  WindowsNavigationPollingService(this._settings, this._sendOverlayCommand);
+class WindowsHotkeyPollingService {
+  WindowsHotkeyPollingService(
+    this._settings, {
+    required HotkeyActionCallback onKeyDown,
+    HotkeyActionCallback? onKeyUp,
+  })  : _onKeyDown = onKeyDown,
+        _onKeyUp = onKeyUp;
 
   static const MethodChannel _channel =
       MethodChannel('grenade_helper/windows_navigation');
   static const Duration _pollInterval = Duration(milliseconds: 16);
-  static const Map<HotkeyAction, String> _directionNames = {
-    HotkeyAction.navigateUp: 'up',
-    HotkeyAction.navigateDown: 'down',
-    HotkeyAction.navigateLeft: 'left',
-    HotkeyAction.navigateRight: 'right',
+  static const Set<HotkeyAction> _coreActions = {
+    HotkeyAction.toggleOverlay,
+  };
+  static const Set<HotkeyAction> _overlayActions = {
+    HotkeyAction.hideOverlay,
+    HotkeyAction.navigateUp,
+    HotkeyAction.navigateDown,
+    HotkeyAction.navigateLeft,
+    HotkeyAction.navigateRight,
+    HotkeyAction.prevGrenade,
+    HotkeyAction.nextGrenade,
+    HotkeyAction.prevStep,
+    HotkeyAction.nextStep,
+    HotkeyAction.toggleSmoke,
+    HotkeyAction.toggleFlash,
+    HotkeyAction.toggleMolotov,
+    HotkeyAction.toggleHE,
+    HotkeyAction.toggleWallbang,
+    HotkeyAction.togglePlayPause,
+    HotkeyAction.toggleMediaFullscreenPreview,
+    HotkeyAction.increaseNavSpeed,
+    HotkeyAction.decreaseNavSpeed,
+    HotkeyAction.scrollUp,
+    HotkeyAction.scrollDown,
+  };
+  static final Set<HotkeyAction> _trackedActions = {
+    ..._coreActions,
+    ..._overlayActions,
+  };
+  static const Set<HotkeyAction> _repeatWhilePressedActions = {
+    HotkeyAction.navigateUp,
+    HotkeyAction.navigateDown,
+    HotkeyAction.navigateLeft,
+    HotkeyAction.navigateRight,
   };
 
   final SettingsService _settings;
-  final OverlayCommandSender _sendOverlayCommand;
+  final HotkeyActionCallback _onKeyDown;
+  final HotkeyActionCallback? _onKeyUp;
+
   Timer? _pollTimer;
-  bool _overlayVisible = false;
-  bool _isPolling = false;
+  bool _overlayHotkeysEnabled = false;
   bool _isDisposed = false;
-  final Map<String, bool> _lastPressedState = {
-    'up': false,
-    'down': false,
-    'left': false,
-    'right': false,
+  bool _isPolling = false;
+  final Map<HotkeyAction, bool> _lastPressedState = {
+    for (final action in _trackedActions) action: false,
   };
 
   static bool get isSupportedPlatform => Platform.isWindows;
 
-  static bool supportsNavigationBindings(
-    Map<HotkeyAction, HotkeyConfig> hotkeys,
-  ) {
-    for (final action in _directionNames.keys) {
-      final config = hotkeys[action];
-      if (config == null || !_isSupportedConfig(config)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  Future<void> start() async {
+  Future<void> init() async {
     if (!isSupportedPlatform || _isDisposed) return;
-    _overlayVisible = true;
-    final enabled = await _syncBindings();
-    if (!enabled) return;
+    await _syncBindings();
     _startPolling();
-    await _pollNavigationState();
+    await _pollHotkeyState();
   }
 
-  Future<void> stop() async {
-    if (!isSupportedPlatform) return;
-    _overlayVisible = false;
-    _pollTimer?.cancel();
-    _pollTimer = null;
-    _isPolling = false;
-    _resetPressedState();
-    try {
-      await _channel.invokeMethod<void>('clearNavigationBindings');
-    } catch (e) {
-      debugPrint(
-        '[WindowsNavigationPollingService] Failed to clear navigation bindings: $e',
-      );
+  Future<void> setOverlayHotkeysEnabled(bool enabled) async {
+    if (!isSupportedPlatform || _isDisposed) return;
+    if (_overlayHotkeysEnabled == enabled) return;
+
+    _overlayHotkeysEnabled = enabled;
+    if (!enabled) {
+      _releaseDisabledActions();
     }
-    _sendOverlayCommand('stop_all_navigation');
+    await _pollHotkeyState();
   }
 
   Future<void> reloadBindings() async {
     if (!isSupportedPlatform || _isDisposed) return;
-    final enabled = await _syncBindings();
-    if (!_overlayVisible) return;
-    if (enabled) {
-      _startPolling();
-      await _pollNavigationState();
-    } else {
-      await stop();
-    }
+    await _syncBindings();
+    await _pollHotkeyState();
   }
 
   Future<void> dispose() async {
     if (_isDisposed) return;
     _isDisposed = true;
-    await stop();
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    _releaseAllPressedActions();
+    try {
+      await _channel.invokeMethod<void>('clearHotkeyBindings');
+    } catch (e) {
+      debugPrint(
+        '[WindowsHotkeyPollingService] Failed to clear hotkey bindings: $e',
+      );
+    }
   }
 
   void _startPolling() {
     if (_pollTimer != null) return;
     _pollTimer = Timer.periodic(_pollInterval, (_) {
-      unawaited(_pollNavigationState());
+      unawaited(_pollHotkeyState());
     });
   }
 
-  Future<bool> _syncBindings() async {
+  Future<void> _syncBindings() async {
     final hotkeys = _settings.getHotkeys();
-    if (!supportsNavigationBindings(hotkeys)) {
-      debugPrint(
-        '[WindowsNavigationPollingService] Navigation bindings are not fully supported, using hotkey_manager fallback.',
-      );
-      try {
-        await _channel.invokeMethod<void>('clearNavigationBindings');
-      } catch (e) {
-        debugPrint(
-          '[WindowsNavigationPollingService] Failed to clear unsupported navigation bindings: $e',
-        );
-      }
-      return false;
-    }
-
     final bindings = <String, dynamic>{};
-    for (final entry in _directionNames.entries) {
-      final config = hotkeys[entry.key];
+
+    for (final action in _trackedActions) {
+      final config = hotkeys[action];
       if (config == null) continue;
+
       final binding = _toBindingPayload(config);
       if (binding == null) {
-        try {
-          await _channel.invokeMethod<void>('clearNavigationBindings');
-        } catch (e) {
-          debugPrint(
-            '[WindowsNavigationPollingService] Failed to clear invalid navigation bindings: $e',
-          );
-        }
-        return false;
+        debugPrint(
+          '[WindowsHotkeyPollingService] Unsupported hotkey config for $action: ${config.toDisplayString()}',
+        );
+        continue;
       }
-      bindings[entry.value] = binding;
+      bindings[action.name] = binding;
     }
 
     try {
-      await _channel.invokeMethod<void>('setNavigationBindings', bindings);
-      return true;
+      await _channel.invokeMethod<void>('setHotkeyBindings', bindings);
     } catch (e) {
       debugPrint(
-        '[WindowsNavigationPollingService] Failed to set navigation bindings: $e',
+        '[WindowsHotkeyPollingService] Failed to set hotkey bindings: $e',
       );
-      return false;
     }
   }
 
-  Future<void> _pollNavigationState() async {
-    if (!_overlayVisible || _isDisposed || _isPolling) return;
+  Future<void> _pollHotkeyState() async {
+    if (_isDisposed || _isPolling) return;
 
     _isPolling = true;
     try {
-      final rawState = await _channel
-          .invokeMethod<Map<dynamic, dynamic>>('readNavigationState');
-      final pressedState = <String, bool>{
-        for (final direction in _lastPressedState.keys)
-          direction: rawState?[direction] == true,
-      };
+      final rawState =
+          await _channel.invokeMethod<Map<dynamic, dynamic>>('readHotkeyState');
 
-      for (final entry in pressedState.entries) {
-        if (entry.value) {
-          _sendOverlayCommand('start_navigation', {'direction': entry.key});
-        } else if (_lastPressedState[entry.key] == true) {
-          _sendOverlayCommand('stop_navigation', {'direction': entry.key});
+      for (final action in _trackedActions) {
+        final isPressed =
+            _isActionEnabled(action) && rawState?[action.name] == true;
+        final wasPressed = _lastPressedState[action] ?? false;
+
+        if (isPressed &&
+            (!wasPressed || _repeatWhilePressedActions.contains(action))) {
+          _onKeyDown(action);
+        } else if (!isPressed && wasPressed) {
+          _onKeyUp?.call(action);
         }
-      }
 
-      _lastPressedState
-        ..clear()
-        ..addAll(pressedState);
+        _lastPressedState[action] = isPressed;
+      }
     } catch (e) {
       debugPrint(
-        '[WindowsNavigationPollingService] Failed to poll navigation state: $e',
+        '[WindowsHotkeyPollingService] Failed to poll hotkey state: $e',
       );
     } finally {
       _isPolling = false;
     }
   }
 
-  void _resetPressedState() {
-    for (final direction in _lastPressedState.keys) {
-      _lastPressedState[direction] = false;
+  bool _isActionEnabled(HotkeyAction action) {
+    return _coreActions.contains(action) ||
+        (_overlayHotkeysEnabled && _overlayActions.contains(action));
+  }
+
+  void _releaseDisabledActions() {
+    for (final action in _trackedActions) {
+      if (_isActionEnabled(action) || _lastPressedState[action] != true) {
+        continue;
+      }
+      _onKeyUp?.call(action);
+      _lastPressedState[action] = false;
     }
   }
 
-  static bool _isSupportedConfig(HotkeyConfig config) {
-    if (_toVirtualKey(config.key) == null) {
-      return false;
+  void _releaseAllPressedActions() {
+    for (final action in _trackedActions) {
+      if (_lastPressedState[action] != true) continue;
+      _onKeyUp?.call(action);
+      _lastPressedState[action] = false;
     }
-    return config.modifiers.every(_isSupportedModifier);
-  }
-
-  static bool _isSupportedModifier(LogicalKeyboardKey key) {
-    return key == LogicalKeyboardKey.alt ||
-        key == LogicalKeyboardKey.altLeft ||
-        key == LogicalKeyboardKey.altRight ||
-        key == LogicalKeyboardKey.control ||
-        key == LogicalKeyboardKey.controlLeft ||
-        key == LogicalKeyboardKey.controlRight ||
-        key == LogicalKeyboardKey.shift ||
-        key == LogicalKeyboardKey.shiftLeft ||
-        key == LogicalKeyboardKey.shiftRight;
   }
 
   static Map<String, dynamic>? _toBindingPayload(HotkeyConfig config) {
@@ -223,6 +215,10 @@ class WindowsNavigationPollingService {
           key == LogicalKeyboardKey.shift ||
           key == LogicalKeyboardKey.shiftLeft ||
           key == LogicalKeyboardKey.shiftRight),
+      'requiresMeta': modifiers.any((key) =>
+          key == LogicalKeyboardKey.meta ||
+          key == LogicalKeyboardKey.metaLeft ||
+          key == LogicalKeyboardKey.metaRight),
     };
   }
 

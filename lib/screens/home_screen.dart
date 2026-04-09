@@ -640,13 +640,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                 await globalHotkeyService!
                                     .updateHotkey(action, config);
                               }
-                              await globalWindowsNavigationService
-                                  ?.reloadBindings();
                             },
                             onHotkeysReset: () async {
                               await globalHotkeyService?.reloadFromSettings();
-                              await globalWindowsNavigationService
-                                  ?.reloadBindings();
                             },
                           ),
                         ),

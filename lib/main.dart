@@ -22,7 +22,6 @@ import 'services/overlay_state_service.dart';
 import 'services/update_service.dart';
 import 'services/migration_service.dart';
 import 'services/tag_service.dart';
-import 'services/windows_navigation_polling_service.dart';
 import 'themes/christmas_theme.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -31,7 +30,6 @@ SettingsService? globalSettingsService;
 HotkeyService? globalHotkeyService;
 WindowService? globalWindowService;
 OverlayStateService? globalOverlayState;
-WindowsNavigationPollingService? globalWindowsNavigationService;
 Isar? globalIsar;
 
 // 悬浮窗控制器
@@ -261,12 +259,6 @@ Future<void> _runMainWindow() async {
     globalHotkeyService = HotkeyService(globalSettingsService!);
     globalWindowService = WindowService(globalSettingsService!);
     globalOverlayState = OverlayStateService(isar);
-    if (Platform.isWindows) {
-      globalWindowsNavigationService = WindowsNavigationPollingService(
-        globalSettingsService!,
-        sendOverlayCommand,
-      );
-    }
 
     // 连接热键服务和窗口服务
     globalWindowService!.setHotkeyService(globalHotkeyService!);
@@ -311,14 +303,29 @@ Future<void> _runMainWindow() async {
     globalHotkeyService!.registerHandler(HotkeyAction.navigateUp, () {
       sendOverlayCommand('start_navigation', {'direction': 'up'});
     });
+    globalHotkeyService!.registerKeyUpHandler(HotkeyAction.navigateUp, () {
+      sendOverlayCommand('stop_navigation', {'direction': 'up'});
+    });
     globalHotkeyService!.registerHandler(HotkeyAction.navigateDown, () {
       sendOverlayCommand('start_navigation', {'direction': 'down'});
+    });
+    globalHotkeyService!.registerKeyUpHandler(HotkeyAction.navigateDown, () {
+      sendOverlayCommand('stop_navigation', {'direction': 'down'});
     });
     globalHotkeyService!.registerHandler(HotkeyAction.navigateLeft, () {
       sendOverlayCommand('start_navigation', {'direction': 'left'});
     });
+    globalHotkeyService!.registerKeyUpHandler(HotkeyAction.navigateLeft, () {
+      sendOverlayCommand('stop_navigation', {'direction': 'left'});
+    });
     globalHotkeyService!.registerHandler(HotkeyAction.navigateRight, () {
       sendOverlayCommand('start_navigation', {'direction': 'right'});
+    });
+    globalHotkeyService!.registerKeyUpHandler(HotkeyAction.navigateRight, () {
+      sendOverlayCommand('stop_navigation', {'direction': 'right'});
+    });
+    globalHotkeyService!.registerHandler(HotkeyAction.hideOverlay, () {
+      unawaited(globalWindowService!.hideOverlay());
     });
     // 视频播放控制
     globalHotkeyService!.registerHandler(HotkeyAction.togglePlayPause, () {
@@ -443,9 +450,15 @@ Future<void> _runOverlayWindow(
     final savedX = args?['x'] as double?;
     final savedY = args?['y'] as double?;
     final savedSize = settingsService.getOverlaySizePixels();
+    final parkedX = softHiddenVisiblePixels - savedSize.$1;
+    final parkedY = softHiddenVisiblePixels - savedSize.$2;
+    final savedPositionLooksLikeSoftHidden = savedX != null &&
+        savedY != null &&
+        (savedX - parkedX).abs() < 0.5 &&
+        (savedY - parkedY).abs() < 0.5;
     return Rect.fromLTWH(
-      savedX ?? 100.0,
-      savedY ?? 100.0,
+      savedPositionLooksLikeSoftHidden ? 100.0 : (savedX ?? 100.0),
+      savedPositionLooksLikeSoftHidden ? 100.0 : (savedY ?? 100.0),
       savedSize.$1,
       savedSize.$2,
     );
@@ -453,6 +466,12 @@ Future<void> _runOverlayWindow(
   bool isOverlayLogicallyVisible = false;
 
   Future<void> persistOverlayBounds() async {
+    if (!isOverlayLogicallyVisible && lastVisibleWindowBounds != null) {
+      final position = lastVisibleWindowBounds!.topLeft;
+      await settingsService.setOverlayPosition(position.dx, position.dy);
+      return;
+    }
+
     final preferredPosition = overlayAppKey
         .currentState?.overlayWindowKey.currentState?.persistedWindowPosition;
     final bounds = await windowManager.getBounds();
@@ -1113,12 +1132,10 @@ class _MainAppState extends ConsumerState<MainApp> {
     }
     // 注册热键
     await globalHotkeyService?.registerOverlayHotkeys();
-    await globalWindowsNavigationService?.start();
   }
 
   Future<void> _hideOverlay() async {
     if (overlayWindowController == null) return;
-    await globalWindowsNavigationService?.stop();
     // 让悬浮窗自己先暂停媒体，再保存位置并隐藏
     await overlayWindowController!.invokeMethod('hide_overlay');
   }
@@ -1163,7 +1180,6 @@ class _MainAppState extends ConsumerState<MainApp> {
       } catch (_) {}
       overlayWindowController = null;
     }
-    await globalWindowsNavigationService?.dispose();
     globalHotkeyService?.dispose();
   }
 
@@ -1171,7 +1187,6 @@ class _MainAppState extends ConsumerState<MainApp> {
   void dispose() {
     _visibilityPollTimer?.cancel();
     _hideOverlay();
-    globalWindowsNavigationService?.dispose();
     globalHotkeyService?.dispose();
     globalWindowService?.dispose();
     super.dispose();

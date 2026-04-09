@@ -1129,6 +1129,8 @@ class OverlayWindowState extends State<OverlayWindow> {
   // === 快捷键处理 ===
 
   void _handleKeyEvent(KeyEvent event) {
+    if (Platform.isWindows) return;
+
     final key = event.logicalKey;
 
     // 忽略单独的修饰键事件
