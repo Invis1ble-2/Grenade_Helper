@@ -5,7 +5,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:isar_community/isar.dart';
 
 import '../models.dart';
@@ -16,6 +15,7 @@ import '../services/lan_sync/lan_sync_discovery_service.dart';
 import '../services/lan_sync/lan_sync_local_store.dart';
 import '../services/lan_sync/lan_sync_receive_controller.dart';
 import '../services/lan_sync/lan_sync_transfer_client.dart';
+import '../widgets/map_icon.dart';
 import '../widgets/selectable_grenade_list_item.dart';
 import 'grenade_detail_screen.dart';
 import 'import_preview_screen.dart';
@@ -2651,16 +2651,7 @@ class _LanSyncMapIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (iconPath.isEmpty) {
-      return Icon(Icons.map_outlined, size: size, color: Colors.orange);
-    }
-    return SvgPicture.asset(
-      iconPath,
-      width: size,
-      height: size,
-      placeholderBuilder: (_) =>
-          Icon(Icons.map_outlined, size: size, color: Colors.orange),
-    );
+    return MapIcon(path: iconPath, size: size);
   }
 }
 

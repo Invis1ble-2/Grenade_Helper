@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:isar_community/isar.dart';
+import 'package:path/path.dart' as p;
 import '../models.dart';
 import '../providers.dart';
 import '../main.dart';
+import '../services/map_management_service.dart';
 import '../widgets/fireworks_effect.dart';
 import '../widgets/snowfall_effect.dart';
+import '../widgets/map_icon.dart';
+import '../widgets/path_image_provider.dart';
 import 'map_screen.dart';
 import 'grenade_detail_screen.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'import_screen.dart';
 import 'share_screen.dart';
 import 'settings_screen.dart';
@@ -86,13 +90,412 @@ class GlobalSearchDelegate extends SearchDelegate {
   }
 }
 
-class HomeScreen extends ConsumerWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  final Set<int> _pendingDeleteMapIds = <int>{};
+
+  Future<bool> _deleteCustomMapQuick(Isar isar, GameMap map) async {
+    if (!MapManagementService.isCustomMap(map)) {
+      if (!mounted) return false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('仅支持删除自定义地图')),
+      );
+      return false;
+    }
+
+    try {
+      final deleted = await MapManagementService(isar).deleteCustomMaps([map]);
+      if (!mounted) return deleted > 0;
+      if (deleted > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已删除自定义地图：${map.name}')),
+        );
+        return true;
+      }
+    } catch (e) {
+      if (!mounted) return false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('删除失败: $e'), backgroundColor: Colors.red),
+      );
+      return false;
+    }
+    return false;
+  }
+
+  Future<void> _queueCustomMapDelete(Isar isar, GameMap map) async {
+    if (_pendingDeleteMapIds.contains(map.id)) return;
+    setState(() {
+      _pendingDeleteMapIds.add(map.id);
+    });
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    var undone = false;
+    final controller = messenger.showSnackBar(
+      SnackBar(
+        content: Text('已移除「${map.name}」'),
+        action: SnackBarAction(
+          label: '撤销',
+          onPressed: () {
+            undone = true;
+            if (!mounted) return;
+            setState(() {
+              _pendingDeleteMapIds.remove(map.id);
+            });
+          },
+        ),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+    await Future.delayed(const Duration(seconds: 4));
+    controller.close();
+
+    if (!mounted) return;
+    if (undone) return;
+    if (!_pendingDeleteMapIds.contains(map.id)) return;
+
+    await _deleteCustomMapQuick(isar, map);
+    if (!mounted) return;
+    setState(() {
+      _pendingDeleteMapIds.remove(map.id);
+    });
+  }
+
+  Future<void> _showAddCustomMapDialog(
+      BuildContext parentContext, Isar isar) async {
+    final nameController = TextEditingController();
+    String? radarPath;
+    String? backgroundPath;
+    String? iconPath;
+
+    await showDialog<void>(
+      context: parentContext,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> pickRadarImage() async {
+              final result = await FilePicker.platform.pickFiles(
+                type: FileType.image,
+                allowMultiple: false,
+                dialogTitle: '选择雷达图',
+              );
+              final selectedPath = result?.files.single.path?.trim();
+              if (selectedPath == null || selectedPath.isEmpty) return;
+              setDialogState(() {
+                radarPath = selectedPath;
+              });
+            }
+
+            Future<void> pickOptionalIcon() async {
+              final result = await FilePicker.platform.pickFiles(
+                type: FileType.custom,
+                allowedExtensions: const [
+                  'png',
+                  'jpg',
+                  'jpeg',
+                  'webp',
+                  'bmp',
+                  'gif',
+                  'svg',
+                ],
+                allowMultiple: false,
+                dialogTitle: '选择地图图标（可选）',
+              );
+              final selectedPath = result?.files.single.path?.trim();
+              if (selectedPath == null || selectedPath.isEmpty) return;
+              setDialogState(() {
+                iconPath = selectedPath;
+              });
+            }
+
+            Future<void> pickOptionalBackgroundImage() async {
+              final result = await FilePicker.platform.pickFiles(
+                type: FileType.image,
+                allowMultiple: false,
+                dialogTitle: '选择地图背景图（可选）',
+              );
+              final selectedPath = result?.files.single.path?.trim();
+              if (selectedPath == null || selectedPath.isEmpty) return;
+              setDialogState(() {
+                backgroundPath = selectedPath;
+              });
+            }
+
+            return AlertDialog(
+              title: const Text('添加自定义地图'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      labelText: '地图名称',
+                      hintText: '例如：Cache',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      const Expanded(child: Text('雷达图（必选）')),
+                      OutlinedButton(
+                        onPressed: pickRadarImage,
+                        child: const Text('选择图片'),
+                      ),
+                    ],
+                  ),
+                  if (radarPath != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        p.basename(radarPath!),
+                        style:
+                            const TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      const Expanded(child: Text('背景图（可选）')),
+                      OutlinedButton(
+                        onPressed: pickOptionalBackgroundImage,
+                        child: const Text('选择背景'),
+                      ),
+                    ],
+                  ),
+                  if (backgroundPath != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        p.basename(backgroundPath!),
+                        style:
+                            const TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      const Expanded(child: Text('地图图标（可选）')),
+                      OutlinedButton(
+                        onPressed: pickOptionalIcon,
+                        child: const Text('选择图标'),
+                      ),
+                    ],
+                  ),
+                  if (iconPath != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        p.basename(iconPath!),
+                        style:
+                            const TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () async {
+                    final mapName = nameController.text.trim();
+                    if (mapName.isEmpty) {
+                      ScaffoldMessenger.of(parentContext).showSnackBar(
+                        const SnackBar(content: Text('请输入地图名称')),
+                      );
+                      return;
+                    }
+                    if (radarPath == null || radarPath!.isEmpty) {
+                      ScaffoldMessenger.of(parentContext).showSnackBar(
+                        const SnackBar(content: Text('请先选择雷达图')),
+                      );
+                      return;
+                    }
+
+                    final existed = await isar.gameMaps
+                        .filter()
+                        .nameEqualTo(mapName, caseSensitive: false)
+                        .findFirst();
+                    if (!mounted) return;
+                    if (existed != null) {
+                      ScaffoldMessenger.of(parentContext).showSnackBar(
+                        const SnackBar(content: Text('地图名称已存在')),
+                      );
+                      return;
+                    }
+
+                    await isar.writeTxn(() async {
+                      final mapBackgroundPath =
+                          (backgroundPath?.trim().isNotEmpty ?? false)
+                              ? backgroundPath!.trim()
+                              : radarPath!;
+                      final newMap = GameMap(
+                        name: mapName,
+                        backgroundPath: mapBackgroundPath,
+                        iconPath: iconPath?.trim() ?? '',
+                      );
+                      await isar.gameMaps.put(newMap);
+
+                      final newLayer = MapLayer(
+                        name: 'Default',
+                        assetPath: radarPath!,
+                        sortOrder: 0,
+                      );
+                      await isar.mapLayers.put(newLayer);
+                      newMap.layers.add(newLayer);
+                      await newMap.layers.save();
+                    });
+
+                    if (!mounted) return;
+                    Navigator.pop(dialogContext);
+                    setState(() {});
+                    ScaffoldMessenger.of(parentContext).showSnackBar(
+                      SnackBar(content: Text('已添加地图：$mapName')),
+                    );
+                  },
+                  child: const Text('添加'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    nameController.dispose();
+  }
+
+  Widget _buildMapCard(BuildContext context, Isar isar, GameMap map) {
+    final imageProvider = imageProviderFromPath(map.backgroundPath);
+    final isCustomMap = MapManagementService.isCustomMap(map);
+
+    Widget card = Card(
+      clipBehavior: Clip.antiAlias,
+      margin: const EdgeInsets.only(bottom: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: InkWell(
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => MapScreen(gameMap: map)),
+        ),
+        child: Container(
+          height: 120,
+          decoration: BoxDecoration(
+            color: const Color(0xFF616161),
+            image: imageProvider == null
+                ? null
+                : DecorationImage(
+                    image: imageProvider,
+                    fit: BoxFit.cover,
+                    colorFilter: ColorFilter.mode(
+                      Colors.black.withValues(alpha: 0.4),
+                      BlendMode.darken,
+                    ),
+                  ),
+          ),
+          child: Center(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (map.iconPath.trim().isNotEmpty) ...[
+                  MapIcon(path: map.iconPath, size: 40),
+                  const SizedBox(width: 16),
+                ],
+                Text(
+                  map.name,
+                  style: const TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                    letterSpacing: 1.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (isCustomMap) {
+      card = Dismissible(
+        key: ValueKey('map-${map.id}'),
+        direction: DismissDirection.endToStart,
+        background: Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          decoration: BoxDecoration(
+            color: Colors.red.shade700,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          alignment: Alignment.centerRight,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Icon(Icons.delete_forever, color: Colors.white),
+              SizedBox(width: 8),
+              Text(
+                '删除地图',
+                style:
+                    TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+        ),
+        confirmDismiss: (_) async => true,
+        onDismissed: (_) => _queueCustomMapDelete(isar, map),
+        child: card,
+      );
+    }
+
+    return card;
+  }
+
+  Widget _buildAddCustomMapCard(
+    BuildContext context,
+    Isar isar,
+  ) {
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      margin: const EdgeInsets.only(bottom: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: InkWell(
+        onTap: () => _showAddCustomMapDialog(context, isar),
+        child: Container(
+          height: 120,
+          color: const Color(0xFF757575),
+          child: const Center(
+            child: Text(
+              '添加自定义地图',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+                letterSpacing: 1.5,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final isar = ref.watch(isarProvider);
-    final maps = isar.gameMaps.where().findAllSync();
+    final maps = isar.gameMaps.where().findAllSync()
+      ..sort((a, b) => a.id.compareTo(b.id));
+    final visibleMaps = maps
+        .where((map) => !_pendingDeleteMapIds.contains(map.id))
+        .toList(growable: false);
     final seasonalTheme = ref.watch(activeSeasonalThemeProvider);
     final seasonalThemeId = seasonalTheme?.id;
     final isChristmasTheme = seasonalThemeId == 'christmas';
@@ -274,48 +677,12 @@ class HomeScreen extends ConsumerWidget {
       ),
       body: ListView.builder(
         padding: const EdgeInsets.all(16),
-        itemCount: maps.length,
+        itemCount: visibleMaps.length + 1,
         itemBuilder: (ctx, index) {
-          final map = maps[index];
-          return Card(
-            clipBehavior: Clip.antiAlias,
-            margin: const EdgeInsets.only(bottom: 16),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            child: InkWell(
-              onTap: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => MapScreen(gameMap: map))),
-              child: Container(
-                height: 120,
-                decoration: BoxDecoration(
-                    image: DecorationImage(
-                  image: AssetImage(map.backgroundPath),
-                  fit: BoxFit.cover,
-                  colorFilter: ColorFilter.mode(
-                      Colors.black.withValues(alpha: 0.4), BlendMode.darken),
-                )),
-                child: Center(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      SvgPicture.asset(
-                        map.iconPath,
-                        width: 40,
-                        height: 40,
-                      ),
-                      const SizedBox(width: 16),
-                      Text(map.name,
-                          style: const TextStyle(
-                              fontSize: 28,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                              letterSpacing: 1.5)),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          );
+          if (index == visibleMaps.length) {
+            return _buildAddCustomMapCard(context, isar);
+          }
+          return _buildMapCard(context, isar, visibleMaps[index]);
         },
       ),
     );

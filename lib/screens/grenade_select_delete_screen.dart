@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:isar_community/isar.dart';
 import '../models.dart';
 import '../providers.dart';
 import '../services/data_service.dart';
+import '../widgets/map_icon.dart';
 import '../widgets/selectable_grenade_list_item.dart';
 import 'grenade_detail_screen.dart';
 
@@ -306,16 +306,7 @@ class _DeleteMapDropdownLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        if (iconPath.trim().isEmpty)
-          const Icon(Icons.map_outlined, size: 20, color: Colors.orange)
-        else
-          SvgPicture.asset(
-            iconPath,
-            width: 20,
-            height: 20,
-            placeholderBuilder: (_) =>
-                const Icon(Icons.map_outlined, size: 20, color: Colors.orange),
-          ),
+        MapIcon(path: iconPath, size: 20),
         const SizedBox(width: 10),
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 220),

@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:isar_community/isar.dart';
 import '../models.dart';
 import '../providers.dart';
 import '../services/data_service.dart';
+import '../widgets/map_icon.dart';
 import 'grenade_detail_screen.dart';
 
 /// 导出选择界面
@@ -332,7 +332,7 @@ class _ExportSelectScreenState extends ConsumerState<ExportSelectScreen> {
                     ),
                     title: Row(
                       children: [
-                        SvgPicture.asset(map.iconPath, width: 32, height: 32),
+                        MapIcon(path: map.iconPath, size: 32),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(map.name,
@@ -446,7 +446,7 @@ class _ExportSelectScreenState extends ConsumerState<ExportSelectScreen> {
                     ),
                     title: Row(
                       children: [
-                        SvgPicture.asset(map.iconPath, width: 32, height: 32),
+                        MapIcon(path: map.iconPath, size: 32),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(map.name,

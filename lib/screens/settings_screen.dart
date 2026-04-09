@@ -4,15 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:isar_community/isar.dart';
 import '../services/settings_service.dart';
 import '../services/seasonal_theme_service.dart';
 import '../services/data_service.dart';
+import '../services/map_management_service.dart';
 import '../services/lan_sync/lan_sync_local_store.dart';
 import '../services/tag_service.dart';
 import '../models.dart';
 import '../providers.dart';
+import '../widgets/map_icon.dart';
 import '../main.dart' show sendOverlayCommand;
 import 'grenade_select_delete_screen.dart';
 
@@ -608,6 +609,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           onTap: () => _showDeleteMapGrenadesDialog(),
         ),
         ListTile(
+          leading: const Icon(Icons.delete_forever, color: Colors.red),
+          title: const Text('删除自定义地图'),
+          subtitle: const Text('支持多选删除自定义地图及其关联数据'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => _showDeleteCustomMapsDialog(),
+        ),
+        ListTile(
           leading: const Icon(Icons.checklist, color: Colors.orange),
           title: const Text('批量选择删除'),
           subtitle: const Text('精确选择要删除的道具，支持预览'),
@@ -950,6 +958,104 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
+  Future<void> _showDeleteCustomMapsDialog() async {
+    final isar = ref.read(isarProvider);
+    final allMaps = await isar.gameMaps.where().findAll();
+    final customMaps =
+        allMaps.where(MapManagementService.isCustomMap).toList(growable: false);
+    if (customMaps.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('暂无可删除的自定义地图')),
+        );
+      }
+      return;
+    }
+
+    final selectedMapIds = <int>{};
+    if (!mounted) return;
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.map_outlined, color: Colors.red[400]),
+              const SizedBox(width: 8),
+              const Text('删除自定义地图'),
+            ],
+          ),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('勾选要删除的自定义地图：'),
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 280,
+                  child: ListView.builder(
+                    itemCount: customMaps.length,
+                    itemBuilder: (_, index) {
+                      final map = customMaps[index];
+                      final checked = selectedMapIds.contains(map.id);
+                      return CheckboxListTile(
+                        dense: true,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        value: checked,
+                        title: _SettingsMapDropdownLabel(
+                          iconPath: map.iconPath,
+                          text: map.name,
+                        ),
+                        onChanged: (value) {
+                          setDialogState(() {
+                            if (value == true) {
+                              selectedMapIds.add(map.id);
+                            } else {
+                              selectedMapIds.remove(map.id);
+                            }
+                          });
+                        },
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '已选择 ${selectedMapIds.length} 张地图',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消'),
+            ),
+            ElevatedButton(
+              onPressed: selectedMapIds.isEmpty
+                  ? null
+                  : () async {
+                      Navigator.pop(ctx);
+                      final targets = customMaps
+                          .where((m) => selectedMapIds.contains(m.id))
+                          .toList(growable: false);
+                      await _performDeleteCustomMaps(targets);
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('删除选中'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _initializeBuiltinAreaMetadataForAllMaps() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1077,6 +1183,69 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           SnackBar(content: Text('删除失败: $e'), backgroundColor: Colors.red),
         );
       }
+    }
+  }
+
+  Future<void> _performDeleteCustomMaps(List<GameMap> maps) async {
+    if (maps.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('二次确认'),
+        content: Text(
+          '确定删除选中的 ${maps.length} 张自定义地图吗？\n\n这会删除地图及其所有关联数据，且不可恢复。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('确定删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 16),
+            Text('正在删除地图...'),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      final isar = ref.read(isarProvider);
+      final deletedCount =
+          await MapManagementService(isar).deleteCustomMaps(maps);
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已删除 $deletedCount 张自定义地图'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('删除失败: $e'), backgroundColor: Colors.red),
+      );
     }
   }
 
@@ -1471,16 +1640,7 @@ class _SettingsMapDropdownLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        if (iconPath.trim().isEmpty)
-          const Icon(Icons.map_outlined, size: 20, color: Colors.orange)
-        else
-          SvgPicture.asset(
-            iconPath,
-            width: 20,
-            height: 20,
-            placeholderBuilder: (_) =>
-                const Icon(Icons.map_outlined, size: 20, color: Colors.orange),
-          ),
+        MapIcon(path: iconPath, size: 20),
         const SizedBox(width: 10),
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 220),

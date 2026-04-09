@@ -15,6 +15,7 @@ import '../providers.dart';
 import '../main.dart';
 import '../spawn_point_data.dart';
 import '../widgets/joystick_widget.dart';
+import '../widgets/path_image_provider.dart';
 import '../services/data_service.dart';
 import '../services/favorite_folder_service.dart';
 import '../services/tag_service.dart';
@@ -4262,6 +4263,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                               final pointCullMarginY = 28 / imageBounds.height;
                               final lineCullMarginX = 40 / imageBounds.width;
                               final lineCullMarginY = 40 / imageBounds.height;
+                              final layerImageProvider =
+                                  imageProviderFromPath(currentLayer.assetPath);
                               List<GrenadeCluster> batchedTapClusters =
                                   const [];
                               var enableBatchedClusterHitTest = false;
@@ -4342,10 +4345,18 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                     );
                                   },
                                   child: Stack(key: _stackKey, children: [
-                                    Image.asset(currentLayer.assetPath,
-                                        width: constraints.maxWidth,
-                                        height: constraints.maxHeight,
-                                        fit: BoxFit.contain),
+                                    layerImageProvider == null
+                                        ? Container(
+                                            width: constraints.maxWidth,
+                                            height: constraints.maxHeight,
+                                            color: const Color(0xFF616161),
+                                          )
+                                        : Image(
+                                            image: layerImageProvider,
+                                            width: constraints.maxWidth,
+                                            height: constraints.maxHeight,
+                                            fit: BoxFit.contain,
+                                          ),
                                     // 道具点位标记和所有依赖选中状态的元素
                                     ...grenadesAsync.when(
                                         data: (list) {
