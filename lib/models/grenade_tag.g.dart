@@ -66,7 +66,7 @@ const GrenadeTagSchema = CollectionSchema(
   getId: _grenadeTagGetId,
   getLinks: _grenadeTagGetLinks,
   attach: _grenadeTagAttach,
-  version: '3.3.0',
+  version: '3.3.2',
 );
 
 int _grenadeTagEstimateSize(

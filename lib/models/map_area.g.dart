@@ -96,7 +96,7 @@ const MapAreaSchema = CollectionSchema(
   getId: _mapAreaGetId,
   getLinks: _mapAreaGetLinks,
   attach: _mapAreaAttach,
-  version: '3.3.0',
+  version: '3.3.2',
 );
 
 int _mapAreaEstimateSize(

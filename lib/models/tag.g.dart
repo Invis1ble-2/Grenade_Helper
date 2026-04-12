@@ -127,7 +127,7 @@ const TagSchema = CollectionSchema(
   getId: _tagGetId,
   getLinks: _tagGetLinks,
   attach: _tagAttach,
-  version: '3.3.0',
+  version: '3.3.2',
 );
 
 int _tagEstimateSize(

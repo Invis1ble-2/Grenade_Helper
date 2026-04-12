@@ -51,7 +51,7 @@ const GameMapSchema = CollectionSchema(
   getId: _gameMapGetId,
   getLinks: _gameMapGetLinks,
   attach: _gameMapAttach,
-  version: '3.3.0',
+  version: '3.3.2',
 );
 
 int _gameMapEstimateSize(
@@ -902,7 +902,7 @@ const MapLayerSchema = CollectionSchema(
   getId: _mapLayerGetId,
   getLinks: _mapLayerGetLinks,
   attach: _mapLayerAttach,
-  version: '3.3.0',
+  version: '3.3.2',
 );
 
 int _mapLayerEstimateSize(
@@ -1803,7 +1803,7 @@ const GrenadeSchema = CollectionSchema(
   getId: _grenadeGetId,
   getLinks: _grenadeGetLinks,
   attach: _grenadeAttach,
-  version: '3.3.0',
+  version: '3.3.2',
 );
 
 int _grenadeEstimateSize(
@@ -4907,7 +4907,7 @@ const GrenadeStepSchema = CollectionSchema(
   getId: _grenadeStepGetId,
   getLinks: _grenadeStepGetLinks,
   attach: _grenadeStepAttach,
-  version: '3.3.0',
+  version: '3.3.2',
 );
 
 int _grenadeStepEstimateSize(
@@ -5705,7 +5705,7 @@ const StepMediaSchema = CollectionSchema(
   getId: _stepMediaGetId,
   getLinks: _stepMediaGetLinks,
   attach: _stepMediaAttach,
-  version: '3.3.0',
+  version: '3.3.2',
 );
 
 int _stepMediaEstimateSize(
@@ -6359,7 +6359,7 @@ const ImportHistorySchema = CollectionSchema(
   getId: _importHistoryGetId,
   getLinks: _importHistoryGetLinks,
   attach: _importHistoryAttach,
-  version: '3.3.0',
+  version: '3.3.2',
 );
 
 int _importHistoryEstimateSize(
@@ -7315,7 +7315,7 @@ const ImpactGroupSchema = CollectionSchema(
   getId: _impactGroupGetId,
   getLinks: _impactGroupGetLinks,
   attach: _impactGroupAttach,
-  version: '3.3.0',
+  version: '3.3.2',
 );
 
 int _impactGroupEstimateSize(
@@ -8533,7 +8533,7 @@ const FavoriteFolderSchema = CollectionSchema(
   getId: _favoriteFolderGetId,
   getLinks: _favoriteFolderGetLinks,
   attach: _favoriteFolderAttach,
-  version: '3.3.0',
+  version: '3.3.2',
 );
 
 int _favoriteFolderEstimateSize(
