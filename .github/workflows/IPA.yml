@@ -23,6 +23,11 @@ jobs:
           cd ios
           pod install
 
+      - name: Prepare Flutter iOS Build Config
+        run: |
+          flutter precache --ios
+          flutter build ios --release --no-codesign --config-only
+
       - name: Build iOS App (No Codesign)
         # 显式禁用签名，避免 CI 环境缺少 Development Team 时失败
         run: |
