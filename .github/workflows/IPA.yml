@@ -28,26 +28,25 @@ jobs:
           flutter precache --ios
           flutter build ios --release --no-codesign --config-only
 
+      - name: Disable iOS Code Signing For CI
+        run: |
+          cat > ios/Flutter/CI-NoSign.xcconfig <<'EOF'
+          CODE_SIGNING_ALLOWED=NO
+          CODE_SIGNING_REQUIRED=NO
+          CODE_SIGN_STYLE=Manual
+          CODE_SIGN_IDENTITY=
+          DEVELOPMENT_TEAM=
+          PROVISIONING_PROFILE_SPECIFIER=
+          PROVISIONING_PROFILE=
+          EOF
+
       - name: Build iOS App (No Codesign)
-        # 显式禁用签名，避免 CI 环境缺少 Development Team 时失败
+        # 回到 flutter build ios，再通过 XCODE_XCCONFIG_FILE 全局覆盖签名配置
         run: |
           mkdir -p build/ios
           set -o pipefail
-          xcodebuild \
-            -workspace ios/Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination "generic/platform=iOS" \
-            -derivedDataPath build/ios \
-            -resultBundlePath build/ios/Runner.xcresult \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM="" \
-            PROVISIONING_PROFILE_SPECIFIER="" \
-            PROVISIONING_PROFILE="" \
-            build 2>&1 | tee build/ios/xcodebuild.log
+          export XCODE_XCCONFIG_FILE="$GITHUB_WORKSPACE/ios/Flutter/CI-NoSign.xcconfig"
+          flutter build ios --release --no-codesign 2>&1 | tee build/ios/xcodebuild.log
 
       - name: Show iOS Build Error Summary
         if: failure()
@@ -64,14 +63,14 @@ jobs:
           name: ios-build-logs
           path: |
             build/ios/xcodebuild.log
-            build/ios/Runner.xcresult
+            ios/Flutter/CI-NoSign.xcconfig
           if-no-files-found: warn
 
       - name: Create IPA Structure
         # IPA 本质上就是一个 zip 压缩包，里面有个 Payload 文件夹放 .app
         run: |
           mkdir Payload
-          mv build/ios/Build/Products/Release-iphoneos/Runner.app Payload/
+          mv build/ios/iphoneos/Runner.app Payload/
           zip -r release.ipa Payload
 
       - name: Upload IPA
