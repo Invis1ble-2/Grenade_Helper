@@ -194,10 +194,15 @@ class SettingsService {
   /// 初始化
   Future<void> init() async {
     if (isDesktop) {
-      // 桌面端：使用 JSON 文件存储
-      final appSupport = await getApplicationSupportDirectory();
-      _settingsFile = File(path.join(appSupport.path, 'settings.json'));
+      // 桌面端：settings.json 跟随数据目录
+      final dataPath = await getDataPathBeforeInit();
+      final dataDir = Directory(dataPath);
+      if (!await dataDir.exists()) {
+        await dataDir.create(recursive: true);
+      }
+      _settingsFile = File(path.join(dataPath, 'settings.json'));
       await _loadFromFile();
+      _cache[_keyDataPath] = await _readCustomDataPathFromConfigFile();
       // 尝试从 SharedPreferences 迁移旧设置
       await _migrateFromSharedPreferences();
     } else {
@@ -884,13 +889,8 @@ class SettingsService {
       } else {
         _cache[_keyDataPath] = customPath;
       }
-      if (customPath == null) {
-        await _saveValue(_keyDataPath, null);
-      } else {
-        await _saveValue(_keyDataPath, customPath);
-      }
 
-      // 同时更新旧的 custom_data_path.txt 文件以保持兼容性
+      // 启动前通过该文件定位数据目录
       try {
         final appSupport = await getApplicationSupportDirectory();
         final configFile =
@@ -928,21 +928,12 @@ class SettingsService {
       if (customPath != null && customPath.isNotEmpty) {
         return customPath;
       }
-    }
 
-    // 兼容旧的文件存储方式
-    try {
-      final appSupport = await getApplicationSupportDirectory();
-      final configFile =
-          File(path.join(appSupport.path, 'custom_data_path.txt'));
-      if (await configFile.exists()) {
-        final customPath = (await configFile.readAsString()).trim();
-        if (customPath.isNotEmpty) {
-          return customPath;
-        }
+      final configPath = await _readCustomDataPathFromConfigFile();
+      if (configPath != null && configPath.isNotEmpty) {
+        _cache[_keyDataPath] = configPath;
+        return configPath;
       }
-    } catch (e) {
-      debugPrint('[Settings] Error reading legacy config file: $e');
     }
 
     return await getDefaultDataPath();
@@ -950,40 +941,7 @@ class SettingsService {
 
   /// 静态方法：在 SettingsService 初始化前获取数据路径
   static Future<String> getDataPathBeforeInit() async {
-    String? customPath;
-
-    // 优先从 settings.json 读取（桌面端新方式）
-    if (isDesktop) {
-      try {
-        final appSupport = await getApplicationSupportDirectory();
-        final settingsFile = File(path.join(appSupport.path, 'settings.json'));
-        if (await settingsFile.exists()) {
-          final content = await settingsFile.readAsString();
-          if (content.isNotEmpty) {
-            final cache = jsonDecode(content) as Map<String, dynamic>;
-            customPath = cache[_keyDataPath] as String?;
-          }
-        }
-      } catch (e) {
-        debugPrint('[Settings] Error reading settings.json: $e');
-      }
-    }
-
-    // 兼容旧的文件存储方式
-    if (customPath == null || customPath.isEmpty) {
-      try {
-        final appSupport = await getApplicationSupportDirectory();
-        final configFile =
-            File(path.join(appSupport.path, 'custom_data_path.txt'));
-        if (await configFile.exists()) {
-          customPath = await configFile.readAsString();
-          customPath = customPath.trim();
-          if (customPath.isEmpty) customPath = null;
-        }
-      } catch (e) {
-        debugPrint('[Settings] Error reading legacy config file: $e');
-      }
-    }
+    String? customPath = await _readCustomDataPathFromConfigFile();
 
     debugPrint('[Settings] getDataPathBeforeInit - customPath: $customPath');
     final String targetDir;
@@ -1016,6 +974,22 @@ class SettingsService {
     }
 
     return targetDir;
+  }
+
+  static Future<String?> _readCustomDataPathFromConfigFile() async {
+    try {
+      final appSupport = await getApplicationSupportDirectory();
+      final configFile =
+          File(path.join(appSupport.path, 'custom_data_path.txt'));
+      if (!await configFile.exists()) {
+        return null;
+      }
+      final customPath = (await configFile.readAsString()).trim();
+      return customPath.isEmpty ? null : customPath;
+    } catch (e) {
+      debugPrint('[Settings] Error reading custom_data_path.txt: $e');
+      return null;
+    }
   }
 
   /// 递归复制目录
