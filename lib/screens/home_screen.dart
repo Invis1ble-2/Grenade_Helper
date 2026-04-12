@@ -194,7 +194,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Future<void> _showAddCustomMapDialog(
       BuildContext parentContext, Isar isar) async {
-    final nameController = TextEditingController();
+    String mapNameInput = '';
     String? radarPath;
     String? backgroundPath;
     String? iconPath;
@@ -259,8 +259,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   TextField(
-                    controller: nameController,
                     autofocus: true,
+                    onChanged: (value) {
+                      mapNameInput = value;
+                    },
                     decoration: const InputDecoration(
                       labelText: '地图名称',
                       hintText: '例如：Cache',
@@ -332,7 +334,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ),
                 FilledButton(
                   onPressed: () async {
-                    final mapName = nameController.text.trim();
+                    final mapName = mapNameInput.trim();
                     if (mapName.isEmpty) {
                       ScaffoldMessenger.of(parentContext).showSnackBar(
                         const SnackBar(content: Text('请输入地图名称')),
@@ -414,7 +416,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         );
       },
     );
-    nameController.dispose();
   }
 
   Widget _buildMapCard(BuildContext context, Isar isar, GameMap map) {
