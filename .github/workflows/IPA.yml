@@ -26,6 +26,8 @@ jobs:
       - name: Build iOS App (No Codesign)
         # 显式禁用签名，避免 CI 环境缺少 Development Team 时失败
         run: |
+          mkdir -p build/ios
+          set -o pipefail
           xcodebuild \
             -workspace ios/Runner.xcworkspace \
             -scheme Runner \
@@ -33,12 +35,32 @@ jobs:
             -sdk iphoneos \
             -destination "generic/platform=iOS" \
             -derivedDataPath build/ios \
+            -resultBundlePath build/ios/Runner.xcresult \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
             PROVISIONING_PROFILE_SPECIFIER="" \
-            PROVISIONING_PROFILE=""
+            PROVISIONING_PROFILE="" \
+            build 2>&1 | tee build/ios/xcodebuild.log
+
+      - name: Show iOS Build Error Summary
+        if: failure()
+        run: |
+          echo "===== Xcode Error Summary (filtered) ====="
+          grep -nE " error:|\\*\\* BUILD FAILED \\*\\*|CodeSign|Provisioning|No profiles|requires a provisioning profile|Command PhaseScriptExecution failed|SwiftCompile|Ld " build/ios/xcodebuild.log | tail -n 200 || true
+          echo "===== Last 200 lines ====="
+          tail -n 200 build/ios/xcodebuild.log || true
+
+      - name: Upload iOS Build Logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ios-build-logs
+          path: |
+            build/ios/xcodebuild.log
+            build/ios/Runner.xcresult
+          if-no-files-found: warn
 
       - name: Create IPA Structure
         # IPA 本质上就是一个 zip 压缩包，里面有个 Payload 文件夹放 .app
