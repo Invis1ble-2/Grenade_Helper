@@ -201,6 +201,7 @@ class SettingsService {
         await dataDir.create(recursive: true);
       }
       _settingsFile = File(path.join(dataPath, 'settings.json'));
+      await _migrateLegacySettingsFileToDataDir();
       await _loadFromFile();
       _cache[_keyDataPath] = await _readCustomDataPathFromConfigFile();
       // 尝试从 SharedPreferences 迁移旧设置
@@ -989,6 +990,21 @@ class SettingsService {
     } catch (e) {
       debugPrint('[Settings] Error reading custom_data_path.txt: $e');
       return null;
+    }
+  }
+
+  Future<void> _migrateLegacySettingsFileToDataDir() async {
+    if (_settingsFile == null) return;
+    try {
+      if (await _settingsFile!.exists()) return;
+      final appSupport = await getApplicationSupportDirectory();
+      final legacyFile = File(path.join(appSupport.path, 'settings.json'));
+      if (!await legacyFile.exists()) return;
+      if (path.equals(legacyFile.path, _settingsFile!.path)) return;
+      await legacyFile.copy(_settingsFile!.path);
+      debugPrint('[Settings] Migrated legacy settings.json to data directory');
+    } catch (e) {
+      debugPrint('[Settings] Error migrating legacy settings.json: $e');
     }
   }
 
