@@ -713,11 +713,12 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen> {
       }
     }
     for (final entry in localManifest.maps.entries) {
-      if (_shouldSendIncrementalItem(
+      if (!_shouldSendIncrementalItem(
           entry.value, manifestResp.maps[entry.key])) {
-        mapPayloads.add(Map<String, dynamic>.from(entry.value.rawData));
-        filesToZip.addAll(entry.value.filesToZip);
+        continue;
       }
+      mapPayloads.add(Map<String, dynamic>.from(entry.value.rawData));
+      filesToZip.addAll(entry.value.filesToZip);
     }
     for (final entry in localManifest.favoriteFolders.entries) {
       if (_shouldSendIncrementalItem(

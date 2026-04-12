@@ -152,6 +152,19 @@ ArchiveFile? _findArchiveFileByNameOrBasename(
   return null;
 }
 
+String _extractArchiveFileNameFromPackagePath(String rawPath) {
+  final trimmed = rawPath.trim();
+  if (trimmed.isEmpty) return '';
+  final normalized = trimmed.replaceAll('\\', '/');
+  return p.posix.basename(normalized).trim();
+}
+
+String _normalizePackageMediaCacheKey(String rawPath) {
+  final trimmed = rawPath.trim();
+  if (trimmed.isEmpty) return '';
+  return trimmed.replaceAll('\\', '/');
+}
+
 enum ImportPackageMode { normal, lanSync }
 
 class PackageManifestFileEntry {
@@ -1258,7 +1271,7 @@ class DataService {
     String? expectedSha256,
     int? expectedSizeBytes,
   }) async {
-    final fileName = p.basename(packageMediaPath.trim());
+    final fileName = _extractArchiveFileNameFromPackagePath(packageMediaPath);
     if (fileName.isEmpty) return null;
     final extension = p.extension(fileName).toLowerCase();
     if (!_trackedMediaExtensions.contains(extension)) {
@@ -2530,16 +2543,47 @@ class DataService {
       final mapName = packageMap.mapName.trim();
       if (mapName.isEmpty) continue;
       final payload = packageMap.toJson();
+      final digestPayload = await _buildMapDigestPayload(packageMap);
       result[mapName] = LanSyncManifestItem(
         key: mapName,
         mapName: mapName,
-        digest: _digestJsonValue(_normalizePayloadForSyncDigest(payload)),
+        digest: _digestJsonValue(_normalizePayloadForSyncDigest(digestPayload)),
         updatedAtMs: 0,
         rawData: payload,
         filesToZip: filesToZip,
       );
     }
     return result;
+  }
+
+  Future<Map<String, dynamic>> _buildMapDigestPayload(
+    PackageMapData mapData,
+  ) async {
+    final layerDigests = <Map<String, dynamic>>[];
+    for (final layer in mapData.layers) {
+      layerDigests.add({
+        'name': layer.name,
+        'sortOrder': layer.sortOrder,
+        'assetDigest': await _buildMapMediaDigestToken(layer.assetPath),
+      });
+    }
+    return {
+      'mapName': mapData.mapName,
+      'backgroundDigest':
+          await _buildMapMediaDigestToken(mapData.backgroundPath),
+      'iconDigest': await _buildMapMediaDigestToken(mapData.iconPath),
+      'layers': layerDigests,
+    };
+  }
+
+  Future<String> _buildMapMediaDigestToken(String rawPath) async {
+    final normalized = rawPath.trim();
+    if (normalized.isEmpty) return '';
+    if (_isAssetPath(normalized)) return 'asset:$normalized';
+    final hash = await _sha256FileHex(normalized);
+    if (hash.isNotEmpty) return 'sha256:$hash';
+    final fileName = _extractArchiveFileNameFromPackagePath(normalized);
+    return fileName.isEmpty ? 'missing' : 'missing:$fileName';
   }
 
   Future<Map<String, LanSyncManifestItem>> _buildFavoriteFolderManifestItems(
@@ -3099,7 +3143,8 @@ class DataService {
       return normalizedLocal == normalizedShared;
     }
     if (normalizedLocal.isEmpty) return false;
-    final expectedHash = packageFileHashes[p.basename(normalizedShared)] ?? '';
+    final fileName = _extractArchiveFileNameFromPackagePath(normalizedShared);
+    final expectedHash = packageFileHashes[fileName] ?? '';
     if (expectedHash.isEmpty) {
       return normalizedLocal == normalizedShared;
     }
@@ -4239,7 +4284,7 @@ class DataService {
 
     try {
       final shouldOpenPackageArchive =
-          hasGrenadeSelection || preview.changedMapCount > 0;
+          hasGrenadeSelection || preview.maps.isNotEmpty;
       if (shouldOpenPackageArchive) {
         packageArchive = _openCs2PackageArchiveFromFile(preview.filePath);
         if (packageArchive == null) {
@@ -5391,7 +5436,8 @@ class DataService {
     required String dataPath,
     required Map<String, String> importedMediaPathCache,
   }) async {
-    final fileName = p.basename(packageMediaPath.trim());
+    final cacheKey = _normalizePackageMediaCacheKey(packageMediaPath);
+    final fileName = _extractArchiveFileNameFromPackagePath(packageMediaPath);
     if (fileName.isEmpty) return null;
     final extension = p.extension(fileName).toLowerCase();
     if (!_trackedMediaExtensions.contains(extension)) {
@@ -5401,7 +5447,7 @@ class DataService {
       return null;
     }
 
-    final cachedPath = importedMediaPathCache[fileName];
+    final cachedPath = importedMediaPathCache[cacheKey];
     if (cachedPath != null && await File(cachedPath).exists()) {
       return cachedPath;
     }
@@ -5434,7 +5480,7 @@ class DataService {
 
     final savePath = p.join(dataPath, '${const Uuid().v4()}$extension');
     await File(savePath).writeAsBytes(bytes, flush: true);
-    importedMediaPathCache[fileName] = savePath;
+    importedMediaPathCache[cacheKey] = savePath;
     archiveFile.clear();
     return savePath;
   }

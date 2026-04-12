@@ -10,6 +10,7 @@ import '../models.dart';
 import '../providers.dart';
 import '../main.dart';
 import '../services/map_management_service.dart';
+import '../services/tag_service.dart';
 import '../widgets/fireworks_effect.dart';
 import '../widgets/snowfall_effect.dart';
 import '../widgets/map_icon.dart';
@@ -362,6 +363,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     }
 
                     try {
+                      int? newMapId;
+                      final tagService = TagService(isar);
                       final copiedRadarPath =
                           await _copyCustomMapFileToDataDir(isar, radarPath!);
                       final copiedBackgroundPath =
@@ -380,7 +383,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           backgroundPath: copiedBackgroundPath,
                           iconPath: copiedIconPath,
                         );
-                        await isar.gameMaps.put(newMap);
+                        newMapId = await isar.gameMaps.put(newMap);
 
                         final newLayer = MapLayer(
                           name: 'Default',
@@ -391,6 +394,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         newMap.layers.add(newLayer);
                         await newMap.layers.save();
                       });
+                      if (newMapId != null) {
+                        await tagService
+                            .clearDeletedSystemTagRecordsForMap(newMapId!);
+                        await tagService.initializeSystemTags(
+                            newMapId!, mapName);
+                      }
                     } catch (e) {
                       if (!mounted) return;
                       if (!parentContext.mounted) return;

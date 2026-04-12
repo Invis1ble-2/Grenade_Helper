@@ -78,6 +78,7 @@ class MapManagementService {
       await isar.mapLayers.deleteAll(layerIds);
       await isar.gameMaps.delete(map.id);
     });
+    await _tagService.clearDeletedSystemTagRecordsForMap(map.id);
 
     if (filesToDelete.isNotEmpty) {
       await DataService.deleteMediaFiles(filesToDelete.toList(growable: false));

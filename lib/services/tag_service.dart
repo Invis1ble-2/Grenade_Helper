@@ -214,6 +214,11 @@ class TagService {
     await prefs.setStringList(key, current.toList()..sort());
   }
 
+  Future<void> clearDeletedSystemTagRecordsForMap(int mapId) async {
+    final prefs = await _prefs();
+    await prefs.remove(_deletedSystemTagPrefsKey(mapId));
+  }
+
   /// 初始化地图的系统标签
   Future<void> initializeSystemTags(int mapId, String mapName) async {
     final map = await isar.gameMaps.get(mapId);
