@@ -32,6 +32,83 @@ WindowService? globalWindowService;
 OverlayStateService? globalOverlayState;
 Isar? globalIsar;
 
+class _BuiltinMapConfig {
+  final String name;
+  final String key;
+  final List<String> floors;
+  final List<String> floorNames;
+
+  const _BuiltinMapConfig({
+    required this.name,
+    required this.key,
+    required this.floors,
+    required this.floorNames,
+  });
+}
+
+const _builtinMapsConfig = [
+  _BuiltinMapConfig(
+    name: 'Mirage',
+    key: 'mirage',
+    floors: ['mirage.png'],
+    floorNames: ['Default'],
+  ),
+  _BuiltinMapConfig(
+    name: 'Inferno',
+    key: 'inferno',
+    floors: ['inferno.png'],
+    floorNames: ['Default'],
+  ),
+  _BuiltinMapConfig(
+    name: 'Dust 2',
+    key: 'dust2',
+    floors: ['dust2.png'],
+    floorNames: ['Default'],
+  ),
+  _BuiltinMapConfig(
+    name: 'Cache',
+    key: 'cache',
+    floors: ['cache.png'],
+    floorNames: ['Default'],
+  ),
+  _BuiltinMapConfig(
+    name: 'Overpass',
+    key: 'overpass',
+    floors: ['overpass.png'],
+    floorNames: ['Default'],
+  ),
+  _BuiltinMapConfig(
+    name: 'Ancient',
+    key: 'ancient',
+    floors: ['ancient.png'],
+    floorNames: ['Default'],
+  ),
+  _BuiltinMapConfig(
+    name: 'Anubis',
+    key: 'anubis',
+    floors: ['anubis.png'],
+    floorNames: ['Default'],
+  ),
+  _BuiltinMapConfig(
+    name: 'Train',
+    key: 'train',
+    floors: ['train.png'],
+    floorNames: ['Default'],
+  ),
+  _BuiltinMapConfig(
+    name: 'Nuke',
+    key: 'nuke',
+    floors: ['nuke_lower.png', 'nuke_upper.png'],
+    floorNames: ['B Site (Lower)', 'A Site (Upper)'],
+  ),
+  _BuiltinMapConfig(
+    name: 'Vertigo',
+    key: 'vertigo',
+    floors: ['vertigo_lower.png', 'vertigo_upper.png'],
+    floorNames: ['Level 50 (Lower)', 'Level 51 (Upper)'],
+  ),
+];
+
 // 悬浮窗控制器
 WindowController? overlayWindowController;
 // 主窗口控制器（用于接收子窗口消息）
@@ -779,96 +856,71 @@ Future<void> _runOverlayWindow(
 
 /// 数据预填充逻辑：支持多楼层
 Future<void> _initMapData(Isar isar) async {
-  // 数据库为空则写入默认数据
-  if (await isar.gameMaps.count() == 0) {
+  final isFirstRun = await isar.gameMaps.count() == 0;
+  if (isFirstRun) {
     debugPrint("检测到首次运行，正在写入地图数据...");
-
-    final mapsConfig = [
-      {
-        "name": "Mirage",
-        "key": "mirage",
-        "floors": ["mirage.png"],
-        "floorNames": ["Default"]
-      },
-      {
-        "name": "Inferno",
-        "key": "inferno",
-        "floors": ["inferno.png"],
-        "floorNames": ["Default"]
-      },
-      {
-        "name": "Dust 2",
-        "key": "dust2",
-        "floors": ["dust2.png"],
-        "floorNames": ["Default"]
-      },
-      {
-        "name": "Overpass",
-        "key": "overpass",
-        "floors": ["overpass.png"],
-        "floorNames": ["Default"]
-      },
-      {
-        "name": "Ancient",
-        "key": "ancient",
-        "floors": ["ancient.png"],
-        "floorNames": ["Default"]
-      },
-      {
-        "name": "Anubis",
-        "key": "anubis",
-        "floors": ["anubis.png"],
-        "floorNames": ["Default"]
-      },
-      {
-        "name": "Train",
-        "key": "train",
-        "floors": ["train.png"],
-        "floorNames": ["Default"]
-      },
-      {
-        "name": "Nuke",
-        "key": "nuke",
-        "floors": ["nuke_lower.png", "nuke_upper.png"],
-        "floorNames": ["B Site (Lower)", "A Site (Upper)"]
-      },
-      {
-        "name": "Vertigo",
-        "key": "vertigo",
-        "floors": ["vertigo_lower.png", "vertigo_upper.png"],
-        "floorNames": ["Level 50 (Lower)", "Level 51 (Upper)"]
-      },
-    ];
-
-    await isar.writeTxn(() async {
-      for (var config in mapsConfig) {
-        final key = config['key'] as String;
-        final map = GameMap(
-          name: config['name'] as String,
-          backgroundPath: 'assets/backgrounds/${key}_bg.png',
-          iconPath: 'assets/icons/${key}_icon.svg',
-        );
-        await isar.gameMaps.put(map);
-
-        final floors = config['floors'] as List<String>;
-        final floorNames = config['floorNames'] as List<String>;
-
-        for (int i = 0; i < floors.length; i++) {
-          final layer = MapLayer(
-            name: floorNames[i],
-            assetPath: "assets/maps/${floors[i]}",
-            sortOrder: i,
-          );
-          await isar.mapLayers.put(layer);
-
-          // 建立关联
-          map.layers.add(layer);
-        }
-        await map.layers.save();
-      }
-    });
-    debugPrint("地图数据写入完成！");
   }
+
+  final addedCount = await _ensureBuiltinMaps(isar);
+
+  if (isFirstRun) {
+    debugPrint("地图数据写入完成！");
+  } else if (addedCount > 0) {
+    debugPrint("已补充官方地图：$addedCount 张");
+  }
+}
+
+Future<int> _ensureBuiltinMaps(Isar isar) async {
+  final existingMaps = await isar.gameMaps.where().findAll();
+  final existingBuiltinKeys =
+      existingMaps.map(_resolveBuiltinMapKey).whereType<String>().toSet();
+  var addedCount = 0;
+
+  await isar.writeTxn(() async {
+    for (final config in _builtinMapsConfig) {
+      if (existingBuiltinKeys.contains(config.key)) continue;
+
+      final map = GameMap(
+        name: config.name,
+        backgroundPath: 'assets/backgrounds/${config.key}_bg.png',
+        iconPath: 'assets/icons/${config.key}_icon.svg',
+      );
+      await isar.gameMaps.put(map);
+
+      for (int i = 0; i < config.floors.length; i++) {
+        final layer = MapLayer(
+          name: config.floorNames[i],
+          assetPath: 'assets/maps/${config.floors[i]}',
+          sortOrder: i,
+        );
+        await isar.mapLayers.put(layer);
+        map.layers.add(layer);
+      }
+      await map.layers.save();
+
+      existingBuiltinKeys.add(config.key);
+      addedCount++;
+    }
+  });
+
+  return addedCount;
+}
+
+String? _resolveBuiltinMapKey(GameMap map) {
+  final normalizedIconPath = map.iconPath.replaceAll('\\', '/').toLowerCase();
+  final normalizedBackgroundPath =
+      map.backgroundPath.replaceAll('\\', '/').toLowerCase();
+
+  for (final config in _builtinMapsConfig) {
+    if (normalizedIconPath == 'assets/icons/${config.key}_icon.svg') {
+      return config.key;
+    }
+    if (normalizedBackgroundPath == 'assets/backgrounds/${config.key}_bg.png') {
+      return config.key;
+    }
+  }
+
+  return null;
 }
 
 /// 主窗口应用

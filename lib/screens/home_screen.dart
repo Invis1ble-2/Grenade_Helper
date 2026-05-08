@@ -540,11 +540,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
+  int _compareHomeMaps(GameMap a, GameMap b) {
+    final aIsCustom = MapManagementService.isCustomMap(a);
+    final bIsCustom = MapManagementService.isCustomMap(b);
+    if (aIsCustom != bIsCustom) {
+      return aIsCustom ? 1 : -1;
+    }
+    return a.id.compareTo(b.id);
+  }
+
   @override
   Widget build(BuildContext context) {
     final isar = ref.watch(isarProvider);
-    final maps = isar.gameMaps.where().findAllSync()
-      ..sort((a, b) => a.id.compareTo(b.id));
+    final maps = isar.gameMaps.where().findAllSync()..sort(_compareHomeMaps);
     final visibleMaps = maps
         .where((map) => !_pendingDeleteMapIds.contains(map.id))
         .toList(growable: false);
