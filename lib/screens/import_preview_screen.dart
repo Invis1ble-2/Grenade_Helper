@@ -5,6 +5,7 @@ import '../models.dart';
 import '../models/tag.dart';
 import '../providers.dart';
 import '../services/data_service.dart';
+import '../widgets/grenade_type_icon.dart';
 import '../services/lan_sync/lan_sync_local_store.dart';
 import '../widgets/map_icon.dart';
 import 'grenade_preview_screen.dart';
@@ -769,10 +770,9 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
-        leading: Text(
-          localGrenade != null ? _getTypeIcon(localGrenade.type) : '🗑️',
-          style: const TextStyle(fontSize: 18),
-        ),
+        leading: localGrenade != null
+            ? GrenadeTypeIcon(type: localGrenade.type, size: 20)
+            : const Icon(Icons.delete_outline, size: 20, color: Colors.grey),
         title: Text(localGrenade?.title ?? item.uniqueId),
         subtitle: Text(
           localGrenade != null
@@ -901,7 +901,6 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
 
   Widget _buildGrenadeItem(GrenadePreviewItem grenade) {
     final isSelected = _selectedIds.contains(grenade.uniqueId);
-    final typeIcon = _getTypeIcon(grenade.type);
     final statusBadge = _getStatusBadge(grenade.status);
 
     return Card(
@@ -922,7 +921,7 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
         ),
         title: Row(
           children: [
-            Text(typeIcon, style: const TextStyle(fontSize: 16)),
+            GrenadeTypeIcon(type: grenade.type, size: 18),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -968,23 +967,6 @@ class _ImportPreviewScreenState extends ConsumerState<ImportPreviewScreen> {
         },
       ),
     );
-  }
-
-  String _getTypeIcon(int type) {
-    switch (type) {
-      case GrenadeType.smoke:
-        return "☁️";
-      case GrenadeType.flash:
-        return "⚡";
-      case GrenadeType.molotov:
-        return "🔥";
-      case GrenadeType.he:
-        return "💣";
-      case GrenadeType.wallbang:
-        return "🧱";
-      default:
-        return "❓";
-    }
   }
 
   Widget _getStatusBadge(ImportStatus status) {

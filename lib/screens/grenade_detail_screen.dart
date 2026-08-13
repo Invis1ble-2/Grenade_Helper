@@ -17,6 +17,7 @@ import 'package:photo_view/photo_view.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:pasteboard/pasteboard.dart';
+import '../widgets/grenade_type_icon.dart';
 
 import '../models.dart';
 import '../providers.dart';
@@ -131,6 +132,25 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget> {
 
 /// 媒体来源
 enum _MediaSource { gallery, clipboard }
+
+class _GrenadeTypeMenuLabel extends StatelessWidget {
+  final int type;
+  final String label;
+
+  const _GrenadeTypeMenuLabel({required this.type, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        GrenadeTypeIcon(type: type, size: 18),
+        const SizedBox(width: 8),
+        Text(label),
+      ],
+    );
+  }
+}
 
 // 主页面
 class GrenadeDetailScreen extends ConsumerStatefulWidget {
@@ -1674,15 +1694,30 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                       dropdownColor: Theme.of(context).colorScheme.surface,
                       items: const [
                         DropdownMenuItem(
-                            value: GrenadeType.smoke, child: Text("☁️ 烟雾")),
+                          value: GrenadeType.smoke,
+                          child: _GrenadeTypeMenuLabel(
+                              type: GrenadeType.smoke, label: '烟雾'),
+                        ),
                         DropdownMenuItem(
-                            value: GrenadeType.flash, child: Text("⚡ 闪光")),
+                          value: GrenadeType.flash,
+                          child: _GrenadeTypeMenuLabel(
+                              type: GrenadeType.flash, label: '闪光'),
+                        ),
                         DropdownMenuItem(
-                            value: GrenadeType.molotov, child: Text("🔥 燃烧")),
+                          value: GrenadeType.molotov,
+                          child: _GrenadeTypeMenuLabel(
+                              type: GrenadeType.molotov, label: '燃烧'),
+                        ),
                         DropdownMenuItem(
-                            value: GrenadeType.he, child: Text("💣 手雷")),
+                          value: GrenadeType.he,
+                          child: _GrenadeTypeMenuLabel(
+                              type: GrenadeType.he, label: '手雷'),
+                        ),
                         DropdownMenuItem(
-                            value: GrenadeType.wallbang, child: Text("🧱 穿点")),
+                          value: GrenadeType.wallbang,
+                          child: _GrenadeTypeMenuLabel(
+                              type: GrenadeType.wallbang, label: '穿点'),
+                        ),
                       ],
                       onChanged: (val) => _updateGrenade(type: val),
                       underline: Container(),

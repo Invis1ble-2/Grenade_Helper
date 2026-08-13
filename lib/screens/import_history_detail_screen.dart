@@ -9,6 +9,7 @@ import '../models.dart';
 import '../providers.dart';
 import '../services/data_service.dart';
 import 'grenade_detail_screen.dart';
+import '../widgets/grenade_type_icon.dart';
 
 /// 导入历史详情页面 - 显示某次导入的所有道具
 class ImportHistoryDetailScreen extends ConsumerStatefulWidget {
@@ -97,23 +98,6 @@ class _ImportHistoryDetailScreenState
   String _formatDate(DateTime date) {
     return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')} '
         '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
-  }
-
-  String _getGrenadeTypeIcon(int type) {
-    switch (type) {
-      case GrenadeType.smoke:
-        return '💨';
-      case GrenadeType.flash:
-        return '💡';
-      case GrenadeType.molotov:
-        return '🔥';
-      case GrenadeType.he:
-        return '💥';
-      case GrenadeType.wallbang:
-        return '🧱';
-      default:
-        return '❓';
-    }
   }
 
   @override
@@ -210,10 +194,8 @@ class _ImportHistoryDetailScreenState
                           return Card(
                             margin: const EdgeInsets.only(bottom: 8),
                             child: ListTile(
-                              leading: Text(
-                                _getGrenadeTypeIcon(grenade.type),
-                                style: const TextStyle(fontSize: 24),
-                              ),
+                              leading:
+                                  GrenadeTypeIcon(type: grenade.type, size: 22),
                               title: Text(grenade.title),
                               subtitle: Text(mapName),
                               trailing: const Icon(Icons.chevron_right),
@@ -241,10 +223,8 @@ class _ImportHistoryDetailScreenState
                           return Card(
                             margin: const EdgeInsets.only(bottom: 8),
                             child: ListTile(
-                              leading: Text(
-                                _getGrenadeTypeIcon(grenade.type),
-                                style: const TextStyle(fontSize: 24),
-                              ),
+                              leading:
+                                  GrenadeTypeIcon(type: grenade.type, size: 22),
                               title: Text(grenade.title),
                               subtitle: Text(
                                   '${grenade.mapName} / ${grenade.layerName}'),

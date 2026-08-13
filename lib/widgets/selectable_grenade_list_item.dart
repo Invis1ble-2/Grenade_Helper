@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models.dart';
+import 'grenade_type_icon.dart';
 
 class SelectableGrenadeListItem extends StatelessWidget {
   final Grenade grenade;
@@ -23,7 +24,6 @@ class SelectableGrenadeListItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final typeIcon = _getTypeIcon(grenade.type);
     grenade.layer.loadSync();
     final layer = grenade.layer.value;
     layer?.map.loadSync();
@@ -56,7 +56,7 @@ class SelectableGrenadeListItem extends StatelessWidget {
                 onChanged: (value) => onChanged(value ?? false),
                 activeColor: accentColor,
               ),
-              Text(typeIcon, style: const TextStyle(fontSize: 24)),
+              GrenadeTypeIcon(type: grenade.type, size: 26),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -125,23 +125,6 @@ class SelectableGrenadeListItem extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  String _getTypeIcon(int type) {
-    switch (type) {
-      case GrenadeType.smoke:
-        return '☁️';
-      case GrenadeType.flash:
-        return '⚡';
-      case GrenadeType.molotov:
-        return '🔥';
-      case GrenadeType.he:
-        return '💣';
-      case GrenadeType.wallbang:
-        return '🧱';
-      default:
-        return '❓';
-    }
   }
 }
 

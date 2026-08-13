@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:isar_community/isar.dart';
 import '../models.dart';
+import '../widgets/grenade_type_icon.dart';
 import '../providers.dart';
 import '../services/data_service.dart';
 import '../widgets/map_icon.dart';
@@ -581,7 +582,6 @@ class _ExportSelectScreenState extends ConsumerState<ExportSelectScreen> {
 
   Widget _buildGrenadeItem(Grenade grenade) {
     final isSelected = _selectedGrenadeIds.contains(grenade.id);
-    final typeIcon = _getTypeIcon(grenade.type);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -601,7 +601,7 @@ class _ExportSelectScreenState extends ConsumerState<ExportSelectScreen> {
         ),
         title: Row(
           children: [
-            Text(typeIcon, style: const TextStyle(fontSize: 16)),
+            GrenadeTypeIcon(type: grenade.type, size: 18),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -765,22 +765,5 @@ class _ExportSelectScreenState extends ConsumerState<ExportSelectScreen> {
         ],
       ],
     );
-  }
-
-  String _getTypeIcon(int type) {
-    switch (type) {
-      case GrenadeType.smoke:
-        return "☁️";
-      case GrenadeType.flash:
-        return "⚡";
-      case GrenadeType.molotov:
-        return "🔥";
-      case GrenadeType.he:
-        return "💣";
-      case GrenadeType.wallbang:
-        return "🧱";
-      default:
-        return "❓";
-    }
   }
 }

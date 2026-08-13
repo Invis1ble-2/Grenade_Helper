@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:isar_community/isar.dart';
 import '../services/settings_service.dart';
@@ -204,7 +205,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Widget _buildDesktopHotkeySection() {
     return _buildSection(
-      title: '🔧 快捷键配置',
+      iconAsset: 'assets/icons/settings_hotkeys.svg',
+      title: '快捷键配置',
       subtitle: '点击可自定义快捷键',
       children: [
         _buildHotkeyTile(HotkeyAction.toggleOverlay, '显示/隐藏悬浮窗'),
@@ -249,7 +251,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Widget _buildDesktopOverlaySection() {
     return _buildSection(
-      title: '🎨 悬浮窗设置',
+      iconAsset: 'assets/icons/settings_overlay.svg',
+      title: '悬浮窗设置',
       children: [
         ListTile(
           title: const Text('透明度'),
@@ -314,7 +317,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Widget _buildGeneralAppearanceSection(int themeMode) {
     return _buildSection(
-      title: _isDesktop ? '⚙️ 通用设置' : '🎨 外观设置',
+      iconAsset: 'assets/icons/settings_general.svg',
+      title: _isDesktop ? '通用设置' : '外观设置',
       children: [
         ListTile(
           title: const Text('主题模式'),
@@ -356,7 +360,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Widget _buildMapDisplaySection() {
     return _buildSection(
-      title: '🗺️ 地图显示',
+      iconAsset: 'assets/icons/settings_map.svg',
+      title: '地图显示',
       children: [
         ListTile(
           title: const Text('连接线颜色'),
@@ -414,7 +419,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Widget _buildMarkerOperationSection() {
     return _buildSection(
-      title: '📍 标点操作',
+      iconAsset: 'assets/icons/settings_marker.svg',
+      title: '标点操作',
       children: [
         ListTile(
           title: const Text('新增方式'),
@@ -525,7 +531,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Widget _buildDesktopDataStorageSection() {
     return _buildSection(
-      title: '💾 数据存储',
+      iconAsset: 'assets/icons/settings_storage.svg',
+      title: '数据存储',
       subtitle: '更改数据目录需要重启应用',
       children: [
         ListTile(
@@ -592,7 +599,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Widget _buildDataManagementSection() {
     return _buildSection(
-      title: '🗄️ 数据管理',
+      iconAsset: 'assets/icons/settings_data.svg',
+      title: '数据管理',
       children: [
         ListTile(
           leading: const Icon(Icons.playlist_add_check, color: Colors.teal),
@@ -640,7 +648,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Widget _buildLanSyncDebugSection() {
     return _buildSection(
-      title: '🧪 调试信息',
+      iconAsset: 'assets/icons/settings_debug.svg',
+      title: '调试信息',
       subtitle: '仅 Debug 构建显示',
       children: [
         ListTile(
@@ -1419,6 +1428,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Widget _buildSection({
+    required String iconAsset,
     required String title,
     String? subtitle,
     required List<Widget> children,
@@ -1429,27 +1439,54 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
+                Container(
+                  width: 34,
+                  height: 34,
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .primary
+                        .withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
                   ),
-                ),
-                if (subtitle != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      subtitle,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[500],
-                      ),
+                  child: SvgPicture.asset(
+                    iconAsset,
+                    colorFilter: ColorFilter.mode(
+                      Theme.of(context).colorScheme.primary,
+                      BlendMode.srcIn,
                     ),
                   ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      if (subtitle != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 3),
+                          child: Text(
+                            subtitle,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),

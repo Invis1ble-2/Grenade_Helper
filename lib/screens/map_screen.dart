@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:photo_view/photo_view.dart';
@@ -16,6 +17,8 @@ import '../main.dart';
 import '../spawn_point_data.dart';
 import '../widgets/joystick_widget.dart';
 import '../widgets/path_image_provider.dart';
+import '../widgets/app_svg_icon.dart';
+import '../widgets/grenade_type_icon.dart';
 import '../services/data_service.dart';
 import '../services/favorite_folder_service.dart';
 import '../services/tag_service.dart';
@@ -299,6 +302,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   List<GrenadeCluster>? _frozenThrowBatchClusters;
   List<GrenadeCluster>? _frozenImpactBatchClusters;
   final ValueNotifier<int> _batchedDragVisualTick = ValueNotifier<int>(0);
+  final Map<int, PictureInfo> _grenadeTypePictures = {};
+  bool _isLoadingGrenadeTypePictures = false;
 
   @override
   void initState() {
@@ -321,6 +326,52 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     Future.microtask(_initializeSystemTagsForCurrentMap);
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _loadGrenadeTypePictures();
+  }
+
+  Future<void> _loadGrenadeTypePictures() async {
+    if (_isLoadingGrenadeTypePictures || _grenadeTypePictures.isNotEmpty) {
+      return;
+    }
+    _isLoadingGrenadeTypePictures = true;
+    const types = [
+      GrenadeType.smoke,
+      GrenadeType.flash,
+      GrenadeType.molotov,
+      GrenadeType.he,
+      GrenadeType.wallbang,
+    ];
+    final loaded = <int, PictureInfo>{};
+    try {
+      for (final type in types) {
+        loaded[type] = await vg.loadPicture(
+          SvgAssetLoader(
+            GrenadeTypeIcon.assetForType(type),
+            colorMapper: _SolidSvgColorMapper(_getTypeColor(type)),
+          ),
+          null,
+        );
+      }
+      if (!mounted) {
+        for (final info in loaded.values) {
+          info.picture.dispose();
+        }
+        return;
+      }
+      setState(() => _grenadeTypePictures.addAll(loaded));
+    } catch (error, stackTrace) {
+      for (final info in loaded.values) {
+        info.picture.dispose();
+      }
+      debugPrint('Failed to preload grenade type SVGs: $error\n$stackTrace');
+    } finally {
+      _isLoadingGrenadeTypePictures = false;
+    }
+  }
+
   Future<void> _initializeSystemTagsForCurrentMap() async {
     final isar = ref.read(isarProvider);
     final tagService = TagService(isar);
@@ -337,6 +388,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     _allMapListSearchController.dispose();
     _batchedDragVisualTick.dispose();
     _photoViewController.dispose();
+    for (final info in _grenadeTypePictures.values) {
+      info.picture.dispose();
+    }
     // 清除悬浮窗
     globalOverlayState?.clearMap();
     // 通知清除
@@ -813,7 +867,18 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('💡 $detailText'),
+        content: Row(
+          children: [
+            const AppSvgIcon(
+              asset: 'assets/icons/ui_hint.svg',
+              size: 20,
+              color: Colors.white,
+              semanticsLabel: '提示',
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: Text(detailText)),
+          ],
+        ),
         backgroundColor: Colors.blueAccent,
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 2),
@@ -1533,8 +1598,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                       border: Border.all(
                                           color: typeColor, width: 1.8),
                                     ),
-                                    child: Icon(
-                                      _getTypeIcon(g.type),
+                                    child: GrenadeTypeIcon(
+                                      type: g.type,
                                       size: 14,
                                       color: typeColor,
                                     ),
@@ -2196,23 +2261,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     }
   }
 
-  IconData _getTypeIcon(int type) {
-    switch (type) {
-      case GrenadeType.smoke:
-        return Icons.cloud;
-      case GrenadeType.flash:
-        return Icons.flash_on;
-      case GrenadeType.molotov:
-        return Icons.local_fire_department;
-      case GrenadeType.he:
-        return Icons.trip_origin;
-      case GrenadeType.wallbang:
-        return Icons.apps; // 穿点使用网格图标表示墙体
-      default:
-        return Icons.circle;
-    }
-  }
-
   Color _getTypeColor(int type) {
     switch (type) {
       case GrenadeType.smoke:
@@ -2299,8 +2347,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     );
   }
 
-  Widget _buildTypeFilterBtn(Set<int> selectedTypes, int type, String label,
-      IconData icon, Color activeColor) {
+  Widget _buildTypeFilterBtn(
+      Set<int> selectedTypes, int type, String label, Color activeColor) {
     final isSelected = selectedTypes.contains(type);
     final unselectedColor = Theme.of(context).colorScheme.onSurface;
     return InkWell(
@@ -2325,8 +2373,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                     : unselectedColor.withValues(alpha: 0.4)),
             borderRadius: BorderRadius.circular(8)),
         child: Row(children: [
-          Icon(icon,
-              size: 16, color: isSelected ? activeColor : unselectedColor),
+          GrenadeTypeIcon(
+            type: type,
+            size: 16,
+            color: isSelected ? activeColor : unselectedColor,
+          ),
           const SizedBox(width: 4),
           Text(label,
               style: TextStyle(
@@ -2540,7 +2591,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     bool denseStyle = false,
   }) {
     final color = _getTeamColor(cluster.primaryTeam);
-    final icon = _getTypeIcon(cluster.primaryType);
     final count = cluster.grenades.length;
     final showCountText = count > 1;
 
@@ -2635,11 +2685,17 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                   blurRadius: 4,
                                   spreadRadius: 1)
                           ]),
-                child: Icon(cluster.hasMultipleTypes ? Icons.layers : icon,
-                    size: 10,
-                    color: cluster.hasMultipleTypes
-                        ? Colors.purpleAccent.withValues(alpha: 0.9)
-                        : _getTypeColor(cluster.primaryType))), // 图标使用道具类型颜色
+                child: cluster.hasMultipleTypes
+                    ? Icon(
+                        Icons.layers,
+                        size: 10,
+                        color: Colors.purpleAccent.withValues(alpha: 0.9),
+                      )
+                    : GrenadeTypeIcon(
+                        type: cluster.primaryType,
+                        size: 11,
+                        color: _getTypeColor(cluster.primaryType),
+                      )),
             if (showCountText)
               Positioned(
                   right: -3,
@@ -2679,8 +2735,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         double offsetX,
         double offsetY
       }) imageBounds) {
-    final icon = _getTypeIcon(grenade.type);
-
     const double baseHalfSize = 10.0;
     final left =
         imageBounds.offsetX + grenade.xRatio * imageBounds.width - baseHalfSize;
@@ -2712,7 +2766,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               ),
             ],
           ),
-          child: Icon(icon, size: 10, color: _getTypeColor(grenade.type)),
+          child: GrenadeTypeIcon(
+            type: grenade.type,
+            size: 11,
+            color: _getTypeColor(grenade.type),
+          ),
         ),
       ),
     );
@@ -2729,7 +2787,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         double offsetX,
         double offsetY
       }) imageBounds) {
-    final icon = _getTypeIcon(grenade.type);
     final typeColor = _getTypeColor(grenade.type);
 
     const double baseHalfSize = 12.0;
@@ -2768,7 +2825,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               ),
             ],
           ),
-          child: Icon(icon, size: 12, color: typeColor),
+          child: GrenadeTypeIcon(
+            type: grenade.type,
+            size: 13,
+            color: typeColor,
+          ),
         ),
       ),
     );
@@ -2786,7 +2847,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         double offsetY
       }) imageBounds) {
     final color = _getTeamColor(cluster.primaryTeam);
-    final icon = _getTypeIcon(cluster.primaryType);
     final count = cluster.grenades.length;
     final typeColor = cluster.hasMultipleTypes
         ? Colors.purpleAccent
@@ -2835,11 +2895,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   ),
               ],
             ),
-            child: Icon(
-              cluster.hasMultipleTypes ? Icons.layers : icon,
-              size: 14,
-              color: typeColor,
-            ),
+            child: cluster.hasMultipleTypes
+                ? Icon(Icons.layers, size: 14, color: typeColor)
+                : GrenadeTypeIcon(
+                    type: cluster.primaryType,
+                    size: 15,
+                    color: typeColor,
+                  ),
           ),
           if (count > 1)
             Positioned(
@@ -3121,10 +3183,24 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   color: Colors.grey.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Text(
-                  "💡 开启编辑模式可在此位置创建道具",
-                  style: TextStyle(color: Colors.grey, fontSize: 13),
-                  textAlign: TextAlign.center,
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    AppSvgIcon(
+                      asset: 'assets/icons/ui_hint.svg',
+                      size: 17,
+                      color: Colors.grey,
+                      semanticsLabel: '提示',
+                    ),
+                    SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        '开启编辑模式可在此位置创建道具',
+                        style: TextStyle(color: Colors.grey, fontSize: 13),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             const SizedBox(height: 10),
@@ -3423,8 +3499,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                               final layerName = g.layer.value?.name ?? '未知楼层';
                               return ListTile(
                                 dense: true,
-                                leading: Icon(
-                                  _getTypeIcon(g.type),
+                                leading: GrenadeTypeIcon(
+                                  type: g.type,
                                   color: _getTypeColor(g.type),
                                   size: 18,
                                 ),
@@ -4530,6 +4606,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                                             textDirection:
                                                                 Directionality
                                                                     .of(context),
+                                                            typePictures: Map<
+                                                                    int,
+                                                                    PictureInfo>.unmodifiable(
+                                                                _grenadeTypePictures),
                                                           ),
                                                         ),
                                                       ),
@@ -4661,6 +4741,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                                             textDirection:
                                                                 Directionality
                                                                     .of(context),
+                                                            typePictures: Map<
+                                                                    int,
+                                                                    PictureInfo>.unmodifiable(
+                                                                _grenadeTypePictures),
                                                           ),
                                                         ),
                                                       ),
@@ -4978,31 +5062,23 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                             selectedTypes,
                                             GrenadeType.smoke,
                                             "烟",
-                                            Icons.cloud,
                                             Colors.grey),
                                         _buildTypeFilterBtn(
                                             selectedTypes,
                                             GrenadeType.flash,
                                             "闪",
-                                            Icons.flash_on,
                                             Colors.yellow),
                                         _buildTypeFilterBtn(
                                             selectedTypes,
                                             GrenadeType.molotov,
                                             "火",
-                                            Icons.local_fire_department,
                                             Colors.red),
-                                        _buildTypeFilterBtn(
-                                            selectedTypes,
-                                            GrenadeType.he,
-                                            "雷",
-                                            Icons.trip_origin,
-                                            Colors.green),
+                                        _buildTypeFilterBtn(selectedTypes,
+                                            GrenadeType.he, "雷", Colors.green),
                                         _buildTypeFilterBtn(
                                             selectedTypes,
                                             GrenadeType.wallbang,
                                             "穿",
-                                            Icons.apps,
                                             Colors.cyan),
                                       ])),
                               const SizedBox(height: 10),
@@ -5547,7 +5623,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                   typeColor = Colors.white;
                               }
 
-                              final icon = _getTypeIcon(g.type);
                               final isSelected = selectedIds.contains(g.id);
 
                               // 左滑删除功能（编辑模式下）
@@ -5583,8 +5658,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                         border: Border.all(
                                             color: typeColor, width: 2),
                                       ),
-                                      child: Icon(icon,
-                                          size: 14, color: typeColor),
+                                      child: GrenadeTypeIcon(
+                                        type: g.type,
+                                        size: 15,
+                                        color: typeColor,
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -5909,7 +5987,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   Widget _buildTypeChip(
       BuildContext context, int type, int selectedType, Function(int) onTap) {
     final isSelected = type == selectedType;
-    final icon = _getTypeIcon(type);
     final name = _getTypeName(type);
     Color typeColor;
     switch (type) {
@@ -5946,7 +6023,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 18, color: typeColor),
+            GrenadeTypeIcon(type: type, size: 19, color: typeColor),
             const SizedBox(width: 6),
             Text(name,
                 style: TextStyle(
@@ -6071,7 +6148,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               ),
             // 自定义分组列表
             ...customGroups.map((group) {
-              final icon = _getTypeIcon(group.type);
               Color typeColor;
               switch (group.type) {
                 case GrenadeType.smoke:
@@ -6103,7 +6179,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                     shape: BoxShape.circle,
                     border: Border.all(color: Colors.purpleAccent, width: 2),
                   ),
-                  child: Icon(icon, size: 20, color: typeColor),
+                  child: GrenadeTypeIcon(
+                    type: group.type,
+                    size: 21,
+                    color: typeColor,
+                  ),
                 ),
                 title: Text(group.name,
                     style: const TextStyle(
@@ -6294,8 +6374,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                             shape: BoxShape.circle,
                             border: Border.all(color: typeColor, width: 1.5),
                           ),
-                          child: Icon(_getTypeIcon(g.type),
-                              size: 14, color: typeColor),
+                          child: GrenadeTypeIcon(
+                            type: g.type,
+                            size: 15,
+                            color: typeColor,
+                          ),
                         ),
                         dense: true,
                       );
@@ -6425,6 +6508,7 @@ class _ImpactClusterBatchPainter extends CustomPainter {
   final double markerScale;
   final bool denseStyle;
   final TextDirection textDirection;
+  final Map<int, PictureInfo> typePictures;
 
   _ImpactClusterBatchPainter({
     required this.clusters,
@@ -6432,6 +6516,7 @@ class _ImpactClusterBatchPainter extends CustomPainter {
     required this.markerScale,
     required this.denseStyle,
     required this.textDirection,
+    required this.typePictures,
   });
 
   @override
@@ -6469,13 +6554,18 @@ class _ImpactClusterBatchPainter extends CustomPainter {
     canvas.drawCircle(Offset.zero, baseRadius, fillPaint);
     canvas.drawCircle(Offset.zero, baseRadius, borderPaint);
 
-    _drawIconGlyph(
-      canvas,
-      Icons.close,
-      impactColor,
-      center: Offset.zero,
-      size: 12,
-    );
+    final typePicture = typePictures[cluster.primaryType];
+    if (typePicture != null && cluster.grenades.length == 1) {
+      _drawTypePicture(canvas, typePicture, center: Offset.zero, size: 11);
+    } else {
+      _drawIconGlyph(
+        canvas,
+        Icons.close,
+        impactColor,
+        center: Offset.zero,
+        size: 12,
+      );
+    }
   }
 
   void _drawIconGlyph(
@@ -6505,6 +6595,25 @@ class _ImpactClusterBatchPainter extends CustomPainter {
     );
   }
 
+  void _drawTypePicture(
+    Canvas canvas,
+    PictureInfo pictureInfo, {
+    required Offset center,
+    required double size,
+  }) {
+    final sourceSize = pictureInfo.size;
+    if (sourceSize.isEmpty) return;
+    final scale = size / sourceSize.longestSide;
+    final drawWidth = sourceSize.width * scale;
+    final drawHeight = sourceSize.height * scale;
+
+    canvas.save();
+    canvas.translate(center.dx - drawWidth / 2, center.dy - drawHeight / 2);
+    canvas.scale(scale, scale);
+    canvas.drawPicture(pictureInfo.picture);
+    canvas.restore();
+  }
+
   Color _typeColor(int type) {
     switch (type) {
       case GrenadeType.smoke:
@@ -6528,10 +6637,38 @@ class _ImpactClusterBatchPainter extends CustomPainter {
         oldDelegate.markerScale != markerScale ||
         oldDelegate.denseStyle != denseStyle ||
         oldDelegate.textDirection != textDirection ||
+        !_sameTypePictures(oldDelegate.typePictures, typePictures) ||
         oldDelegate.imageBounds.width != imageBounds.width ||
         oldDelegate.imageBounds.height != imageBounds.height ||
         oldDelegate.imageBounds.offsetX != imageBounds.offsetX ||
         oldDelegate.imageBounds.offsetY != imageBounds.offsetY;
+  }
+
+  bool _sameTypePictures(
+    Map<int, PictureInfo> left,
+    Map<int, PictureInfo> right,
+  ) {
+    if (left.length != right.length) return false;
+    for (final entry in left.entries) {
+      if (!identical(entry.value, right[entry.key])) return false;
+    }
+    return true;
+  }
+}
+
+class _SolidSvgColorMapper extends ColorMapper {
+  final Color color;
+
+  const _SolidSvgColorMapper(this.color);
+
+  @override
+  Color substitute(
+    String? id,
+    String elementName,
+    String attributeName,
+    Color sourceColor,
+  ) {
+    return color;
   }
 }
 
@@ -6546,6 +6683,7 @@ class _ClusterBatchPainter extends CustomPainter {
   final double markerScale;
   final bool denseStyle;
   final TextDirection textDirection;
+  final Map<int, PictureInfo> typePictures;
 
   _ClusterBatchPainter({
     required this.clusters,
@@ -6553,6 +6691,7 @@ class _ClusterBatchPainter extends CustomPainter {
     required this.markerScale,
     required this.denseStyle,
     required this.textDirection,
+    required this.typePictures,
   });
 
   @override
@@ -6576,9 +6715,6 @@ class _ClusterBatchPainter extends CustomPainter {
   void _paintCluster(Canvas canvas, GrenadeCluster cluster) {
     final borderColor = _teamColor(cluster.primaryTeam).withValues(alpha: 0.5);
     final count = cluster.grenades.length;
-    final iconData = cluster.hasMultipleTypes
-        ? Icons.layers
-        : _typeIcon(cluster.primaryType);
     final iconColor = cluster.hasMultipleTypes
         ? Colors.purpleAccent.withValues(alpha: 0.9)
         : _typeColor(cluster.primaryType);
@@ -6595,13 +6731,20 @@ class _ClusterBatchPainter extends CustomPainter {
     canvas.drawCircle(Offset.zero, baseRadius, fillPaint);
     canvas.drawCircle(Offset.zero, baseRadius, borderPaint);
 
-    _drawIconGlyph(
-      canvas,
-      iconData,
-      iconColor,
-      center: Offset.zero,
-      size: 10,
-    );
+    final typePicture = typePictures[cluster.primaryType];
+    if (!cluster.hasMultipleTypes && typePicture != null) {
+      _drawTypePicture(canvas, typePicture, center: Offset.zero, size: 11);
+    } else {
+      _drawIconGlyph(
+        canvas,
+        cluster.hasMultipleTypes
+            ? Icons.layers
+            : _typeIcon(cluster.primaryType),
+        iconColor,
+        center: Offset.zero,
+        size: 10,
+      );
+    }
 
     if (count > 1) {
       final badgeCenter = const Offset(8, -8);
@@ -6664,6 +6807,28 @@ class _ClusterBatchPainter extends CustomPainter {
       canvas,
       Offset(center.dx - painter.width / 2, center.dy - painter.height / 2),
     );
+  }
+
+  void _drawTypePicture(
+    Canvas canvas,
+    PictureInfo pictureInfo, {
+    required Offset center,
+    required double size,
+  }) {
+    final sourceSize = pictureInfo.size;
+    if (sourceSize.isEmpty) return;
+    final scale = size / sourceSize.longestSide;
+    final drawWidth = sourceSize.width * scale;
+    final drawHeight = sourceSize.height * scale;
+
+    canvas.save();
+    canvas.translate(
+      center.dx - drawWidth / 2,
+      center.dy - drawHeight / 2,
+    );
+    canvas.scale(scale, scale);
+    canvas.drawPicture(pictureInfo.picture);
+    canvas.restore();
   }
 
   void _drawText(
@@ -6735,10 +6900,22 @@ class _ClusterBatchPainter extends CustomPainter {
         oldDelegate.markerScale != markerScale ||
         oldDelegate.denseStyle != denseStyle ||
         oldDelegate.textDirection != textDirection ||
+        !_sameTypePictures(oldDelegate.typePictures, typePictures) ||
         oldDelegate.imageBounds.width != imageBounds.width ||
         oldDelegate.imageBounds.height != imageBounds.height ||
         oldDelegate.imageBounds.offsetX != imageBounds.offsetX ||
         oldDelegate.imageBounds.offsetY != imageBounds.offsetY;
+  }
+
+  bool _sameTypePictures(
+    Map<int, PictureInfo> left,
+    Map<int, PictureInfo> right,
+  ) {
+    if (left.length != right.length) return false;
+    for (final entry in left.entries) {
+      if (!identical(entry.value, right[entry.key])) return false;
+    }
+    return true;
   }
 }
 

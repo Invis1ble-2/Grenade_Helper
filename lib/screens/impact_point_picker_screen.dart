@@ -7,6 +7,7 @@ import 'package:photo_view/photo_view.dart';
 import '../models.dart';
 import '../providers.dart';
 import '../widgets/path_image_provider.dart';
+import '../widgets/app_svg_icon.dart';
 
 /// 爆点选择/绘制页面
 class ImpactPointPickerScreen extends ConsumerStatefulWidget {
@@ -597,14 +598,30 @@ class _ImpactPointPickerScreenState
             ],
           ),
           const SizedBox(height: 8),
-          Text(
-            _selectedX != null ? '已选择爆点，点击确认保存' : '💡 点击地图任意位置设置爆点',
-            style: TextStyle(
-              color: _selectedX != null
-                  ? theme.colorScheme.primary
-                  : colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
-              fontSize: 13,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (_selectedX == null) ...[
+                AppSvgIcon(
+                  asset: 'assets/icons/ui_hint.svg',
+                  size: 17,
+                  color: colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
+                  semanticsLabel: '提示',
+                ),
+                const SizedBox(width: 7),
+              ],
+              Flexible(
+                child: Text(
+                  _selectedX != null ? '已选择爆点，点击确认保存' : '点击地图任意位置设置爆点',
+                  style: TextStyle(
+                    color: _selectedX != null
+                        ? theme.colorScheme.primary
+                        : colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

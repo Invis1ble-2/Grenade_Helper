@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../models.dart';
 import '../services/data_service.dart';
+import '../widgets/grenade_type_icon.dart';
 
 /// 道具预览
 class GrenadePreviewScreen extends StatelessWidget {
@@ -59,7 +60,6 @@ class GrenadePreviewScreen extends StatelessWidget {
   }
 
   Widget _buildInfoBar(BuildContext context) {
-    final typeIcon = _getTypeIcon(grenade.type);
     final typeName = _getTypeName(grenade.type);
 
     return Container(
@@ -67,7 +67,7 @@ class GrenadePreviewScreen extends StatelessWidget {
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: Row(
         children: [
-          Text(typeIcon, style: const TextStyle(fontSize: 24)),
+          GrenadeTypeIcon(type: grenade.type, size: 26),
           const SizedBox(width: 8),
           Text(typeName, style: const TextStyle(fontWeight: FontWeight.bold)),
           const Spacer(),
@@ -371,23 +371,6 @@ class GrenadePreviewScreen extends StatelessWidget {
       ),
       child: Text(text, style: TextStyle(fontSize: 12, color: color)),
     );
-  }
-
-  String _getTypeIcon(int type) {
-    switch (type) {
-      case GrenadeType.smoke:
-        return "☁️";
-      case GrenadeType.flash:
-        return "⚡";
-      case GrenadeType.molotov:
-        return "🔥";
-      case GrenadeType.he:
-        return "💣";
-      case GrenadeType.wallbang:
-        return "🧱";
-      default:
-        return "❓";
-    }
   }
 
   String _getTypeName(int type) {
