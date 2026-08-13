@@ -1087,9 +1087,8 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
           exposure: '曝光',
           hue: '色调',
           temperature: '色温',
-          sharpness: '锐度',
           fade: '褪色',
-          luminance: '明度',
+          tint: '色调',
         ),
         emojiEditor: I18nEmojiEditor(
           bottomNavigationBarText: '表情',
@@ -1539,9 +1538,8 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                 exposure: '曝光',
                 hue: '色调',
                 temperature: '色温',
-                sharpness: '锐度',
                 fade: '褪色',
-                luminance: '明度',
+                tint: '色调',
               ),
               emojiEditor: I18nEmojiEditor(
                 bottomNavigationBarText: '表情',
