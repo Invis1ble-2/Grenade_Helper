@@ -5030,7 +5030,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                         behavior: SnackBarBehavior.floating,
                       ));
                     },
-                    child: Icon(
+                    child: FaIcon(
                       _isImpactMode
                           ? FontAwesomeIcons.crosshairs
                           : FontAwesomeIcons.locationDot,

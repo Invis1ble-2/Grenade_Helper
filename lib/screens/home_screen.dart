@@ -206,7 +206,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             Future<void> pickRadarImage() async {
-              final result = await FilePicker.platform.pickFiles(
+              final result = await FilePicker.pickFiles(
                 type: FileType.image,
                 allowMultiple: false,
                 dialogTitle: '选择雷达图',
@@ -219,7 +219,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             }
 
             Future<void> pickOptionalIcon() async {
-              final result = await FilePicker.platform.pickFiles(
+              final result = await FilePicker.pickFiles(
                 type: FileType.custom,
                 allowedExtensions: const [
                   'png',
@@ -241,7 +241,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             }
 
             Future<void> pickOptionalBackgroundImage() async {
-              final result = await FilePicker.platform.pickFiles(
+              final result = await FilePicker.pickFiles(
                 type: FileType.image,
                 allowMultiple: false,
                 dialogTitle: '选择地图背景图（可选）',

@@ -1251,7 +1251,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   /// 更改目录
   Future<void> _changeDataDirectory() async {
-    final result = await FilePicker.platform.getDirectoryPath(
+    final result = await FilePicker.getDirectoryPath(
       dialogTitle: '选择数据存储目录',
     );
     if (result == null) return;
