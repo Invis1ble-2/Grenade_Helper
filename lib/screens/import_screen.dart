@@ -59,7 +59,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen>
     if (_dataService == null) return;
 
     // 选择文件
-    final result = await FilePicker.pickFiles(
+    final result = await FilePicker.platform.pickFiles(
       dialogTitle: '选择要导入的 .cs2pkg 文件',
     );
     if (result == null) return;
