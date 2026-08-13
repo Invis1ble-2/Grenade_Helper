@@ -540,12 +540,12 @@ class _ExportSelectScreenState extends ConsumerState<ExportSelectScreen> {
 
   Widget _buildTypeFilter() {
     const types = [
-      (null, "全部", Icons.apps),
-      (GrenadeType.smoke, "烟雾", Icons.cloud),
-      (GrenadeType.flash, "闪光", Icons.flash_on),
-      (GrenadeType.molotov, "燃烧", Icons.local_fire_department),
-      (GrenadeType.he, "手雷", Icons.trip_origin),
-      (GrenadeType.wallbang, "穿点", Icons.grid_4x4),
+      (null, "全部"),
+      (GrenadeType.smoke, "烟雾"),
+      (GrenadeType.flash, "闪光"),
+      (GrenadeType.molotov, "燃烧"),
+      (GrenadeType.he, "手雷"),
+      (GrenadeType.wallbang, "穿点"),
     ];
 
     return Container(
@@ -561,9 +561,11 @@ class _ExportSelectScreenState extends ConsumerState<ExportSelectScreen> {
                 label: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(t.$3,
-                        size: 16,
-                        color: isSelected ? Colors.white : Colors.grey),
+                    GrenadeFilterIcon(
+                      type: t.$1,
+                      size: 16,
+                      color: isSelected ? Colors.white : Colors.grey,
+                    ),
                     const SizedBox(width: 4),
                     Text(t.$2),
                   ],

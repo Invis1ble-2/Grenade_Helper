@@ -6737,9 +6737,7 @@ class _ClusterBatchPainter extends CustomPainter {
     } else {
       _drawIconGlyph(
         canvas,
-        cluster.hasMultipleTypes
-            ? Icons.layers
-            : _typeIcon(cluster.primaryType),
+        Icons.layers,
         iconColor,
         center: Offset.zero,
         size: 10,
@@ -6874,23 +6872,6 @@ class _ClusterBatchPainter extends CustomPainter {
         return Colors.cyan;
       default:
         return Colors.white;
-    }
-  }
-
-  IconData _typeIcon(int type) {
-    switch (type) {
-      case GrenadeType.smoke:
-        return Icons.cloud;
-      case GrenadeType.flash:
-        return Icons.flash_on;
-      case GrenadeType.molotov:
-        return Icons.local_fire_department;
-      case GrenadeType.he:
-        return Icons.trip_origin;
-      case GrenadeType.wallbang:
-        return Icons.apps;
-      default:
-        return Icons.circle;
     }
   }
 

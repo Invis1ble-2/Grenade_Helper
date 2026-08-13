@@ -79,3 +79,34 @@ class GrenadeTypeIcon extends StatelessWidget {
     }
   }
 }
+
+/// 用于“全部 + 道具类型”筛选器的统一 SVG 图标。
+class GrenadeFilterIcon extends StatelessWidget {
+  final int? type;
+  final double size;
+  final Color? color;
+
+  const GrenadeFilterIcon({
+    super.key,
+    required this.type,
+    this.size = 18,
+    this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (type != null) {
+      return GrenadeTypeIcon(type: type!, size: size, color: color);
+    }
+    return SvgPicture.asset(
+      'assets/icons/grenade_all.svg',
+      width: size,
+      height: size,
+      colorFilter: ColorFilter.mode(
+        color ?? IconTheme.of(context).color ?? Colors.grey,
+        BlendMode.srcIn,
+      ),
+      semanticsLabel: '全部道具类型',
+    );
+  }
+}

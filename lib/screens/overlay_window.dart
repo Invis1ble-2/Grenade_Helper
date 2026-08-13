@@ -8,6 +8,7 @@ import '../models.dart';
 import '../services/settings_service.dart';
 import '../services/overlay_state_service.dart';
 import '../widgets/radar_mini_map.dart';
+import '../widgets/grenade_type_icon.dart';
 import 'grenade_detail_screen.dart'
     show VideoPlayerWidget, VideoPlayerWidgetState;
 
@@ -239,13 +240,11 @@ class OverlayWindowState extends State<OverlayWindow> {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _buildFilterIcon(GrenadeType.smoke, Icons.cloud, Colors.grey, state),
-        _buildFilterIcon(
-            GrenadeType.flash, Icons.flash_on, Colors.yellow, state),
-        _buildFilterIcon(GrenadeType.molotov, Icons.local_fire_department,
-            Colors.red, state),
-        _buildFilterIcon(GrenadeType.he, Icons.circle, Colors.green, state),
-        _buildFilterIcon(GrenadeType.wallbang, Icons.apps, Colors.cyan, state),
+        _buildFilterIcon(GrenadeType.smoke, Colors.grey, state),
+        _buildFilterIcon(GrenadeType.flash, Colors.yellow, state),
+        _buildFilterIcon(GrenadeType.molotov, Colors.red, state),
+        _buildFilterIcon(GrenadeType.he, Colors.green, state),
+        _buildFilterIcon(GrenadeType.wallbang, Colors.cyan, state),
       ],
     );
   }
@@ -277,15 +276,14 @@ class OverlayWindowState extends State<OverlayWindow> {
     );
   }
 
-  Widget _buildFilterIcon(
-      int type, IconData icon, Color color, OverlayStateService state) {
+  Widget _buildFilterIcon(int type, Color color, OverlayStateService state) {
     final isActive = state.activeFilters.contains(type);
     return GestureDetector(
       onTap: () => state.toggleFilter(type),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 3),
-        child: Icon(
-          icon,
+        child: GrenadeTypeIcon(
+          type: type,
           size: 18,
           color: isActive ? color : Colors.grey.withValues(alpha: 0.3),
         ),

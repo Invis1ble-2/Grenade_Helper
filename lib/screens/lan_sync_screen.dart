@@ -16,6 +16,7 @@ import '../services/lan_sync/lan_sync_local_store.dart';
 import '../services/lan_sync/lan_sync_receive_controller.dart';
 import '../services/lan_sync/lan_sync_transfer_client.dart';
 import '../widgets/map_icon.dart';
+import '../widgets/grenade_type_icon.dart';
 import '../widgets/selectable_grenade_list_item.dart';
 import 'grenade_detail_screen.dart';
 import 'import_preview_screen.dart';
@@ -2548,12 +2549,12 @@ class _LanSyncGrenadePickerScreenState
 
   Widget _buildTypeFilter() {
     const types = [
-      (null, '全部', Icons.apps),
-      (GrenadeType.smoke, '烟雾', Icons.cloud_outlined),
-      (GrenadeType.flash, '闪光', Icons.flash_on_outlined),
-      (GrenadeType.molotov, '燃烧', Icons.local_fire_department_outlined),
-      (GrenadeType.he, '手雷', Icons.trip_origin),
-      (GrenadeType.wallbang, '穿点', Icons.grid_4x4),
+      (null, '全部'),
+      (GrenadeType.smoke, '烟雾'),
+      (GrenadeType.flash, '闪光'),
+      (GrenadeType.molotov, '燃烧'),
+      (GrenadeType.he, '手雷'),
+      (GrenadeType.wallbang, '穿点'),
     ];
 
     return Container(
@@ -2572,8 +2573,8 @@ class _LanSyncGrenadePickerScreenState
                 label: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
-                      item.$3,
+                    GrenadeFilterIcon(
+                      type: item.$1,
                       size: 16,
                       color: isSelected ? Colors.white : Colors.grey,
                     ),
