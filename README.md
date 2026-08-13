@@ -9,68 +9,74 @@
 ![CS2](https://img.shields.io/badge/Game-CS2-orange)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-**Grenade Helper** 是一款专为 **Counter-Strike 2** 玩家打造的现代化道具教学与辅助工具，亦或者也可以叫做道具便签。这不仅仅是教学工具，更是你的实战好帮手。
-不用再在实战中慌乱的查找视频，不需要再进行繁琐无聊的跑图训练，只需要动动手指记录你在视频平台和其他地方看到的道具，就能实时调出，直接投掷！
-核心亮点：**PC端独家 Overlay (画中画) 模式**，让你在游戏中一键呼出，无需切屏，即学即用！
+**Grenade Helper** 是一款为 **Counter-Strike 2** 玩家设计的道具教学与辅助工具，也可以理解为一个道具便签。
+不用在实战中慌乱地找视频，也不用反复跑图练习，把你看到的道具位置记录下来，随时调出直接投掷。
 
 ---
 
-## ✨ 核心功能 (Features)
+## 功能
 
-*   🎮 **游戏内悬浮窗 (Overlay)**: 按下 `Alt + G` (默认) 即可呼出/隐藏。在死后或冻结时间快速查看点位，无需 Alt-Tab 切屏，不错过任何战机。
-*   🗺️ **全地图覆盖**: 支持 Dust2, Mirage, Inferno, Nuke, Overpass, Ancient, Vertigo, Anubis 等主流竞技地图。
-*   🎯 **全道具类型覆盖**: 烟雾弹 (Smoke)、燃烧瓶 (Molotov)、闪光弹 (Flash) 和手雷 (HE) 都包含在内。
-*   📱 **多端互通**: 
-    *   **PC**: 排位实战神器，Overlay 助你掌控全场。
-    *   **Mobile (Android/iOS)**: 掏出手机即可迅速查看道具，助你精准投掷所需道具，无需等待。
-*   📍 **出生点位 (Spawn Points)**: 全新功能！精准展示 CT/T 出生点位，帮助你开局扔道具快人一步。
-*   🔎 **点位搜索**: 快速查找整张地图的道具或者在主页查找全部的道具。
-*   🔗 **道具分享/导入**: 一键打包分享或者快捷导入他人分享的或者其他端的数据，方便又迅速，省去繁琐的手动添加。
-*   🏦 **道具仓库**: 道具仓库已经开放，查阅[GitHub仓库](https://github.com/Invis1ble-2/grenades_repo)以获得更多信息。
-*   🎯 **爆点查看**：爆点查看功能可以查询道具的爆点，或者直接以爆点为基准查看所有道具。
+* **游戏内悬浮窗**：按 `Alt + G`（默认）呼出或隐藏。死亡或开局买枪时可以快速查看点位，不需要 Alt-Tab 切屏。
+* **全地图覆盖**：支持 Dust2、Mirage、Inferno 等主流地图池竞技地图。
+* **全道具类型**：烟雾弹、燃烧瓶、闪光弹、手雷都支持。
+* **多端互通**：
+  * PC 端：配合悬浮窗，排位实战中直接查看。
+  * 移动端（Android/iOS）：随手打开手机查看道具，不用等待。
+* **出生点位**：显示 CT/T 出生点位，帮助你开局更快扔出第一颗道具。
+* **点位搜索**：可以在单张地图内搜索道具，也可以在主页搜索所有道具。
+* **道具分享/导入**：一键打包分享，或导入他人分享的数据，不用手动添加。
+* **道具仓库**：查看 [GitHub 仓库](https://github.com/Invis1ble-2/grenades_repo) 了解更多。
+* **爆点查看**：查询道具的爆点位置，或以爆点为基准查看所有相关道具。
+* **局域网同步**：同一网络下的设备之间可以直接同步道具数据，不需要联网账号。
+* **收藏夹分组**：把常用道具整理进自定义分组，方便查找。
+* **区域与标签**：标签系统给道具打上更可观、简单的分类，支持涂绘道具的爆点区域并快速批量给对应的打上区域标签。
+* **自动检测更新**：启动时检查新版本，支持多个网盘下载安装包。
+* **数据管理**：支持清空/删除自定义地图、批量删除道具、清理孤儿媒体文件、迁移数据目录。
+* **内置图片编辑器**：导入道具截图后可以直接裁剪、标注，不用切换到其他软件。
+* **节日主题**：应用内置了部分节日限定的界面主题。
 
 ---
 
-## 📸 预览 (Screenshots)
+## 预览
 
-<img src="docs/overlay_preview.png" width="250" /><img src="docs/mobile_preview.png" width="250" /><img src="docs/map_screen.png" width="250" /><img src="docs/grenade_detail.png" width="250" /> 
+<img src="docs/overlay_preview.png" width="250" /><img src="docs/mobile_preview.png" width="250" /><img src="docs/map_screen.png" width="250" /><img src="docs/grenade_detail.png" width="250" />
 
 ---
 
-## 🚀 下载与安装 (Installation)
+## 下载与安装
 
 ### Windows
-1.  前往 [Releases页面](../../releases) 下载最新的 `GrenadeHelper_Setup_x.x.x.exe`。
-2.  运行安装程序完成安装。
-3.  **注意**: 首次运行如果遇到杀毒软件误报，请添加信任。
+1. 前往 [Releases 页面](../../releases) 下载最新的 `GrenadeHelper_Setup_x.x.x.exe`。
+2. 运行安装程序完成安装。
+3. 首次运行如果被杀毒软件误报，请添加信任。
 
 ### Android
-1.  前往 [Releases页面](../../releases) 下载最新的 `.apk` 安装包。
-2.  直接安装即可。
+1. 前往 [Releases 页面](../../releases) 下载最新的 `.apk` 安装包。
+2. 直接安装即可。
 
 ### iOS
-1.  **AltStore (推荐)**: 下载 `.ipa` 文件，使用 AltStore 签名安装。
-2.  **SideStore**: 支持免电脑续签。
-3.  *详细教程请参考[官网 Wiki](https://grenade-helper.zeabur.app/docs.html#ios-sideload)*
+1. **AltStore（推荐）**：下载 `.ipa` 文件，用 AltStore 签名安装。
+2. **SideStore**：支持免电脑续签。
+3. 详细教程见[官网 Wiki](https://grenade-helper.zeabur.app/docs.html#ios-sideload)。
 
 ---
 
-## 📖 使用指南 (Usage)
+## 使用指南
 
 ### PC 悬浮窗模式
-1.  启动 Grenade Helper。
-2.  进入 CS2 游戏 (建议设置为 **【全屏窗口化】** 或 **【窗口化】** 以获得最佳 Overlay 体验，全屏独占模式下无法显示)。
-3.  按下快捷键 **`Alt + G`** (可在设置中修改) 呼出/隐藏界面。
+1. 启动 Grenade Helper。
+2. 进入 CS2 游戏（建议设置为**全屏窗口化**或**窗口化**，全屏独占模式下无法显示悬浮窗）。
+3. 按快捷键 **`Alt + G`**（可在设置中修改）呼出或隐藏界面。
 
 ### 地图与筛选
-*   在主页选择正在游玩的地图。
-*   顶部标签栏筛选道具类型 (烟/火/闪/雷)。
+* 在主页选择正在游玩的地图。
+* 顶部标签栏可按道具类型筛选（烟/火/闪/雷）。
 
 ---
 
-## ❤️ 支持项目 (Support)
+## 支持项目
 
-如果这个项目对你有帮助，欢迎在爱发电支持我们！
+如果这个项目对你有帮助，欢迎在爱发电支持我们。
 
 <p align="center">
   <img src="assets/icons/afdian.jpg" alt="afdian qrcode" width="300">
@@ -78,12 +84,11 @@
 
 [![爱发电](https://img.shields.io/badge/爱发电-支持作者-ff69b4?logo=heart)](https://afdian.com/a/Invis1ble)
 
-
 ---
 
-## 🛠️ 开发与构建 (Development)
+## 开发与构建
 
-如果你想在本地开发这个项目，可以按照以下步骤进行构建：
+如果你想在本地开发这个项目，可以按以下步骤构建：
 
 ```bash
 # Clone 仓库
@@ -104,11 +109,11 @@ flutter run -d windows
 
 ---
 
-## 🤝 反馈与贡献 (Feedback)
+## 反馈与贡献
 
-*   发现 Bug ？请提交 [Issue](../../issues)。
-*   欢迎 Pull Request 贡献代码！
+* 发现 Bug 请提交 [Issue](../../issues)。
+* 欢迎提交 Pull Request 贡献代码。
 
-## 📄 许可证 (License)
+## 许可证
 
 本项目基于 MIT License 开源。
