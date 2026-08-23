@@ -42,7 +42,10 @@ class DataTransferHubScreen extends StatelessWidget {
               ? 3
               : (constraints.maxWidth >= 720 ? 2 : 1);
           return GridView.builder(
-            padding: const EdgeInsets.all(24),
+            padding: AppBreakpoints.isMobile(context)
+                ? AppBreakpoints.withMobileBottomBarClearance(
+                    context, const EdgeInsets.all(24))
+                : const EdgeInsets.all(24),
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: columns,
               mainAxisExtent: 180,

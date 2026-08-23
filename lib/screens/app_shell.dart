@@ -135,18 +135,23 @@ class _LiquidGlassNavigationBar extends StatelessWidget {
     final primary = theme.colorScheme.primary;
 
     return SafeArea(
-      minimum: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+      minimum: EdgeInsets.fromLTRB(
+        12,
+        0,
+        12,
+        AppBreakpoints.mobileBottomBarMinimumSafeArea,
+      ),
       child: Align(
         alignment: Alignment.bottomCenter,
         heightFactor: 1,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 390),
           child: SizedBox(
-            height: 70,
+            height: AppBreakpoints.mobileBottomBarHeight,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(24),
               child: BackdropFilter(
-                filter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                filter: ui.ImageFilter.blur(sigmaX: 3, sigmaY: 3),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     color: (isDark ? const Color(0xFF22262B) : Colors.white)
@@ -283,7 +288,7 @@ class _LiquidGlassNavigationItem extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(18),
         child: SizedBox(
-          height: 70,
+          height: AppBreakpoints.mobileBottomBarHeight,
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [

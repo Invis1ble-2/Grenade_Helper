@@ -3,12 +3,33 @@ import 'package:flutter/material.dart';
 abstract final class AppBreakpoints {
   static const double mobile = 720;
   static const double expandedNavigation = 1280;
+  static const double mobileBottomBarHeight = 70;
+  static const double mobileBottomBarMinimumSafeArea = 10;
 
   static bool isMobile(BuildContext context) =>
       MediaQuery.sizeOf(context).width < mobile;
 
   static bool isExpandedNavigation(BuildContext context) =>
       MediaQuery.sizeOf(context).width >= expandedNavigation;
+
+  /// Adds enough trailing scroll space for the transparent mobile bottom bar.
+  static EdgeInsets withMobileBottomBarClearance(
+    BuildContext context,
+    EdgeInsets padding,
+  ) {
+    final systemBottomInset = MediaQuery.paddingOf(context).bottom;
+    const minimumClearance =
+        mobileBottomBarHeight + mobileBottomBarMinimumSafeArea;
+    final bottomBarClearance = systemBottomInset > minimumClearance
+        ? systemBottomInset
+        : minimumClearance;
+    return EdgeInsets.fromLTRB(
+      padding.left,
+      padding.top,
+      padding.right,
+      padding.bottom + bottomBarClearance,
+    );
+  }
 }
 
 abstract final class AppMotion {

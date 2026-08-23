@@ -216,8 +216,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     ];
 
     if (AppBreakpoints.isMobile(context)) {
+      final bottomContentPadding = AppBreakpoints.withMobileBottomBarClearance(
+        context,
+        const EdgeInsets.all(16),
+      );
       return ListView.separated(
-        padding: const EdgeInsets.all(16),
+        padding: bottomContentPadding,
         itemCount: categories.length,
         separatorBuilder: (_, __) => const SizedBox(height: 10),
         itemBuilder: (context, index) {

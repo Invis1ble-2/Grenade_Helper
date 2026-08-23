@@ -243,34 +243,41 @@ List<GrenadeCluster> clusterGrenadesByImpact(List<Grenade> grenades,
   );
 }
 
-String _mapMarkerEmojiForType(int type) {
+IconData _mapMarkerLegacyIconForType(int type) {
   switch (type) {
     case GrenadeType.smoke:
-      return '☁️';
+      return Icons.cloud;
     case GrenadeType.flash:
-      return '⚡';
+      return Icons.flash_on;
     case GrenadeType.molotov:
-      return '🔥';
+      return Icons.local_fire_department;
     case GrenadeType.he:
-      return '💣';
+      return Icons.trip_origin;
     case GrenadeType.wallbang:
-      return '🧱';
+      return Icons.apps;
     default:
-      return '❓';
+      return Icons.circle;
   }
 }
 
-void _paintMapMarkerEmoji(
+void _paintMapMarkerLegacyIcon(
   Canvas canvas,
   int type, {
   required Offset center,
-  required double fontSize,
+  required double size,
+  required Color color,
   required TextDirection textDirection,
 }) {
+  final icon = _mapMarkerLegacyIconForType(type);
   final painter = TextPainter(
     text: TextSpan(
-      text: _mapMarkerEmojiForType(type),
-      style: TextStyle(fontSize: fontSize, height: 1),
+      text: String.fromCharCode(icon.codePoint),
+      style: TextStyle(
+        color: color,
+        fontSize: size,
+        fontFamily: icon.fontFamily,
+        package: icon.fontPackage,
+      ),
     ),
     textDirection: textDirection,
     maxLines: 1,
@@ -346,7 +353,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   final Map<int, PictureInfo> _grenadeTypePictures = {};
   bool _isLoadingGrenadeTypePictures = false;
 
-  bool get _useEmojiMapMarkers =>
+  bool get _useLegacyMapMarkers =>
       globalSettingsService?.getMapMarkerUseEmoji() ?? false;
 
   @override
@@ -908,9 +915,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         _getGrenadeCreateMode() == _grenadeCreateModeLongPress
             ? '长按地图新增道具'
             : '单点地图新增道具';
-    final detailText = isEditMode
-        ? '当前为编辑模式 · 新增方式：$createModeText'
-        : '当前为查看模式';
+    final detailText =
+        isEditMode ? '当前为编辑模式 · 新增方式：$createModeText' : '当前为查看模式';
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -2330,13 +2336,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     required double size,
     required Color color,
   }) {
-    if (_useEmojiMapMarkers) {
-      return Center(
-        child: Text(
-          _mapMarkerEmojiForType(type),
-          style: TextStyle(fontSize: size + 2, height: 1),
-        ),
-      );
+    if (_useLegacyMapMarkers) {
+      return Icon(_mapMarkerLegacyIconForType(type), size: size, color: color);
     }
     return GrenadeTypeIcon(type: type, size: size, color: color);
   }
@@ -4284,13 +4285,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                       maxWidth: AppBreakpoints.isMobile(context) ? 240 : 360),
                   child: Container(
                     height: 34,
-                    decoration: BoxDecoration(
-                        color: Colors.transparent,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                            color: Theme.of(context)
-                                .dividerColor
-                                .withValues(alpha: 0.1))),
                     padding: const EdgeInsets.symmetric(horizontal: 10),
                     child: Row(
                       children: [
@@ -4395,6 +4389,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                 hintStyle:
                                     TextStyle(color: Colors.grey, fontSize: 13),
                                 border: InputBorder.none,
+                                enabledBorder: InputBorder.none,
+                                focusedBorder: InputBorder.none,
+                                disabledBorder: InputBorder.none,
+                                errorBorder: InputBorder.none,
+                                focusedErrorBorder: InputBorder.none,
                                 isDense: true,
                                 contentPadding: EdgeInsets.zero,
                               ),
@@ -4757,8 +4756,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                                                     int,
                                                                     PictureInfo>.unmodifiable(
                                                                 _grenadeTypePictures),
-                                                            useEmoji:
-                                                                _useEmojiMapMarkers,
+                                                            useLegacy:
+                                                                _useLegacyMapMarkers,
                                                           ),
                                                         ),
                                                       ),
@@ -4894,8 +4893,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                                                     int,
                                                                     PictureInfo>.unmodifiable(
                                                                 _grenadeTypePictures),
-                                                            useEmoji:
-                                                                _useEmojiMapMarkers,
+                                                            useLegacy:
+                                                                _useLegacyMapMarkers,
                                                           ),
                                                         ),
                                                       ),
@@ -6711,7 +6710,7 @@ class _ImpactClusterBatchPainter extends CustomPainter {
   final bool denseStyle;
   final TextDirection textDirection;
   final Map<int, PictureInfo> typePictures;
-  final bool useEmoji;
+  final bool useLegacy;
 
   _ImpactClusterBatchPainter({
     required this.clusters,
@@ -6720,7 +6719,7 @@ class _ImpactClusterBatchPainter extends CustomPainter {
     required this.denseStyle,
     required this.textDirection,
     required this.typePictures,
-    required this.useEmoji,
+    required this.useLegacy,
   });
 
   @override
@@ -6759,12 +6758,13 @@ class _ImpactClusterBatchPainter extends CustomPainter {
     canvas.drawCircle(Offset.zero, baseRadius, borderPaint);
 
     final typePicture = typePictures[cluster.primaryType];
-    if (useEmoji && cluster.grenades.length == 1) {
-      _paintMapMarkerEmoji(
+    if (useLegacy && cluster.grenades.length == 1) {
+      _paintMapMarkerLegacyIcon(
         canvas,
         cluster.primaryType,
         center: Offset.zero,
-        fontSize: 13,
+        size: 11,
+        color: impactColor,
         textDirection: textDirection,
       );
     } else if (typePicture != null && cluster.grenades.length == 1) {
@@ -6849,7 +6849,7 @@ class _ImpactClusterBatchPainter extends CustomPainter {
         oldDelegate.markerScale != markerScale ||
         oldDelegate.denseStyle != denseStyle ||
         oldDelegate.textDirection != textDirection ||
-        oldDelegate.useEmoji != useEmoji ||
+        oldDelegate.useLegacy != useLegacy ||
         !_sameTypePictures(oldDelegate.typePictures, typePictures) ||
         oldDelegate.imageBounds.width != imageBounds.width ||
         oldDelegate.imageBounds.height != imageBounds.height ||
@@ -6897,7 +6897,7 @@ class _ClusterBatchPainter extends CustomPainter {
   final bool denseStyle;
   final TextDirection textDirection;
   final Map<int, PictureInfo> typePictures;
-  final bool useEmoji;
+  final bool useLegacy;
 
   _ClusterBatchPainter({
     required this.clusters,
@@ -6906,7 +6906,7 @@ class _ClusterBatchPainter extends CustomPainter {
     required this.denseStyle,
     required this.textDirection,
     required this.typePictures,
-    required this.useEmoji,
+    required this.useLegacy,
   });
 
   @override
@@ -6947,12 +6947,13 @@ class _ClusterBatchPainter extends CustomPainter {
     canvas.drawCircle(Offset.zero, baseRadius, borderPaint);
 
     final typePicture = typePictures[cluster.primaryType];
-    if (!cluster.hasMultipleTypes && useEmoji) {
-      _paintMapMarkerEmoji(
+    if (!cluster.hasMultipleTypes && useLegacy) {
+      _paintMapMarkerLegacyIcon(
         canvas,
         cluster.primaryType,
         center: Offset.zero,
-        fontSize: 13,
+        size: 11,
+        color: iconColor,
         textDirection: textDirection,
       );
     } else if (!cluster.hasMultipleTypes && typePicture != null) {
@@ -7104,7 +7105,7 @@ class _ClusterBatchPainter extends CustomPainter {
         oldDelegate.markerScale != markerScale ||
         oldDelegate.denseStyle != denseStyle ||
         oldDelegate.textDirection != textDirection ||
-        oldDelegate.useEmoji != useEmoji ||
+        oldDelegate.useLegacy != useLegacy ||
         !_sameTypePictures(oldDelegate.typePictures, typePictures) ||
         oldDelegate.imageBounds.width != imageBounds.width ||
         oldDelegate.imageBounds.height != imageBounds.height ||

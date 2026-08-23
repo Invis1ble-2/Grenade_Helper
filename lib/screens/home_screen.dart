@@ -582,12 +582,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   final columns = constraints.maxWidth >= 1280
                       ? 3
                       : (constraints.maxWidth >= 720 ? 2 : 1);
+                  final gridPadding = EdgeInsets.fromLTRB(
+                    AppBreakpoints.isMobile(context) ? 16 : 24,
+                    8,
+                    AppBreakpoints.isMobile(context) ? 16 : 24,
+                    24,
+                  );
                   return GridView.builder(
-                    padding: EdgeInsets.fromLTRB(
-                        AppBreakpoints.isMobile(context) ? 16 : 24,
-                        8,
-                        AppBreakpoints.isMobile(context) ? 16 : 24,
-                        24),
+                    padding: AppBreakpoints.isMobile(context)
+                        ? AppBreakpoints.withMobileBottomBarClearance(
+                            context,
+                            gridPadding,
+                          )
+                        : gridPadding,
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: columns,
                       mainAxisExtent: 220,
