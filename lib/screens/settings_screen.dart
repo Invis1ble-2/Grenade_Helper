@@ -15,6 +15,7 @@ import '../services/tag_service.dart';
 import '../models.dart';
 import '../providers.dart';
 import '../widgets/map_icon.dart';
+import '../theme/app_design_system.dart';
 import '../main.dart' show sendOverlayCommand;
 import 'grenade_select_delete_screen.dart';
 
@@ -36,6 +37,7 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  int _selectedCategory = 0;
   static const Map<HotkeyAction, String> _hotkeyActionLabels = {
     HotkeyAction.toggleOverlay: '显示/隐藏悬浮窗',
     HotkeyAction.navigateUp: '向上导航点位',
@@ -178,32 +180,150 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
     final themeMode = ref.watch(themeModeProvider);
 
-    return ListView(
-      padding: const EdgeInsets.all(16),
+    final categories = <({String label, IconData icon, List<Widget> content})>[
+      (
+        label: '外观与地图',
+        icon: Icons.palette_outlined,
+        content: [
+          _buildGeneralAppearanceSection(themeMode),
+          _buildMapDisplaySection(),
+          _buildMarkerOperationSection(),
+        ],
+      ),
+      if (_isDesktop)
+        (
+          label: '快捷键与悬浮窗',
+          icon: Icons.keyboard_alt_outlined,
+          content: [
+            _buildDesktopHotkeySection(),
+            _buildDesktopOverlaySection(),
+          ],
+        ),
+      (
+        label: '数据管理',
+        icon: Icons.storage_outlined,
+        content: [
+          if (_isDesktop) _buildDesktopDataStorageSection(),
+          _buildDataManagementSection(),
+        ],
+      ),
+      if (kDebugMode)
+        (
+          label: '调试',
+          icon: Icons.bug_report_outlined,
+          content: [_buildLanSyncDebugSection()],
+        ),
+    ];
+
+    if (AppBreakpoints.isMobile(context)) {
+      return ListView.separated(
+        padding: const EdgeInsets.all(16),
+        itemCount: categories.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (context, index) {
+          final category = categories[index];
+          return Card(
+            child: ExpansionTile(
+              initiallyExpanded: index == 0,
+              leading: Icon(category.icon,
+                  color: Theme.of(context).colorScheme.primary),
+              title: Text(category.label,
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+              childrenPadding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+              children: _spacedSettingsSections(category.content),
+            ),
+          );
+        },
+      );
+    }
+
+    final safeIndex = _selectedCategory.clamp(0, categories.length - 1);
+    final selected = categories[safeIndex];
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (_isDesktop) ...[
-          _buildDesktopHotkeySection(),
-          const SizedBox(height: 16),
-          _buildDesktopOverlaySection(),
-          const SizedBox(height: 16),
-        ],
-        _buildGeneralAppearanceSection(themeMode),
-        const SizedBox(height: 16),
-        _buildMapDisplaySection(),
-        const SizedBox(height: 16),
-        _buildMarkerOperationSection(),
-        if (_isDesktop) ...[
-          const SizedBox(height: 16),
-          _buildDesktopDataStorageSection(),
-        ],
-        const SizedBox(height: 16),
-        _buildDataManagementSection(),
-        if (kDebugMode) ...[
-          const SizedBox(height: 16),
-          _buildLanSyncDebugSection(),
-        ],
+        Container(
+          width: 224,
+          color: Theme.of(context).colorScheme.surface,
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 10, 10, 14),
+                child: Text('设置分类',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: context.appTheme.mutedText,
+                        )),
+              ),
+              for (var index = 0; index < categories.length; index++)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: ListTile(
+                    selected: safeIndex == index,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(6)),
+                    leading: Icon(categories[index].icon, size: 21),
+                    title: Text(categories[index].label),
+                    onTap: () => setState(() => _selectedCategory = index),
+                  ),
+                ),
+              const Spacer(),
+              Padding(
+                padding: const EdgeInsets.all(10),
+                child: Text(
+                  'Grenade Helper',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: context.appTheme.mutedText),
+                ),
+              ),
+            ],
+          ),
+        ),
+        VerticalDivider(width: 1, color: context.appTheme.subtleBorder),
+        Expanded(
+          child: AnimatedSwitcher(
+            duration: AppMotion.content,
+            switchInCurve: AppMotion.enter,
+            switchOutCurve: AppMotion.exit,
+            transitionBuilder: (child, animation) => FadeTransition(
+              opacity: animation,
+              child: SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0.025, 0),
+                  end: Offset.zero,
+                ).animate(animation),
+                child: child,
+              ),
+            ),
+            child: ListView(
+              key: ValueKey(safeIndex),
+              padding: const EdgeInsets.all(24),
+              children: [
+                Text(selected.label,
+                    style: Theme.of(context)
+                        .textTheme
+                        .headlineSmall
+                        ?.copyWith(fontWeight: FontWeight.w800)),
+                const SizedBox(height: 18),
+                ..._spacedSettingsSections(selected.content),
+              ],
+            ),
+          ),
+        ),
       ],
     );
+  }
+
+  List<Widget> _spacedSettingsSections(List<Widget> sections) {
+    final result = <Widget>[];
+    for (var index = 0; index < sections.length; index++) {
+      if (index > 0) result.add(const SizedBox(height: 14));
+      result.add(sections[index]);
+    }
+    return result;
   }
 
   Widget _buildDesktopHotkeySection() {
@@ -350,7 +470,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         if (_isDesktop)
           SwitchListTile(
             title: const Text('关闭按钮最小化到托盘'),
-            subtitle: const Text('关闭时隐藏到系统托盘，而非退出程序'),
+            subtitle: const Text('关闭时隐藏到系统托盘，不退出程序'),
             value: _closeToTray,
             onChanged: (value) async {
               setState(() => _closeToTray = value);
@@ -417,8 +537,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ),
         SwitchListTile(
-          title: const Text('地图圆标使用默认表情'),
-          subtitle: const Text('仅切换地图上的道具圆形标记，其他界面保持 SVG'),
+          title: const Text('地图界面使用旧版标识'),
+          subtitle: const Text('仅切换地图上的道具标记，其他界面保持新版标识'),
           value: _mapMarkerUseEmoji,
           onChanged: (value) async {
             setState(() => _mapMarkerUseEmoji = value);
@@ -469,8 +589,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           },
         ),
         SwitchListTile(
-          title: const Text('高密度模式（强聚合）'),
-          subtitle: const Text('仅增大地图页聚合范围，帮助大量道具时提升流畅度'),
+          title: const Text('高密度模式/强聚合模式'),
+          subtitle: const Text('仅增大地图页聚合范围'),
           value: _highDensityClusterMode,
           onChanged: (value) async {
             setState(() => _highDensityClusterMode = value);
@@ -614,7 +734,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Widget _buildDataManagementSection() {
     return _buildSection(
       iconAsset: 'assets/icons/settings_data.svg',
-      title: '数据管理',
+      title: '危险操作',
+      subtitle: '这些操作可能删除或覆盖本地数据',
+      danger: true,
       children: [
         ListTile(
           leading: const Icon(Icons.playlist_add_check, color: Colors.teal),
@@ -1445,6 +1567,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     required String iconAsset,
     required String title,
     String? subtitle,
+    bool danger = false,
     required List<Widget> children,
   }) {
     return Card(
@@ -1461,16 +1584,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   height: 34,
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .primary
+                    color: (danger
+                            ? Theme.of(context).colorScheme.error
+                            : Theme.of(context).colorScheme.primary)
                         .withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: SvgPicture.asset(
                     iconAsset,
                     colorFilter: ColorFilter.mode(
-                      Theme.of(context).colorScheme.primary,
+                      danger
+                          ? Theme.of(context).colorScheme.error
+                          : Theme.of(context).colorScheme.primary,
                       BlendMode.srcIn,
                     ),
                   ),
@@ -1482,9 +1607,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     children: [
                       Text(
                         title,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
+                          color: danger
+                              ? Theme.of(context).colorScheme.error
+                              : null,
                         ),
                       ),
                       if (subtitle != null)
@@ -1535,15 +1663,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: Colors.orange.withValues(alpha: 0.2),
+              color:
+                  Theme.of(context).colorScheme.primary.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: Colors.orange.withValues(alpha: 0.5)),
+              border: Border.all(color: context.appTheme.subtleBorder),
             ),
             child: Text(
               displayStr,
-              style: const TextStyle(
+              style: TextStyle(
+                fontFamily: 'monospace',
                 fontWeight: FontWeight.w500,
-                color: Colors.orange,
+                color: Theme.of(context).colorScheme.primary,
               ),
             ),
           ),

@@ -18,6 +18,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:pasteboard/pasteboard.dart';
 import '../widgets/grenade_type_icon.dart';
+import '../theme/app_design_system.dart';
 
 import '../models.dart';
 import '../providers.dart';
@@ -152,6 +153,62 @@ class _GrenadeTypeMenuLabel extends StatelessWidget {
   }
 }
 
+class _DetailBadge extends StatelessWidget {
+  final String label;
+  final IconData? icon;
+
+  const _DetailBadge({required this.label, this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: context.appTheme.subtleBorder),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 15, color: context.appTheme.mutedText),
+            const SizedBox(width: 5),
+          ],
+          Text(label, style: const TextStyle(fontSize: 12)),
+        ],
+      ),
+    );
+  }
+}
+
+class _GrenadeTypeBadge extends StatelessWidget {
+  final int type;
+  final String label;
+
+  const _GrenadeTypeBadge({required this.type, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: context.appTheme.subtleBorder),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          GrenadeTypeIcon(type: type, size: 16),
+          const SizedBox(width: 6),
+          Text(label, style: const TextStyle(fontSize: 12)),
+        ],
+      ),
+    );
+  }
+}
+
 // 主页面
 class GrenadeDetailScreen extends ConsumerStatefulWidget {
   final int grenadeId;
@@ -168,6 +225,8 @@ class GrenadeDetailScreen extends ConsumerStatefulWidget {
 class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
   Grenade? grenade;
   final _titleController = TextEditingController();
+  final _stepScrollController = ScrollController();
+  final Map<int, GlobalKey> _stepKeys = <int, GlobalKey>{};
   String? _originalTitle; // 存原始标题
 
   @override
@@ -175,6 +234,31 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     super.initState();
     _loadData();
     _loadAuthorHistory();
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _stepScrollController.dispose();
+    super.dispose();
+  }
+
+  List<GrenadeStep> _sortedSteps() {
+    final steps = grenade?.steps.toList() ?? <GrenadeStep>[];
+    steps.sort((a, b) => a.stepIndex.compareTo(b.stepIndex));
+    return steps;
+  }
+
+  Future<void> _focusStep(GrenadeStep step) async {
+    final key = _stepKeys[step.id];
+    final target = key?.currentContext;
+    if (target == null) return;
+    await Scrollable.ensureVisible(
+      target,
+      duration: AppMotion.panel,
+      curve: AppMotion.enter,
+      alignment: 0.08,
+    );
   }
 
   Future<void> _loadData({bool resetTitle = true}) async {
@@ -1682,66 +1766,8 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
         ),
         body: Column(
           children: [
-            if (isEditing)
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                child: Row(
-                  children: [
-                    DropdownButton<int>(
-                      value: grenade!.type,
-                      dropdownColor: Theme.of(context).colorScheme.surface,
-                      items: const [
-                        DropdownMenuItem(
-                          value: GrenadeType.smoke,
-                          child: _GrenadeTypeMenuLabel(
-                              type: GrenadeType.smoke, label: '烟雾'),
-                        ),
-                        DropdownMenuItem(
-                          value: GrenadeType.flash,
-                          child: _GrenadeTypeMenuLabel(
-                              type: GrenadeType.flash, label: '闪光'),
-                        ),
-                        DropdownMenuItem(
-                          value: GrenadeType.molotov,
-                          child: _GrenadeTypeMenuLabel(
-                              type: GrenadeType.molotov, label: '燃烧'),
-                        ),
-                        DropdownMenuItem(
-                          value: GrenadeType.he,
-                          child: _GrenadeTypeMenuLabel(
-                              type: GrenadeType.he, label: '手雷'),
-                        ),
-                        DropdownMenuItem(
-                          value: GrenadeType.wallbang,
-                          child: _GrenadeTypeMenuLabel(
-                              type: GrenadeType.wallbang, label: '穿点'),
-                        ),
-                      ],
-                      onChanged: (val) => _updateGrenade(type: val),
-                      underline: Container(),
-                    ),
-                    const Spacer(),
-                    DropdownButton<int>(
-                      value: grenade!.team,
-                      dropdownColor: Theme.of(context).colorScheme.surface,
-                      items: const [
-                        DropdownMenuItem(
-                            value: TeamType.all, child: Text("⚪ 通用")),
-                        DropdownMenuItem(
-                            value: TeamType.ct, child: Text("🔵 CT (警)")),
-                        DropdownMenuItem(
-                            value: TeamType.t, child: Text("🟡 T (匪)")),
-                      ],
-                      onChanged: (val) => _updateGrenade(team: val),
-                      underline: Container(),
-                    ),
-                  ],
-                ),
-              ),
-            Expanded(child: _buildStepList(isEditing)),
-            _buildFooterInfo(),
+            _buildDetailHeader(isEditing),
+            Expanded(child: _buildResponsiveStepLayout(isEditing)),
           ],
         ),
         floatingActionButton: isEditing
@@ -1756,21 +1782,239 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     );
   }
 
+  String _typeLabel(int type) => switch (type) {
+        GrenadeType.smoke => '烟雾弹',
+        GrenadeType.flash => '闪光弹',
+        GrenadeType.molotov => '燃烧弹',
+        GrenadeType.he => '高爆手雷',
+        GrenadeType.wallbang => '穿点',
+        _ => '道具',
+      };
+
+  String _teamLabel(int team) => switch (team) {
+        TeamType.ct => 'CT',
+        TeamType.t => 'T',
+        _ => '通用',
+      };
+
+  Widget _buildDetailHeader(bool isEditing) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border:
+            Border(bottom: BorderSide(color: context.appTheme.subtleBorder)),
+      ),
+      child: Row(
+        children: [
+          if (isEditing)
+            Expanded(
+              child: Wrap(
+                spacing: 14,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  DropdownButton<int>(
+                    value: grenade!.type,
+                    underline: const SizedBox.shrink(),
+                    items: const [
+                      DropdownMenuItem(
+                          value: GrenadeType.smoke,
+                          child: _GrenadeTypeMenuLabel(
+                              type: GrenadeType.smoke, label: '烟雾')),
+                      DropdownMenuItem(
+                          value: GrenadeType.flash,
+                          child: _GrenadeTypeMenuLabel(
+                              type: GrenadeType.flash, label: '闪光')),
+                      DropdownMenuItem(
+                          value: GrenadeType.molotov,
+                          child: _GrenadeTypeMenuLabel(
+                              type: GrenadeType.molotov, label: '燃烧')),
+                      DropdownMenuItem(
+                          value: GrenadeType.he,
+                          child: _GrenadeTypeMenuLabel(
+                              type: GrenadeType.he, label: '手雷')),
+                      DropdownMenuItem(
+                          value: GrenadeType.wallbang,
+                          child: _GrenadeTypeMenuLabel(
+                              type: GrenadeType.wallbang, label: '穿点')),
+                    ],
+                    onChanged: (value) => _updateGrenade(type: value),
+                  ),
+                  DropdownButton<int>(
+                    value: grenade!.team,
+                    underline: const SizedBox.shrink(),
+                    items: const [
+                      DropdownMenuItem(value: TeamType.all, child: Text('通用')),
+                      DropdownMenuItem(value: TeamType.ct, child: Text('CT')),
+                      DropdownMenuItem(value: TeamType.t, child: Text('T')),
+                    ],
+                    onChanged: (value) => _updateGrenade(team: value),
+                  ),
+                  Text('${_sortedSteps().length} 个步骤',
+                      style: TextStyle(color: context.appTheme.mutedText)),
+                ],
+              ),
+            )
+          else
+            Expanded(
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  _GrenadeTypeBadge(
+                    type: grenade!.type,
+                    label: _typeLabel(grenade!.type),
+                  ),
+                  _DetailBadge(
+                      label: _teamLabel(grenade!.team),
+                      icon: Icons.groups_outlined),
+                  _DetailBadge(
+                      label: '${_sortedSteps().length} 个步骤',
+                      icon: Icons.format_list_numbered_rounded),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildResponsiveStepLayout(bool isEditing) {
+    final steps = _sortedSteps();
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < AppBreakpoints.mobile) {
+          return Column(
+            children: [
+              if (steps.isNotEmpty)
+                SizedBox(
+                  height: 58,
+                  child: ListView.separated(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    scrollDirection: Axis.horizontal,
+                    itemCount: steps.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    itemBuilder: (_, index) => ActionChip(
+                      avatar: CircleAvatar(
+                          radius: 11,
+                          child: Text('${index + 1}',
+                              style: const TextStyle(fontSize: 11))),
+                      label: Text(steps[index].title.isEmpty
+                          ? '步骤 ${index + 1}'
+                          : steps[index].title),
+                      onPressed: () => _focusStep(steps[index]),
+                    ),
+                  ),
+                ),
+              Expanded(child: _buildStepList(isEditing)),
+            ],
+          );
+        }
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              width: 236,
+              color: Theme.of(context).colorScheme.surface,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 18, 18, 10),
+                    child: Text('教学步骤',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w800)),
+                  ),
+                  Expanded(
+                    child: ListView.builder(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      itemCount: steps.length,
+                      itemBuilder: (_, index) => ListTile(
+                        dense: true,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(6)),
+                        leading: CircleAvatar(
+                            radius: 13,
+                            backgroundColor: Theme.of(context)
+                                .colorScheme
+                                .primary
+                                .withValues(alpha: 0.14),
+                            child: Text('${index + 1}',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .primary))),
+                        title: Text(
+                            steps[index].title.isEmpty
+                                ? '步骤 ${index + 1}'
+                                : steps[index].title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis),
+                        onTap: () => _focusStep(steps[index]),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            VerticalDivider(width: 1, color: context.appTheme.subtleBorder),
+            Expanded(child: _buildStepList(isEditing)),
+          ],
+        );
+      },
+    );
+  }
+
   /// 构建爆点设置区域
   Widget _buildImpactPointSection(bool isEditing) {
     final hasImpactPoint =
         grenade!.impactXRatio != null && grenade!.impactYRatio != null;
 
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Colors.purpleAccent.withValues(alpha: 0.3),
-          width: 1,
+    Future<void> openImpactPoint() async {
+      await grenade!.layer.load();
+      final layer = grenade!.layer.value;
+      if (layer == null) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('无法获取楼层信息')),
+          );
+        }
+        return;
+      }
+      if (!context.mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ImpactPointPickerScreen(
+            grenadeId: grenade!.id,
+            initialX: grenade!.impactXRatio,
+            initialY: grenade!.impactYRatio,
+            throwX: grenade!.xRatio,
+            throwY: grenade!.yRatio,
+            layerId: layer.id,
+            readOnly: true,
+            existingStrokes: grenade!.impactAreaStrokes,
+            grenadeType: grenade!.type,
+          ),
         ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: context.appTheme.subtleBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1778,111 +2022,65 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
           Row(
             children: [
               Container(
-                width: 24,
-                height: 24,
+                width: 36,
+                height: 36,
                 decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.purpleAccent, width: 2),
+                  color: Theme.of(context)
+                      .colorScheme
+                      .primary
+                      .withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(7),
                 ),
-                child: const Icon(Icons.close,
-                    size: 14, color: Colors.purpleAccent),
+                child: Icon(Icons.gps_fixed_rounded,
+                    size: 19, color: Theme.of(context).colorScheme.primary),
               ),
-              const SizedBox(width: 8),
-              Text(
-                '爆点位置',
-                style: TextStyle(
-                  color: Theme.of(context).textTheme.bodyLarge?.color,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('爆点位置',
+                        style: TextStyle(fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 2),
+                    Text(
+                      hasImpactPoint
+                          ? '坐标 (${grenade!.impactXRatio!.toStringAsFixed(3)}, ${grenade!.impactYRatio!.toStringAsFixed(3)})'
+                          : '尚未设置爆点',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: context.appTheme.mutedText),
+                    ),
+                  ],
                 ),
               ),
-              const Spacer(),
               if (hasImpactPoint)
                 Container(
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.green.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(10),
+                    color: Colors.green.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
                   ),
-                  child: const Text(
-                    '已设置',
-                    style: TextStyle(
-                      color: Colors.greenAccent,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                  child: const Text('已设置',
+                      style: TextStyle(
+                          color: Colors.green,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700)),
                 ),
+              if (!isEditing && hasImpactPoint) ...[
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: openImpactPoint,
+                  icon: const Icon(Icons.visibility_outlined, size: 17),
+                  label: const Text('查看'),
+                ),
+              ],
             ],
           ),
-          const SizedBox(height: 12),
-          if (hasImpactPoint)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Row(
-                children: [
-                  Icon(Icons.location_on, size: 14, color: Colors.grey[500]),
-                  const SizedBox(width: 4),
-                  Text(
-                    '坐标: (${grenade!.impactXRatio!.toStringAsFixed(3)}, ${grenade!.impactYRatio!.toStringAsFixed(3)})',
-                    style: TextStyle(
-                      color: Colors.grey[500],
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          // 非编辑模式：只显示查看按钮
-          if (!isEditing && hasImpactPoint)
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () async {
-                  await grenade!.layer.load();
-                  final layer = grenade!.layer.value;
-                  if (layer == null) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('无法获取楼层信息')),
-                      );
-                    }
-                    return;
-                  }
-                  if (context.mounted) {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ImpactPointPickerScreen(
-                          grenadeId: grenade!.id,
-                          initialX: grenade!.impactXRatio,
-                          initialY: grenade!.impactYRatio,
-                          throwX: grenade!.xRatio,
-                          throwY: grenade!.yRatio,
-                          layerId: layer.id,
-                          readOnly: true,
-                          existingStrokes: grenade!.impactAreaStrokes,
-                          grenadeType: grenade!.type,
-                        ),
-                      ),
-                    );
-                  }
-                },
-                icon: const Icon(Icons.visibility, size: 18),
-                label: const Text('查看爆点位置'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-              ),
-            ),
           // 编辑模式：显示修改/清除/绘制按钮
           if (isEditing) ...[
+            const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
@@ -2073,8 +2271,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
   }
 
   Widget _buildStepList(bool isEditing) {
-    final steps = grenade!.steps.toList();
-    steps.sort((a, b) => a.stepIndex.compareTo(b.stepIndex));
+    final steps = _sortedSteps();
 
     final hasImpactPoint =
         grenade!.impactXRatio != null && grenade!.impactYRatio != null;
@@ -2091,6 +2288,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     if (isEditing) {
       // 编辑模式：使用 ListView（爬点卡片不参与重排序）
       return ListView(
+        controller: _stepScrollController,
         padding: const EdgeInsets.all(16),
         children: [
           // 爆点卡片（编辑模式且非穿点类型时显示）
@@ -2098,12 +2296,17 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
           // 标签编辑器
           _buildTagSection(isEditing),
           // 步骤卡片
-          ...steps.map((step) => _buildStepCard(step, isEditing)),
+          ...steps.map((step) => KeyedSubtree(
+                key: _stepKeys.putIfAbsent(step.id, GlobalKey.new),
+                child: _buildStepCard(step, isEditing),
+              )),
+          _buildFooterInfo(),
         ],
       );
     } else {
       // 非编辑模式：使用 ListView（包含爆点卡片）
       return ListView(
+        controller: _stepScrollController,
         padding: const EdgeInsets.all(16),
         children: [
           // 爆点卡片（有爆点时显示）
@@ -2111,7 +2314,11 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
           // 标签（只读展示）
           _buildTagSection(isEditing),
           // 步骤卡片
-          ...steps.map((step) => _buildStepCard(step, isEditing)),
+          ...steps.map((step) => KeyedSubtree(
+                key: _stepKeys.putIfAbsent(step.id, GlobalKey.new),
+                child: _buildStepCard(step, isEditing),
+              )),
+          _buildFooterInfo(),
         ],
       );
     }
@@ -2175,8 +2382,8 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
           Expanded(
             child: Stack(
               children: [
-                SizedBox(
-                  height: 250,
+                AspectRatio(
+                  aspectRatio: 16 / 9,
                   child: media.type == MediaType.image
                       ? GestureDetector(
                           onTap: () => _showFullscreenImage(media.localPath),
@@ -2325,8 +2532,6 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     return Card(
       key: ValueKey(step.id),
       margin: const EdgeInsets.only(bottom: 20),
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2339,11 +2544,11 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
-                      color: Colors.orange,
+                      color: Theme.of(context).colorScheme.primary,
                       borderRadius: BorderRadius.circular(4)),
                   child: Text("#${step.stepIndex + 1}",
-                      style: const TextStyle(
-                          color: Colors.black,
+                      style: TextStyle(
+                          color: Theme.of(context).colorScheme.onPrimary,
                           fontWeight: FontWeight.bold,
                           fontSize: 12)),
                 ),

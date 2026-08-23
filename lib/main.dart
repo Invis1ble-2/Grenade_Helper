@@ -13,7 +13,7 @@ import 'models/tag.dart';
 import 'models/grenade_tag.dart';
 import 'models/map_area.dart';
 import 'providers.dart';
-import 'screens/home_screen.dart';
+import 'screens/app_shell.dart';
 import 'screens/overlay_window.dart';
 import 'services/settings_service.dart';
 import 'services/hotkey_service.dart';
@@ -23,6 +23,7 @@ import 'services/update_service.dart';
 import 'services/migration_service.dart';
 import 'services/tag_service.dart';
 import 'themes/christmas_theme.dart';
+import 'theme/app_design_system.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // 全局服务实例
@@ -1372,53 +1373,8 @@ class _MainAppState extends ConsumerState<MainApp> {
     final themeMode = ref.watch(themeModeProvider);
     final seasonalTheme = ref.watch(activeSeasonalThemeProvider);
 
-    // 基础深色主题
-    ThemeData baseDarkTheme = ThemeData(
-      brightness: Brightness.dark,
-      primarySwatch: Colors.orange,
-      colorScheme: ColorScheme.dark(
-        primary: Colors.orange,
-        secondary: Colors.orangeAccent,
-      ),
-      scaffoldBackgroundColor: const Color(0xFF1B1E23),
-      useMaterial3: true,
-      appBarTheme: const AppBarTheme(
-        backgroundColor: Color(0xFF141619),
-        elevation: 0,
-      ),
-    );
-
-    // 基础浅色主题
-    ThemeData baseLightTheme = ThemeData(
-      brightness: Brightness.light,
-      primarySwatch: Colors.blue,
-      colorScheme: ColorScheme.light(
-        primary: Colors.blue,
-        secondary: Colors.blueAccent,
-        surface: const Color.fromARGB(255, 248, 239, 225),
-        onSurface: const Color(0xFF1A1A1A),
-      ),
-      scaffoldBackgroundColor: const Color.fromARGB(255, 248, 240, 227),
-      cardColor: const Color.fromARGB(255, 248, 240, 227),
-      useMaterial3: true,
-      appBarTheme: const AppBarTheme(
-        backgroundColor: Color.fromARGB(255, 255, 239, 213),
-        foregroundColor: Color.fromARGB(255, 5, 5, 5),
-        elevation: 0,
-        iconTheme: IconThemeData(color: Color(0xFF333333)),
-      ),
-      textTheme: const TextTheme(
-        bodyLarge: TextStyle(color: Color(0xFF1A1A1A)),
-        bodyMedium: TextStyle(color: Color(0xFF333333)),
-        bodySmall: TextStyle(color: Color(0xFF555555)),
-        titleLarge:
-            TextStyle(color: Color(0xFF1A1A1A), fontWeight: FontWeight.bold),
-        titleMedium: TextStyle(color: Color(0xFF1A1A1A)),
-        labelLarge: TextStyle(color: Color(0xFF1A1A1A)),
-      ),
-      iconTheme: const IconThemeData(color: Color(0xFF333333)),
-      dividerColor: const Color(0xFFE0DDD8),
-    );
+    ThemeData baseDarkTheme = AppTheme.dark();
+    ThemeData baseLightTheme = AppTheme.light();
 
     // 如果有激活的节日主题，应用节日配色
     ThemeData darkTheme = baseDarkTheme;
@@ -1455,7 +1411,15 @@ class _MainAppState extends ConsumerState<MainApp> {
       themeMode: intToThemeMode(themeMode),
       darkTheme: darkTheme,
       theme: lightTheme,
-      home: const HomeScreen(),
+      home: AppShell(
+        settingsService: globalSettingsService,
+        onHotkeyChanged: (action, config) async {
+          await globalHotkeyService?.updateHotkey(action, config);
+        },
+        onHotkeysReset: () async {
+          await globalHotkeyService?.reloadFromSettings();
+        },
+      ),
     );
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -19,6 +20,8 @@ import '../widgets/joystick_widget.dart';
 import '../widgets/path_image_provider.dart';
 import '../widgets/app_svg_icon.dart';
 import '../widgets/grenade_type_icon.dart';
+import '../widgets/map_icon.dart';
+import '../theme/app_design_system.dart';
 import '../services/data_service.dart';
 import '../services/favorite_folder_service.dart';
 import '../services/tag_service.dart';
@@ -899,12 +902,15 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         _grenadeCreateModeTap;
   }
 
-  void _showGrenadeCreateModeHint() {
+  void _showGrenadeCreateModeHint(bool isEditMode) {
     if (!mounted) return;
-    final mode = _getGrenadeCreateMode();
-    final detailText = mode == _grenadeCreateModeLongPress
-        ? '当前新增方式：长按地图新增道具'
-        : '当前新增方式：单点地图新增道具';
+    final createModeText =
+        _getGrenadeCreateMode() == _grenadeCreateModeLongPress
+            ? '长按地图新增道具'
+            : '单点地图新增道具';
+    final detailText = isEditMode
+        ? '当前为编辑模式 · 新增方式：$createModeText'
+        : '当前为查看模式';
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -2407,7 +2413,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   Widget _buildTypeFilterBtn(
       Set<int> selectedTypes, int type, String label, Color activeColor) {
     final isSelected = selectedTypes.contains(type);
-    final unselectedColor = Theme.of(context).colorScheme.onSurface;
+    const unselectedColor = Colors.white70;
     return InkWell(
       onTap: () {
         final newSet = Set<int>.from(selectedTypes);
@@ -2449,7 +2455,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   Widget _buildFilterChip(
       String label, int value, int groupValue, Color color) {
     final isSelected = value == groupValue;
-    final unselectedColor = Theme.of(context).colorScheme.onSurface;
+    const unselectedColor = Colors.white70;
     return GestureDetector(
       onTap: () => ref.read(teamFilterProvider.notifier).state = value,
       child: Container(
@@ -3506,6 +3512,109 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     );
   }
 
+  Widget _buildFavoritesSidePanel(FavoriteFolderService folderService) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.34),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.18),
+                blurRadius: 18,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: StreamBuilder<List<FolderWithGrenades>>(
+            stream: folderService.watchMapFavorites(widget.gameMap.id),
+            builder: (context, snapshot) {
+              final folders = (snapshot.data ?? const <FolderWithGrenades>[])
+                  .where((folder) => folder.grenades.isNotEmpty)
+                  .toList();
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 10, 6, 8),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.star_rounded,
+                            size: 18, color: Colors.amber),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text('收藏夹',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700)),
+                        ),
+                        IconButton(
+                          tooltip: '管理收藏夹',
+                          color: Colors.white70,
+                          onPressed: () =>
+                              _showFavoriteFolderManager(folderService),
+                          icon: const Icon(Icons.settings_outlined, size: 18),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Divider(color: Colors.white.withValues(alpha: 0.14)),
+                  Expanded(
+                    child: snapshot.connectionState == ConnectionState.waiting
+                        ? const Center(child: CircularProgressIndicator())
+                        : folders.isEmpty
+                            ? Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(18),
+                                  child: Text(
+                                    '收藏常用道具后会显示在这里',
+                                    textAlign: TextAlign.center,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(color: Colors.white60),
+                                  ),
+                                ),
+                              )
+                            : ListView.separated(
+                                padding: const EdgeInsets.all(8),
+                                itemCount: folders.length,
+                                separatorBuilder: (_, __) =>
+                                    const SizedBox(height: 4),
+                                itemBuilder: (context, index) {
+                                  final folder = folders[index];
+                                  return ListTile(
+                                    dense: true,
+                                    textColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(6)),
+                                    leading: const Icon(Icons.folder_outlined,
+                                        size: 19, color: Colors.orangeAccent),
+                                    title: Text(folder.folder.name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis),
+                                    trailing: Text('${folder.grenades.length}',
+                                        style:
+                                            TextStyle(color: Colors.white70)),
+                                    onTap: () => _showFavoriteFolderItemsSheet(
+                                        folderService, folder.folder.id),
+                                  );
+                                },
+                              ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _showFavoriteFolderItemsSheet(
       FavoriteFolderService folderService, int folderId) async {
     await showModalBottomSheet(
@@ -4147,6 +4256,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final showMapGrenadeListPanel =
         globalSettingsService?.getShowMapGrenadeList() ?? false;
     final showFavoritesBar = !isEditMode && _selectedClusterForImpact == null;
+    final isMobile = AppBreakpoints.isMobile(context);
     final floatingButtonsBottomInset = showFavoritesBar ? 80.0 : 30.0;
     final spawnSidebarBottomInset = showFavoritesBar ? 60.0 : 0.0;
 
@@ -4161,201 +4271,181 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         titleSpacing: 0,
         title: Row(
           children: [
-            Expanded(
-              child: Container(
-                height: 36,
-                decoration: BoxDecoration(
-                    color:
-                        Theme.of(context).colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                        color: Theme.of(context)
-                            .dividerColor
-                            .withValues(alpha: 0.1))),
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Row(
-                  children: [
-                    // 地图名作为搜索栏前缀
-                    Text(
-                      widget.gameMap.name,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                    ),
-                    Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 8),
-                      width: 1,
-                      height: 16,
-                      color:
-                          Theme.of(context).dividerColor.withValues(alpha: 0.3),
-                    ),
-                    Icon(Icons.search,
-                        color: Theme.of(context).hintColor, size: 16),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Autocomplete<Grenade>(
-                        optionsBuilder: (textEditingValue) {
-                          if (textEditingValue.text.isEmpty) {
-                            return const Iterable<Grenade>.empty();
-                          }
-                          final query = textEditingValue.text.toLowerCase();
-                          return allMapGrenades.where((g) {
-                            // 匹配标题
-                            if (g.title.toLowerCase().contains(query)) {
-                              return true;
-                            }
-                            // 匹配标签名
-                            final grenadeTags = isar.grenadeTags
-                                .filter()
-                                .grenadeIdEqualTo(g.id)
-                                .findAllSync();
-                            for (final gt in grenadeTags) {
-                              final tag = isar.tags.getSync(gt.tagId);
-                              if (tag != null &&
-                                  tag.name.toLowerCase().contains(query)) {
-                                return true;
-                              }
-                            }
-                            return false;
-                          });
-                        },
-                        displayStringForOption: (g) => g.title,
-                        onSelected: _onSearchResultSelected,
-                        optionsViewBuilder: (context, onSelected, options) {
-                          return Align(
-                            alignment: Alignment.topLeft,
-                            child: Material(
-                              elevation: 8.0,
-                              color: const Color(0xFF2A2D33),
-                              borderRadius: BorderRadius.circular(8),
-                              child: Container(
-                                width: MediaQuery.of(context).size.width *
-                                    0.6, // Adjust width as needed
-                                constraints:
-                                    const BoxConstraints(maxHeight: 250),
-                                child: ListView.builder(
-                                  padding: EdgeInsets.zero,
-                                  shrinkWrap: true,
-                                  itemCount: options.length,
-                                  itemBuilder: (context, index) {
-                                    final option = options.elementAt(index);
-                                    option.layer.loadSync();
-                                    return ListTile(
-                                        title: Text(option.title,
-                                            style: const TextStyle(
-                                                color: Colors.white)),
-                                        subtitle: Text(
-                                            "${option.layer.value?.name ?? ''} • ${_getTypeName(option.type)}",
-                                            style: const TextStyle(
-                                                color: Colors.grey,
-                                                fontSize: 12)),
-                                        onTap: () => onSelected(option));
-                                  },
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                        fieldViewBuilder: (context, controller, focusNode,
-                                onFieldSubmitted) =>
-                            TextField(
-                          controller: controller,
-                          focusNode: focusNode,
+            Hero(
+              tag: 'map-icon-${widget.gameMap.id}',
+              child: MapIcon(path: widget.gameMap.iconPath, size: 28),
+            ),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                      maxWidth: AppBreakpoints.isMobile(context) ? 240 : 360),
+                  child: Container(
+                    height: 34,
+                    decoration: BoxDecoration(
+                        color: Colors.transparent,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color: Theme.of(context)
+                                .dividerColor
+                                .withValues(alpha: 0.1))),
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: Row(
+                      children: [
+                        // 地图名作为搜索栏前缀
+                        Text(
+                          widget.gameMap.name,
                           style: TextStyle(
-                              fontSize: 13,
-                              color: Theme.of(context)
-                                  .textTheme
-                                  .bodyMedium
-                                  ?.color),
-                          decoration: const InputDecoration(
-                            hintText: "搜索道具...",
-                            hintStyle:
-                                TextStyle(color: Colors.grey, fontSize: 13),
-                            border: InputBorder.none,
-                            isDense: true,
-                            contentPadding: EdgeInsets.zero,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            color: Theme.of(context).colorScheme.primary,
                           ),
                         ),
-                      ),
+                        Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 8),
+                          width: 1,
+                          height: 16,
+                          color: Theme.of(context)
+                              .dividerColor
+                              .withValues(alpha: 0.3),
+                        ),
+                        Icon(Icons.search,
+                            color: Theme.of(context).hintColor, size: 16),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Autocomplete<Grenade>(
+                            optionsBuilder: (textEditingValue) {
+                              if (textEditingValue.text.isEmpty) {
+                                return const Iterable<Grenade>.empty();
+                              }
+                              final query = textEditingValue.text.toLowerCase();
+                              return allMapGrenades.where((g) {
+                                // 匹配标题
+                                if (g.title.toLowerCase().contains(query)) {
+                                  return true;
+                                }
+                                // 匹配标签名
+                                final grenadeTags = isar.grenadeTags
+                                    .filter()
+                                    .grenadeIdEqualTo(g.id)
+                                    .findAllSync();
+                                for (final gt in grenadeTags) {
+                                  final tag = isar.tags.getSync(gt.tagId);
+                                  if (tag != null &&
+                                      tag.name.toLowerCase().contains(query)) {
+                                    return true;
+                                  }
+                                }
+                                return false;
+                              });
+                            },
+                            displayStringForOption: (g) => g.title,
+                            onSelected: _onSearchResultSelected,
+                            optionsViewBuilder: (context, onSelected, options) {
+                              return Align(
+                                alignment: Alignment.topLeft,
+                                child: Material(
+                                  elevation: 8.0,
+                                  color: const Color(0xFF2A2D33),
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Container(
+                                    width: MediaQuery.of(context).size.width *
+                                        0.6, // Adjust width as needed
+                                    constraints:
+                                        const BoxConstraints(maxHeight: 250),
+                                    child: ListView.builder(
+                                      padding: EdgeInsets.zero,
+                                      shrinkWrap: true,
+                                      itemCount: options.length,
+                                      itemBuilder: (context, index) {
+                                        final option = options.elementAt(index);
+                                        option.layer.loadSync();
+                                        return ListTile(
+                                            title: Text(option.title,
+                                                style: const TextStyle(
+                                                    color: Colors.white)),
+                                            subtitle: Text(
+                                                "${option.layer.value?.name ?? ''} • ${_getTypeName(option.type)}",
+                                                style: const TextStyle(
+                                                    color: Colors.grey,
+                                                    fontSize: 12)),
+                                            onTap: () => onSelected(option));
+                                      },
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                            fieldViewBuilder: (context, controller, focusNode,
+                                    onFieldSubmitted) =>
+                                TextField(
+                              controller: controller,
+                              focusNode: focusNode,
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  color: Theme.of(context)
+                                      .textTheme
+                                      .bodyMedium
+                                      ?.color),
+                              decoration: const InputDecoration(
+                                filled: false,
+                                hintText: "搜索道具...",
+                                hintStyle:
+                                    TextStyle(color: Colors.grey, fontSize: 13),
+                                border: InputBorder.none,
+                                isDense: true,
+                                contentPadding: EdgeInsets.zero,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),
           ],
         ),
         actions: [
-          Padding(
-              padding: const EdgeInsets.only(right: 12.0),
-              child: Row(children: [
-                Text(isEditMode ? "编辑" : "浏览",
-                    style: TextStyle(
-                        color: isEditMode ? Colors.redAccent : Colors.grey,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12)),
-                Transform.scale(
-                  scale: 0.7,
-                  child: Switch(
-                      value: isEditMode,
-                      activeThumbColor: Colors.redAccent,
-                      inactiveThumbColor: Colors.grey,
-                      inactiveTrackColor: Colors.grey.withValues(alpha: 0.3),
-                      onChanged: (val) {
-                        ref.read(isEditModeProvider.notifier).state = val;
-                        if (val) {
-                          _showGrenadeCreateModeHint();
-                        }
-                      }),
-                ),
-              ])),
+          if (isMobile)
+            IconButton(
+              tooltip: isEditMode ? '切换至浏览模式' : '切换至编辑模式',
+              icon: Icon(
+                isEditMode ? Icons.edit_outlined : Icons.visibility_outlined,
+              ),
+              onPressed: () {
+                final value = !isEditMode;
+                ref.read(isEditModeProvider.notifier).state = value;
+                _showGrenadeCreateModeHint(value);
+              },
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: SegmentedButton<bool>(
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(
+                      value: false,
+                      icon: Icon(Icons.visibility_outlined, size: 16),
+                      label: Text('浏览')),
+                  ButtonSegment(
+                      value: true,
+                      icon: Icon(Icons.edit_outlined, size: 16),
+                      label: Text('编辑')),
+                ],
+                selected: {isEditMode},
+                onSelectionChanged: (selection) {
+                  final value = selection.first;
+                  ref.read(isEditModeProvider.notifier).state = value;
+                  _showGrenadeCreateModeHint(value);
+                },
+              ),
+            ),
         ],
-        bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(40),
-            child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                child: Row(children: [
-                  _buildFilterChip("全部", TeamType.all, teamFilter, Colors.grey),
-                  const SizedBox(width: 8),
-                  _buildFilterChip(
-                      "通用", TeamType.onlyAll, teamFilter, Colors.white),
-                  const SizedBox(width: 8),
-                  _buildFilterChip(
-                      "CT", TeamType.ct, teamFilter, Colors.blueAccent),
-                  const SizedBox(width: 8),
-                  _buildFilterChip("T", TeamType.t, teamFilter, Colors.amber),
-                  const SizedBox(width: 20),
-                  FilterChip(
-                      label: const Icon(Icons.star,
-                          size: 16, color: Colors.yellowAccent),
-                      selected: onlyFav,
-                      onSelected: (val) =>
-                          ref.read(onlyFavoritesProvider.notifier).state = val,
-                      backgroundColor: Colors.white10,
-                      selectedColor: Colors.orange.withValues(alpha: 0.3),
-                      showCheckmark: false,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20))),
-                  const SizedBox(width: 8),
-                  FilterChip(
-                      label: const Text("出生点", style: TextStyle(fontSize: 12)),
-                      selected: showSpawnPoints,
-                      onSelected: (val) => ref
-                          .read(showSpawnPointsProvider.notifier)
-                          .state = val,
-                      backgroundColor: Colors.white10,
-                      selectedColor: Colors.green.withValues(alpha: 0.3),
-                      showCheckmark: false,
-                      labelStyle: TextStyle(
-                          color: showSpawnPoints
-                              ? Colors.greenAccent
-                              : Colors.grey),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20))),
-                ]))),
       ),
       body: Column(
         children: [
@@ -5094,58 +5184,90 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                             },
                           ),
                         ))),
-                // 顶部UI
+                // 画布过滤器：不占用地图的垂直空间。
                 Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: SafeArea(
-                      child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 8),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                      color:
-                                          Colors.black.withValues(alpha: 0.85),
-                                      borderRadius: BorderRadius.circular(16),
-                                      border:
-                                          Border.all(color: Colors.white12)),
-                                  child: Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceAround,
-                                      children: [
-                                        _buildTypeFilterBtn(
-                                            selectedTypes,
-                                            GrenadeType.smoke,
-                                            "烟",
-                                            Colors.grey),
-                                        _buildTypeFilterBtn(
-                                            selectedTypes,
-                                            GrenadeType.flash,
-                                            "闪",
-                                            Colors.yellow),
-                                        _buildTypeFilterBtn(
-                                            selectedTypes,
-                                            GrenadeType.molotov,
-                                            "火",
-                                            Colors.red),
-                                        _buildTypeFilterBtn(selectedTypes,
-                                            GrenadeType.he, "雷", Colors.green),
-                                        _buildTypeFilterBtn(
-                                            selectedTypes,
-                                            GrenadeType.wallbang,
-                                            "穿",
-                                            Colors.cyan),
-                                      ])),
-                              const SizedBox(height: 10),
-                              /* Search bar moved to AppBar */
-                            ],
-                          ))),
+                  top: 12,
+                  left: 82,
+                  right: 82,
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 6),
+                      decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.82),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.white12)),
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          _buildFilterChip(
+                              '全部', TeamType.all, teamFilter, Colors.grey),
+                          const SizedBox(width: 6),
+                          _buildFilterChip(
+                              '通用', TeamType.onlyAll, teamFilter, Colors.white),
+                          const SizedBox(width: 6),
+                          _buildFilterChip(
+                              'CT', TeamType.ct, teamFilter, Colors.blueAccent),
+                          const SizedBox(width: 6),
+                          _buildFilterChip(
+                              'T', TeamType.t, teamFilter, Colors.amber),
+                          const SizedBox(width: 10),
+                          IconButton(
+                            tooltip: '仅显示收藏',
+                            visualDensity: VisualDensity.compact,
+                            onPressed: () => ref
+                                .read(onlyFavoritesProvider.notifier)
+                                .state = !onlyFav,
+                            icon: Icon(
+                                onlyFav
+                                    ? Icons.star_rounded
+                                    : Icons.star_border_rounded,
+                                color: onlyFav ? Colors.amber : Colors.white70,
+                                size: 19),
+                          ),
+                          IconButton(
+                            tooltip: '显示出生点',
+                            visualDensity: VisualDensity.compact,
+                            onPressed: () => ref
+                                .read(showSpawnPointsProvider.notifier)
+                                .state = !showSpawnPoints,
+                            icon: Icon(Icons.my_location_rounded,
+                                color: showSpawnPoints
+                                    ? Colors.greenAccent
+                                    : Colors.white70,
+                                size: 18),
+                          ),
+                        ]),
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 74,
+                  left: 12,
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.84),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.white12)),
+                    child: Column(children: [
+                      _buildTypeFilterBtn(selectedTypes, GrenadeType.smoke, '烟',
+                          context.appTheme.smoke),
+                      const SizedBox(height: 6),
+                      _buildTypeFilterBtn(selectedTypes, GrenadeType.flash, '闪',
+                          context.appTheme.flash),
+                      const SizedBox(height: 6),
+                      _buildTypeFilterBtn(selectedTypes, GrenadeType.molotov,
+                          '火', context.appTheme.molotov),
+                      const SizedBox(height: 6),
+                      _buildTypeFilterBtn(selectedTypes, GrenadeType.he, '雷',
+                          context.appTheme.he),
+                      const SizedBox(height: 6),
+                      _buildTypeFilterBtn(selectedTypes, GrenadeType.wallbang,
+                          '穿', context.appTheme.wallbang),
+                    ]),
+                  ),
                 ),
                 // 爆点模式切换按钮
                 Positioned(
@@ -5241,12 +5363,31 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                         spawnConfig, currentLayer.id, isEditMode),
                   ),
                 // 底部收藏栏（仅在未选中点位时显示）
-                if (showFavoritesBar)
+                if (showFavoritesBar &&
+                    constraints.maxWidth >= AppBreakpoints.mobile &&
+                    !showSpawnPoints)
                   Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      child: _buildFavoritesBar(context, folderService)),
+                    top: 74,
+                    right: 12,
+                    height: 368,
+                    width: 190,
+                    child: AnimatedSlide(
+                      offset: Offset.zero,
+                      duration: AppMotion.panel,
+                      curve: AppMotion.enter,
+                      child: Align(
+                        alignment: Alignment.topCenter,
+                        child: _buildFavoritesSidePanel(folderService),
+                      ),
+                    ),
+                  )
+                else if (showFavoritesBar)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: _buildFavoritesBar(context, folderService),
+                  ),
               ]);
             }),
           ),

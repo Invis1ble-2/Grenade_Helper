@@ -8,7 +8,6 @@ import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 import '../models.dart';
 import '../providers.dart';
-import '../main.dart';
 import '../services/map_management_service.dart';
 import '../services/tag_service.dart';
 import '../widgets/fireworks_effect.dart';
@@ -16,14 +15,9 @@ import '../widgets/snowfall_effect.dart';
 import '../widgets/map_icon.dart';
 import '../widgets/path_image_provider.dart';
 import '../widgets/grenade_type_icon.dart';
+import '../theme/app_design_system.dart';
 import 'map_screen.dart';
 import 'grenade_detail_screen.dart';
-import 'import_screen.dart';
-import 'share_screen.dart';
-import 'settings_screen.dart';
-import 'about_screen.dart';
-import 'lan_sync_screen.dart';
-import '../widgets/spring_festival_fu.dart';
 import '../widgets/spring_festival_banner.dart';
 
 // 全局搜索
@@ -79,7 +73,9 @@ class GlobalSearchDelegate extends SearchDelegate {
 }
 
 class HomeScreen extends ConsumerStatefulWidget {
-  const HomeScreen({super.key});
+  final bool embedded;
+
+  const HomeScreen({super.key, this.embedded = false});
 
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
@@ -411,53 +407,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  Widget _buildMapCard(BuildContext context, Isar isar, GameMap map) {
-    final imageProvider = imageProviderFromPath(map.backgroundPath);
-    final isCustomMap = MapManagementService.isCustomMap(map);
+  int _mapGrenadeCount(GameMap map) {
+    map.layers.loadSync();
+    var grenades = 0;
+    for (final layer in map.layers) {
+      layer.grenades.loadSync();
+      grenades += layer.grenades.length;
+    }
+    return grenades;
+  }
 
-    Widget card = Card(
-      clipBehavior: Clip.antiAlias,
-      margin: const EdgeInsets.only(bottom: 16),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: InkWell(
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => MapScreen(gameMap: map)),
-        ),
-        child: Container(
-          height: 120,
-          decoration: BoxDecoration(
-            color: const Color(0xFF616161),
-            image: imageProvider == null
-                ? null
-                : DecorationImage(
-                    image: imageProvider,
-                    fit: BoxFit.cover,
-                    colorFilter: ColorFilter.mode(
-                      Colors.black.withValues(alpha: 0.4),
-                      BlendMode.darken,
-                    ),
-                  ),
-          ),
-          child: Center(
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                MapIcon(path: map.iconPath, size: 40),
-                const SizedBox(width: 16),
-                Text(
-                  map.name,
-                  style: const TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                    letterSpacing: 1.5,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+  Widget _buildMapCard(
+      BuildContext context, Isar isar, GameMap map, int index) {
+    final isCustomMap = MapManagementService.isCustomMap(map);
+    final grenadeCount = _mapGrenadeCount(map);
+
+    Widget card = _HomeMapCard(
+      map: map,
+      index: index,
+      grenadeCount: grenadeCount,
+      isCustomMap: isCustomMap,
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => MapScreen(gameMap: map)),
       ),
     );
 
@@ -466,10 +438,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         key: ValueKey('map-${map.id}'),
         direction: DismissDirection.endToStart,
         background: Container(
-          margin: const EdgeInsets.only(bottom: 16),
           decoration: BoxDecoration(
             color: Colors.red.shade700,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(8),
           ),
           alignment: Alignment.centerRight,
           padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -499,24 +470,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     BuildContext context,
     Isar isar,
   ) {
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      margin: const EdgeInsets.only(bottom: 16),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: InkWell(
-        onTap: () => _showAddCustomMapDialog(context, isar),
-        child: Container(
-          height: 120,
-          color: const Color(0xFF757575),
-          child: const Center(
-            child: Text(
-              '添加自定义地图',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-                letterSpacing: 1.5,
-              ),
+    return CustomPaint(
+      painter: _DashedBorderPainter(color: context.appTheme.subtleBorder),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => _showAddCustomMapDialog(context, isar),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.add_photo_alternate_outlined,
+                    size: 32, color: context.appTheme.mutedText),
+                const SizedBox(height: 12),
+                const Text('添加自定义地图',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 4),
+                Text('导入雷达图并建立自己的点位库',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: context.appTheme.mutedText,
+                        )),
+              ],
             ),
           ),
         ),
@@ -546,184 +521,90 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final isSpringFestivalTheme = seasonalThemeId == 'spring_festival';
 
     Widget body = Scaffold(
-      appBar: AppBar(
-        title: GestureDetector(
-          onTap: () =>
-              showSearch(context: context, delegate: GlobalSearchDelegate(ref)),
-          child: Container(
-            height: 40,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(20)),
-            child: const Row(
-              children: [
-                Icon(Icons.search, color: Colors.grey),
-                SizedBox(width: 8),
-                Text("搜索道具...",
-                    style: TextStyle(color: Colors.grey, fontSize: 14))
-              ],
-            ),
-          ),
-        ),
-        // 圣诞灯带
-        bottom: isChristmasTheme
-            ? const PreferredSize(
-                preferredSize: Size.fromHeight(24),
-                child: ChristmasLights(height: 24),
-              )
-            : (isSpringFestivalTheme
-                ? const PreferredSize(
-                    preferredSize: Size.fromHeight(40),
-                    child: SpringFestivalBanner(),
-                  )
-                : null),
-      ),
-      drawer: Drawer(
+      body: SafeArea(
+        bottom: !widget.embedded,
         child: Column(
           children: [
-            Expanded(
-              child: ListView(
-                padding: EdgeInsets.zero,
+            if (isChristmasTheme) const ChristmasLights(height: 20),
+            if (isSpringFestivalTheme) const SpringFestivalBanner(),
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                  AppBreakpoints.isMobile(context) ? 16 : 24,
+                  20,
+                  AppBreakpoints.isMobile(context) ? 16 : 24,
+                  14),
+              child: Row(
                 children: [
-                  DrawerHeader(
-                      child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      // Logo
-                      Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          ClipOval(
-                            child: Image.asset(
-                              'assets/icons/app_icon.png',
-                              width: 80,
-                              height: 80,
-                              fit: BoxFit.cover,
-                            ),
-                          ),
-                          // 圣诞帽
-                          if (isChristmasTheme)
-                            const Positioned(
-                              top: -25,
-                              left: 5,
-                              child: ChristmasHat(width: 70),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          if (seasonalTheme != null)
-                            Padding(
-                              padding: const EdgeInsets.only(right: 8),
-                              child: Text(seasonalTheme.emoji,
-                                  style: const TextStyle(fontSize: 24)),
-                            ),
-                          const Text("Grenade Helper",
-                              style: TextStyle(
-                                  fontSize: 22, fontWeight: FontWeight.bold)),
-                          if (seasonalTheme != null)
-                            Padding(
-                              padding: const EdgeInsets.only(left: 8),
-                              child: Text(seasonalTheme.emoji,
-                                  style: const TextStyle(fontSize: 24)),
-                            ),
-                        ],
-                      ),
-                    ],
-                  )),
-                  ListTile(
-                    leading: const Icon(Icons.file_download),
-                    title: const Text("导入"),
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => const ImportScreen()));
-                    },
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
+                          Text('地图库',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .headlineSmall
+                                  ?.copyWith(fontWeight: FontWeight.w800)),
+                          if (seasonalTheme != null) ...[
+                            const SizedBox(width: 8),
+                            Text(seasonalTheme.emoji)
+                          ],
+                        ]),
+                        const SizedBox(height: 4),
+                        Text('${visibleMaps.length} 张地图',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: context.appTheme.mutedText)),
+                      ],
+                    ),
                   ),
-                  ListTile(
-                    leading: const Icon(Icons.share),
-                    title: const Text("分享"),
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => const ShareScreen()));
-                    },
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.wifi_tethering),
-                    title: const Text("局域网同步"),
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const LanSyncScreen(),
-                        ),
-                      );
-                    },
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.settings),
-                    title: const Text("设置"),
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => SettingsScreen(
-                            settingsService: globalSettingsService,
-                            onHotkeyChanged: (action, config) async {
-                              if (globalHotkeyService != null) {
-                                await globalHotkeyService!
-                                    .updateHotkey(action, config);
-                              }
-                            },
-                            onHotkeysReset: () async {
-                              await globalHotkeyService?.reloadFromSettings();
-                            },
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.info_outline),
-                    title: const Text("关于"),
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const AboutScreen()),
-                      );
-                    },
+                  const SizedBox(width: 16),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                        maxWidth: AppBreakpoints.isMobile(context) ? 220 : 360),
+                    child: TextField(
+                      readOnly: true,
+                      onTap: () => showSearch(
+                          context: context,
+                          delegate: GlobalSearchDelegate(ref)),
+                      decoration: const InputDecoration(
+                          prefixIcon: Icon(Icons.search_rounded),
+                          hintText: '搜索全部道具'),
+                    ),
                   ),
                 ],
               ),
             ),
-            if (isSpringFestivalTheme)
-              const Padding(
-                padding: EdgeInsets.only(bottom: 40),
-                child: SpringFestivalFu(size: 140),
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final columns = constraints.maxWidth >= 1280
+                      ? 3
+                      : (constraints.maxWidth >= 720 ? 2 : 1);
+                  return GridView.builder(
+                    padding: EdgeInsets.fromLTRB(
+                        AppBreakpoints.isMobile(context) ? 16 : 24,
+                        8,
+                        AppBreakpoints.isMobile(context) ? 16 : 24,
+                        24),
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: columns,
+                      mainAxisExtent: 220,
+                      crossAxisSpacing: 16,
+                      mainAxisSpacing: 16,
+                    ),
+                    itemCount: visibleMaps.length + 1,
+                    itemBuilder: (ctx, index) => index == visibleMaps.length
+                        ? _buildAddCustomMapCard(context, isar)
+                        : _buildMapCard(
+                            context, isar, visibleMaps[index], index),
+                  );
+                },
               ),
+            ),
           ],
         ),
-      ),
-      body: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: visibleMaps.length + 1,
-        itemBuilder: (ctx, index) {
-          if (index == visibleMaps.length) {
-            return _buildAddCustomMapCard(context, isar);
-          }
-          return _buildMapCard(context, isar, visibleMaps[index]);
-        },
       ),
     );
 
@@ -742,4 +623,160 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     return body;
   }
+}
+
+class _HomeMapCard extends StatefulWidget {
+  final GameMap map;
+  final int index;
+  final int grenadeCount;
+  final bool isCustomMap;
+  final VoidCallback onTap;
+
+  const _HomeMapCard({
+    required this.map,
+    required this.index,
+    required this.grenadeCount,
+    required this.isCustomMap,
+    required this.onTap,
+  });
+
+  @override
+  State<_HomeMapCard> createState() => _HomeMapCardState();
+}
+
+class _HomeMapCardState extends State<_HomeMapCard> {
+  bool _hovered = false;
+  bool _visible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Future.delayed(Duration(milliseconds: 35 * widget.index.clamp(0, 8)), () {
+      if (mounted) setState(() => _visible = true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final imageProvider = imageProviderFromPath(widget.map.backgroundPath);
+    return AnimatedSlide(
+      offset: _visible ? Offset.zero : const Offset(0, 0.04),
+      duration: AppMotion.panel,
+      curve: AppMotion.enter,
+      child: AnimatedOpacity(
+        opacity: _visible ? 1 : 0,
+        duration: AppMotion.panel,
+        child: MouseRegion(
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit: (_) => setState(() => _hovered = false),
+          child: Card(
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: widget.onTap,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  AnimatedScale(
+                    scale: _hovered ? 1.035 : 1,
+                    duration: AppMotion.content,
+                    curve: AppMotion.enter,
+                    child: imageProvider == null
+                        ? Container(color: const Color(0xFF30343A))
+                        : Image(image: imageProvider, fit: BoxFit.cover),
+                  ),
+                  Positioned.fill(
+                      child: ColoredBox(
+                          color: Colors.black
+                              .withValues(alpha: _hovered ? 0.28 : 0.38))),
+                  Positioned(
+                    left: 16,
+                    right: 16,
+                    bottom: 14,
+                    child: AnimatedSlide(
+                      offset: _hovered ? const Offset(0, -0.03) : Offset.zero,
+                      duration: AppMotion.quick,
+                      child: Row(
+                        children: [
+                          Hero(
+                              tag: 'map-icon-${widget.map.id}',
+                              child:
+                                  MapIcon(path: widget.map.iconPath, size: 40)),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(widget.map.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 21,
+                                        fontWeight: FontWeight.w800)),
+                                const SizedBox(height: 3),
+                                Text('${widget.grenadeCount} 个道具',
+                                    style: TextStyle(
+                                        color: Colors.white
+                                            .withValues(alpha: 0.76),
+                                        fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.arrow_forward_rounded,
+                              color: Colors.white),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (widget.isCustomMap)
+                    Positioned(
+                        top: 12,
+                        right: 12,
+                        child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.54),
+                                borderRadius: BorderRadius.circular(6)),
+                            child: const Text('自定义',
+                                style: TextStyle(
+                                    color: Colors.white, fontSize: 11)))),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DashedBorderPainter extends CustomPainter {
+  final Color color;
+  const _DashedBorderPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    final path = Path()
+      ..addRRect(RRect.fromRectAndRadius(
+          Offset.zero & size, const Radius.circular(8)));
+    for (final metric in path.computeMetrics()) {
+      var distance = 0.0;
+      while (distance < metric.length) {
+        canvas.drawPath(
+            metric.extractPath(
+                distance, (distance + 7).clamp(0, metric.length)),
+            paint);
+        distance += 12;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedBorderPainter oldDelegate) =>
+      oldDelegate.color != color;
 }
