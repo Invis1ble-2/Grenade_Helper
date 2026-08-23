@@ -240,6 +240,44 @@ List<GrenadeCluster> clusterGrenadesByImpact(List<Grenade> grenades,
   );
 }
 
+String _mapMarkerEmojiForType(int type) {
+  switch (type) {
+    case GrenadeType.smoke:
+      return '☁️';
+    case GrenadeType.flash:
+      return '⚡';
+    case GrenadeType.molotov:
+      return '🔥';
+    case GrenadeType.he:
+      return '💣';
+    case GrenadeType.wallbang:
+      return '🧱';
+    default:
+      return '❓';
+  }
+}
+
+void _paintMapMarkerEmoji(
+  Canvas canvas,
+  int type, {
+  required Offset center,
+  required double fontSize,
+  required TextDirection textDirection,
+}) {
+  final painter = TextPainter(
+    text: TextSpan(
+      text: _mapMarkerEmojiForType(type),
+      style: TextStyle(fontSize: fontSize, height: 1),
+    ),
+    textDirection: textDirection,
+    maxLines: 1,
+  )..layout();
+  painter.paint(
+    canvas,
+    Offset(center.dx - painter.width / 2, center.dy - painter.height / 2),
+  );
+}
+
 class MapScreen extends ConsumerStatefulWidget {
   final GameMap gameMap;
   const MapScreen({super.key, required this.gameMap});
@@ -304,6 +342,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   final ValueNotifier<int> _batchedDragVisualTick = ValueNotifier<int>(0);
   final Map<int, PictureInfo> _grenadeTypePictures = {};
   bool _isLoadingGrenadeTypePictures = false;
+
+  bool get _useEmojiMapMarkers =>
+      globalSettingsService?.getMapMarkerUseEmoji() ?? false;
 
   @override
   void initState() {
@@ -2278,6 +2319,22 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     }
   }
 
+  Widget _buildMapMarkerTypeIcon(
+    int type, {
+    required double size,
+    required Color color,
+  }) {
+    if (_useEmojiMapMarkers) {
+      return Center(
+        child: Text(
+          _mapMarkerEmojiForType(type),
+          style: TextStyle(fontSize: size + 2, height: 1),
+        ),
+      );
+    }
+    return GrenadeTypeIcon(type: type, size: size, color: color);
+  }
+
   String _getTeamName(int team) {
     switch (team) {
       case TeamType.ct:
@@ -2691,8 +2748,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                         size: 10,
                         color: Colors.purpleAccent.withValues(alpha: 0.9),
                       )
-                    : GrenadeTypeIcon(
-                        type: cluster.primaryType,
+                    : _buildMapMarkerTypeIcon(
+                        cluster.primaryType,
                         size: 11,
                         color: _getTypeColor(cluster.primaryType),
                       )),
@@ -2766,8 +2823,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               ),
             ],
           ),
-          child: GrenadeTypeIcon(
-            type: grenade.type,
+          child: _buildMapMarkerTypeIcon(
+            grenade.type,
             size: 11,
             color: _getTypeColor(grenade.type),
           ),
@@ -2825,8 +2882,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               ),
             ],
           ),
-          child: GrenadeTypeIcon(
-            type: grenade.type,
+          child: _buildMapMarkerTypeIcon(
+            grenade.type,
             size: 13,
             color: typeColor,
           ),
@@ -2897,8 +2954,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             ),
             child: cluster.hasMultipleTypes
                 ? Icon(Icons.layers, size: 14, color: typeColor)
-                : GrenadeTypeIcon(
-                    type: cluster.primaryType,
+                : _buildMapMarkerTypeIcon(
+                    cluster.primaryType,
                     size: 15,
                     color: typeColor,
                   ),
@@ -4610,6 +4667,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                                                     int,
                                                                     PictureInfo>.unmodifiable(
                                                                 _grenadeTypePictures),
+                                                            useEmoji:
+                                                                _useEmojiMapMarkers,
                                                           ),
                                                         ),
                                                       ),
@@ -4745,6 +4804,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                                                     int,
                                                                     PictureInfo>.unmodifiable(
                                                                 _grenadeTypePictures),
+                                                            useEmoji:
+                                                                _useEmojiMapMarkers,
                                                           ),
                                                         ),
                                                       ),
@@ -6509,6 +6570,7 @@ class _ImpactClusterBatchPainter extends CustomPainter {
   final bool denseStyle;
   final TextDirection textDirection;
   final Map<int, PictureInfo> typePictures;
+  final bool useEmoji;
 
   _ImpactClusterBatchPainter({
     required this.clusters,
@@ -6517,6 +6579,7 @@ class _ImpactClusterBatchPainter extends CustomPainter {
     required this.denseStyle,
     required this.textDirection,
     required this.typePictures,
+    required this.useEmoji,
   });
 
   @override
@@ -6555,7 +6618,15 @@ class _ImpactClusterBatchPainter extends CustomPainter {
     canvas.drawCircle(Offset.zero, baseRadius, borderPaint);
 
     final typePicture = typePictures[cluster.primaryType];
-    if (typePicture != null && cluster.grenades.length == 1) {
+    if (useEmoji && cluster.grenades.length == 1) {
+      _paintMapMarkerEmoji(
+        canvas,
+        cluster.primaryType,
+        center: Offset.zero,
+        fontSize: 13,
+        textDirection: textDirection,
+      );
+    } else if (typePicture != null && cluster.grenades.length == 1) {
       _drawTypePicture(canvas, typePicture, center: Offset.zero, size: 11);
     } else {
       _drawIconGlyph(
@@ -6637,6 +6708,7 @@ class _ImpactClusterBatchPainter extends CustomPainter {
         oldDelegate.markerScale != markerScale ||
         oldDelegate.denseStyle != denseStyle ||
         oldDelegate.textDirection != textDirection ||
+        oldDelegate.useEmoji != useEmoji ||
         !_sameTypePictures(oldDelegate.typePictures, typePictures) ||
         oldDelegate.imageBounds.width != imageBounds.width ||
         oldDelegate.imageBounds.height != imageBounds.height ||
@@ -6684,6 +6756,7 @@ class _ClusterBatchPainter extends CustomPainter {
   final bool denseStyle;
   final TextDirection textDirection;
   final Map<int, PictureInfo> typePictures;
+  final bool useEmoji;
 
   _ClusterBatchPainter({
     required this.clusters,
@@ -6692,6 +6765,7 @@ class _ClusterBatchPainter extends CustomPainter {
     required this.denseStyle,
     required this.textDirection,
     required this.typePictures,
+    required this.useEmoji,
   });
 
   @override
@@ -6732,7 +6806,15 @@ class _ClusterBatchPainter extends CustomPainter {
     canvas.drawCircle(Offset.zero, baseRadius, borderPaint);
 
     final typePicture = typePictures[cluster.primaryType];
-    if (!cluster.hasMultipleTypes && typePicture != null) {
+    if (!cluster.hasMultipleTypes && useEmoji) {
+      _paintMapMarkerEmoji(
+        canvas,
+        cluster.primaryType,
+        center: Offset.zero,
+        fontSize: 13,
+        textDirection: textDirection,
+      );
+    } else if (!cluster.hasMultipleTypes && typePicture != null) {
       _drawTypePicture(canvas, typePicture, center: Offset.zero, size: 11);
     } else {
       _drawIconGlyph(
@@ -6881,6 +6963,7 @@ class _ClusterBatchPainter extends CustomPainter {
         oldDelegate.markerScale != markerScale ||
         oldDelegate.denseStyle != denseStyle ||
         oldDelegate.textDirection != textDirection ||
+        oldDelegate.useEmoji != useEmoji ||
         !_sameTypePictures(oldDelegate.typePictures, typePictures) ||
         oldDelegate.imageBounds.width != imageBounds.width ||
         oldDelegate.imageBounds.height != imageBounds.height ||

@@ -74,6 +74,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late int _grenadeCreateMode;
   late bool _showMapGrenadeList;
   late bool _highDensityClusterMode;
+  late bool _mapMarkerUseEmoji;
   late double _joystickOpacity;
   late int _joystickSpeed;
   // 存储路径
@@ -119,6 +120,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _showMapGrenadeList = widget.settingsService!.getShowMapGrenadeList();
       _highDensityClusterMode =
           widget.settingsService!.getHighDensityClusterMode();
+      _mapMarkerUseEmoji = widget.settingsService!.getMapMarkerUseEmoji();
       _joystickOpacity = widget.settingsService!.getJoystickOpacity();
       _joystickSpeed = widget.settingsService!.getJoystickSpeed();
       // 加载路径
@@ -139,6 +141,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _grenadeCreateMode = 0;
       _showMapGrenadeList = false;
       _highDensityClusterMode = true;
+      _mapMarkerUseEmoji = false;
       _joystickOpacity = 0.8;
       _joystickSpeed = 3;
     }
@@ -413,6 +416,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
             ),
           ),
+        SwitchListTile(
+          title: const Text('地图圆标使用默认表情'),
+          subtitle: const Text('仅切换地图上的道具圆形标记，其他界面保持 SVG'),
+          value: _mapMarkerUseEmoji,
+          onChanged: (value) async {
+            setState(() => _mapMarkerUseEmoji = value);
+            if (widget.settingsService != null) {
+              await widget.settingsService!.setMapMarkerUseEmoji(value);
+            }
+          },
+        ),
       ],
     );
   }

@@ -169,6 +169,7 @@ class SettingsService {
   static const String _keyGrenadeCreateMode = 'grenade_create_mode';
   static const String _keyShowMapGrenadeList = 'show_map_grenade_list';
   static const String _keyHighDensityClusterMode = 'high_density_cluster_mode';
+  static const String _keyMapMarkerUseEmoji = 'map_marker_use_emoji';
   static const String _keyJoystickOpacity = 'joystick_opacity';
   static const String _keyJoystickSpeed = 'joystick_speed';
   static const String _keyOverlayNavSpeed = 'overlay_nav_speed';
@@ -736,6 +737,23 @@ class SettingsService {
       await _saveValue(_keyHighDensityClusterMode, value);
     } else {
       await _prefs?.setBool(_keyHighDensityClusterMode, value);
+    }
+  }
+
+  /// 地图圆形点位标记是否使用系统 emoji，而非 SVG。
+  bool getMapMarkerUseEmoji() {
+    if (isDesktop) {
+      return _cache[_keyMapMarkerUseEmoji] as bool? ?? false;
+    }
+    return _prefs?.getBool(_keyMapMarkerUseEmoji) ?? false;
+  }
+
+  Future<void> setMapMarkerUseEmoji(bool value) async {
+    if (isDesktop) {
+      _cache[_keyMapMarkerUseEmoji] = value;
+      await _saveValue(_keyMapMarkerUseEmoji, value);
+    } else {
+      await _prefs?.setBool(_keyMapMarkerUseEmoji, value);
     }
   }
 
