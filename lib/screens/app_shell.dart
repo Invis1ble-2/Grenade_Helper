@@ -113,7 +113,7 @@ class _AppShellState extends State<AppShell> {
   }
 }
 
-class _LiquidGlassNavigationBar extends StatelessWidget {
+class _LiquidGlassNavigationBar extends StatefulWidget {
   final int selectedIndex;
   final ValueChanged<int> onDestinationSelected;
 
@@ -121,6 +121,31 @@ class _LiquidGlassNavigationBar extends StatelessWidget {
     required this.selectedIndex,
     required this.onDestinationSelected,
   });
+
+  @override
+  State<_LiquidGlassNavigationBar> createState() =>
+      _LiquidGlassNavigationBarState();
+}
+
+class _LiquidGlassNavigationBarState extends State<_LiquidGlassNavigationBar> {
+  late final Future<ui.FragmentProgram> _glassProgram;
+  ui.FragmentShader? _barShader;
+  ui.FragmentShader? _indicatorShader;
+  ui.ImageFilter? _barFilter;
+  ui.ImageFilter? _indicatorFilter;
+
+  @override
+  void initState() {
+    super.initState();
+    _glassProgram = ui.FragmentProgram.fromAsset('shaders/liquid_glass.frag');
+  }
+
+  @override
+  void dispose() {
+    _barShader?.dispose();
+    _indicatorShader?.dispose();
+    super.dispose();
+  }
 
   static const _items = [
     (Icons.map_outlined, Icons.map_rounded, '地图库'),
@@ -130,6 +155,47 @@ class _LiquidGlassNavigationBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return FutureBuilder<ui.FragmentProgram>(
+      future: _glassProgram,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return ErrorWidget.withDetails(
+            message: 'Liquid glass shader failed to load',
+            error: FlutterError('${snapshot.error}'),
+          );
+        }
+        final program = snapshot.data;
+        if (program == null) {
+          // Keep the layout stable while the mandatory shader asset loads.
+          return const SizedBox(
+            height: AppBreakpoints.mobileBottomBarHeight +
+                AppBreakpoints.mobileBottomBarMinimumSafeArea,
+          );
+        }
+        _prepareFilters(program);
+        return _buildBar(context);
+      },
+    );
+  }
+
+  void _prepareFilters(ui.FragmentProgram program) {
+    if (_barFilter != null && _indicatorFilter != null) return;
+
+    _barShader = program.fragmentShader()
+      ..setFloat(2, -118)
+      ..setFloat(3, 10)
+      ..setFloat(4, 0.055)
+      ..setFloat(5, 0.085);
+    _indicatorShader = program.fragmentShader()
+      ..setFloat(2, -82)
+      ..setFloat(3, 7)
+      ..setFloat(4, 0.075)
+      ..setFloat(5, 0.105);
+    _barFilter = ui.ImageFilter.shader(_barShader!);
+    _indicatorFilter = ui.ImageFilter.shader(_indicatorShader!);
+  }
+
+  Widget _buildBar(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final primary = theme.colorScheme.primary;
@@ -149,111 +215,135 @@ class _LiquidGlassNavigationBar extends StatelessWidget {
           child: SizedBox(
             height: AppBreakpoints.mobileBottomBarHeight,
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(24),
-              child: BackdropFilter(
-                filter: ui.ImageFilter.blur(sigmaX: 3, sigmaY: 3),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: (isDark ? const Color(0xFF22262B) : Colors.white)
-                        .withValues(alpha: isDark ? 0.42 : 0.34),
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(
-                      color: (isDark ? Colors.white : Colors.black)
-                          .withValues(alpha: isDark ? 0.15 : 0.09),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black
-                            .withValues(alpha: isDark ? 0.28 : 0.12),
-                        blurRadius: 24,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                  ),
-                  child: Stack(
-                    children: [
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          child: CustomPaint(
-                            painter: _GlassRefractionPainter(
-                              primary: primary,
-                              isDark: isDark,
-                            ),
+              borderRadius: BorderRadius.circular(25),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  BackdropFilter(
+                    filter: _barFilter!,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: (isDark ? const Color(0xFF101418) : Colors.white)
+                            .withValues(alpha: isDark ? 0.24 : 0.11),
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            Colors.white
+                                .withValues(alpha: isDark ? 0.10 : 0.26),
+                            primary.withValues(alpha: isDark ? 0.06 : 0.035),
+                            Colors.black
+                                .withValues(alpha: isDark ? 0.10 : 0.025),
+                          ],
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black
+                                .withValues(alpha: isDark ? 0.34 : 0.16),
+                            blurRadius: 24,
+                            offset: const Offset(0, 8),
                           ),
-                        ),
-                      ),
-                      AnimatedAlign(
-                        alignment: Alignment(
-                          -1.0 + selectedIndex,
-                          0,
-                        ),
-                        duration: AppMotion.panel,
-                        curve: AppMotion.enter,
-                        child: FractionallySizedBox(
-                          widthFactor: 1 / _items.length,
-                          heightFactor: 1,
-                          child: Padding(
-                            padding: const EdgeInsets.all(7),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(18),
-                              child: BackdropFilter(
-                                filter:
-                                    ui.ImageFilter.blur(sigmaX: 7, sigmaY: 7),
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                      colors: [
-                                        Colors.white.withValues(
-                                            alpha: isDark ? 0.16 : 0.42),
-                                        primary.withValues(
-                                            alpha: isDark ? 0.20 : 0.11),
-                                        Colors.white.withValues(
-                                            alpha: isDark ? 0.04 : 0.15),
-                                      ],
-                                    ),
-                                    borderRadius: BorderRadius.circular(18),
-                                    border: Border.all(
-                                      color: primary.withValues(
-                                          alpha: isDark ? 0.48 : 0.24),
-                                    ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: primary.withValues(alpha: 0.14),
-                                        blurRadius: 13,
-                                        spreadRadius: 1,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Row(
-                        children: [
-                          for (var index = 0; index < _items.length; index++)
-                            Expanded(
-                              child: _LiquidGlassNavigationItem(
-                                icon: _items[index].$1,
-                                selectedIcon: _items[index].$2,
-                                label: _items[index].$3,
-                                selected: selectedIndex == index,
-                                primary: primary,
-                                onTap: () => onDestinationSelected(index),
-                              ),
-                            ),
                         ],
                       ),
+                    ),
+                  ),
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: CustomPaint(
+                        painter: _LiquidGlassRimPainter(
+                          primary: primary,
+                          isDark: isDark,
+                        ),
+                      ),
+                    ),
+                  ),
+                  AnimatedAlign(
+                    alignment: Alignment(-1.0 + widget.selectedIndex, 0),
+                    duration: AppMotion.panel,
+                    curve: AppMotion.enter,
+                    child: FractionallySizedBox(
+                      widthFactor: 1 / _items.length,
+                      heightFactor: 1,
+                      child: Padding(
+                        padding: const EdgeInsets.all(6),
+                        child: _LiquidGlassIndicator(
+                          filter: _indicatorFilter!,
+                          primary: primary,
+                          isDark: isDark,
+                        ),
+                      ),
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      for (var index = 0; index < _items.length; index++)
+                        Expanded(
+                          child: _LiquidGlassNavigationItem(
+                            icon: _items[index].$1,
+                            selectedIcon: _items[index].$2,
+                            label: _items[index].$3,
+                            selected: widget.selectedIndex == index,
+                            primary: primary,
+                            onTap: () => widget.onDestinationSelected(index),
+                          ),
+                        ),
                     ],
                   ),
-                ),
+                ],
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _LiquidGlassIndicator extends StatelessWidget {
+  final ui.ImageFilter filter;
+  final Color primary;
+  final bool isDark;
+
+  const _LiquidGlassIndicator({
+    required this.filter,
+    required this.primary,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          BackdropFilter(
+            filter: filter,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: primary.withValues(alpha: isDark ? 0.08 : 0.045),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Colors.white.withValues(alpha: isDark ? 0.18 : 0.34),
+                    primary.withValues(alpha: isDark ? 0.12 : 0.08),
+                    Colors.black.withValues(alpha: isDark ? 0.12 : 0.035),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          IgnorePointer(
+            child: CustomPaint(
+              painter: _LiquidGlassRimPainter(
+                primary: primary,
+                isDark: isDark,
+                indicator: true,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -312,54 +402,78 @@ class _LiquidGlassNavigationItem extends StatelessWidget {
   }
 }
 
-class _GlassRefractionPainter extends CustomPainter {
+class _LiquidGlassRimPainter extends CustomPainter {
   final Color primary;
   final bool isDark;
+  final bool indicator;
 
-  const _GlassRefractionPainter({required this.primary, required this.isDark});
+  const _LiquidGlassRimPainter({
+    required this.primary,
+    required this.isDark,
+    this.indicator = false,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final radius = size.height * 0.32;
-    final highlight = Paint()
+    final rect = Offset.zero & size;
+    final radius = Radius.circular(size.height * (indicator ? 0.38 : 0.36));
+    final edge = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = 1.4;
+      ..strokeWidth = indicator ? 1.1 : 1.0
+      ..shader = LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          Colors.white.withValues(
+              alpha:
+                  indicator ? (isDark ? 0.40 : 0.56) : (isDark ? 0.30 : 0.46)),
+          const Color(0xFF78E7FF).withValues(alpha: isDark ? 0.22 : 0.17),
+          primary.withValues(alpha: isDark ? 0.23 : 0.15),
+          const Color(0xFFFF8FC8).withValues(alpha: isDark ? 0.16 : 0.10),
+          Colors.white.withValues(alpha: isDark ? 0.08 : 0.14),
+        ],
+      ).createShader(rect);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect.deflate(0.5), radius),
+      edge,
+    );
 
-    highlight.color = Colors.white.withValues(alpha: isDark ? 0.25 : 0.58);
-    canvas.drawArc(
-      Rect.fromLTWH(
-          -size.width * 0.08, -size.height * 0.33, size.width * 0.72, radius),
-      0.12,
-      1.1,
-      false,
-      highlight,
+    final topRim = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = indicator ? 1.0 : 0.9
+      ..color = Colors.white.withValues(
+          alpha: indicator ? (isDark ? 0.24 : 0.38) : (isDark ? 0.16 : 0.28));
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        rect.deflate(indicator ? 2.0 : 1.5),
+        Radius.circular(size.height * (indicator ? 0.32 : 0.31)),
+      ),
+      topRim,
     );
-    highlight.color =
-        const Color(0xFF67D7FF).withValues(alpha: isDark ? 0.14 : 0.10);
+
+    final bottomRim = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.8
+      ..color = Colors.black.withValues(alpha: isDark ? 0.30 : 0.10);
     canvas.drawArc(
       Rect.fromLTWH(
-          size.width * 0.48, size.height * 0.58, size.width * 0.66, radius),
-      3.25,
-      1.0,
+        size.width * 0.08,
+        size.height * 0.25,
+        size.width * 0.84,
+        size.height * 1.30,
+      ),
+      0.25,
+      2.65,
       false,
-      highlight,
-    );
-    highlight.color =
-        const Color(0xFFFF8AC7).withValues(alpha: isDark ? 0.11 : 0.08);
-    canvas.drawArc(
-      Rect.fromLTWH(
-          size.width * 0.58, -size.height * 0.2, size.width * 0.55, radius),
-      1.65,
-      0.68,
-      false,
-      highlight,
+      bottomRim,
     );
   }
 
   @override
-  bool shouldRepaint(covariant _GlassRefractionPainter oldDelegate) =>
-      oldDelegate.primary != primary || oldDelegate.isDark != isDark;
+  bool shouldRepaint(covariant _LiquidGlassRimPainter oldDelegate) =>
+      oldDelegate.primary != primary ||
+      oldDelegate.isDark != isDark ||
+      oldDelegate.indicator != indicator;
 }
 
 class _AppLogo extends StatelessWidget {

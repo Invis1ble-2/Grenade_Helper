@@ -1,7 +1,7 @@
 name: grenade_helper
 description: A CS2 grenade helper App.
 publish_to: 'none'
-version: 1.5.4+23
+version: 2.0.0+23
 
 environment:
   sdk: '>=3.2.0 <4.0.0'
@@ -13,6 +13,8 @@ flutter:
     - assets/maps/
     - assets/backgrounds/
     - assets/icons/
+  shaders:
+    - shaders/liquid_glass.frag
 
 dependencies:
   flutter:
