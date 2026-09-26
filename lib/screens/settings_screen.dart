@@ -167,7 +167,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
+        backgroundColor: Colors.transparent,
         title: const Text('设置'),
       ),
       body: _buildSettingsContent(),
@@ -227,6 +229,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         itemBuilder: (context, index) {
           final category = categories[index];
           return Card(
+            color: Colors.transparent,
             child: ExpansionTile(
               initiallyExpanded: index == 0,
               leading: Icon(category.icon,
@@ -248,7 +251,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       children: [
         Container(
           width: 224,
-          color: Theme.of(context).colorScheme.surface,
           padding: const EdgeInsets.all(12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1575,6 +1577,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     required List<Widget> children,
   }) {
     return Card(
+      color: Colors.transparent,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

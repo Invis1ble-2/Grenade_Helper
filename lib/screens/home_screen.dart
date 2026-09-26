@@ -521,6 +521,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final isSpringFestivalTheme = seasonalThemeId == 'spring_festival';
 
     Widget body = Scaffold(
+      backgroundColor: Colors.transparent,
       body: SafeArea(
         bottom: !widget.embedded,
         child: Column(
@@ -569,6 +570,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           context: context,
                           delegate: GlobalSearchDelegate(ref)),
                       decoration: const InputDecoration(
+                          fillColor: Colors.transparent,
                           prefixIcon: Icon(Icons.search_rounded),
                           hintText: '搜索全部道具'),
                     ),

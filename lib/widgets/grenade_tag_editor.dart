@@ -12,6 +12,9 @@ const List<int> _tagDimensionDisplayOrder = <int>[
   TagDimension.custom,
 ];
 
+// 标签较多时先折叠展示，避免占用整个道具详情页。
+const int _collapsedTagCount = 12;
+
 int _tagDimensionRank(int dimension) {
   final index = _tagDimensionDisplayOrder.indexOf(dimension);
   return index >= 0 ? index : _tagDimensionDisplayOrder.length + dimension;
@@ -55,6 +58,7 @@ class _GrenadeTagEditorState extends State<GrenadeTagEditor> {
   List<Tag> _allTags = [];
   Set<int> _selectedTagIds = {};
   bool _isLoading = true;
+  bool _showAllTags = false;
 
   @override
   void initState() {
@@ -108,6 +112,11 @@ class _GrenadeTagEditorState extends State<GrenadeTagEditor> {
           height: 60,
           child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
     }
+    final sortedTags = _sortTagsForDisplay(_allTags);
+    final visibleTags = _showAllTags
+        ? sortedTags
+        : sortedTags.take(_collapsedTagCount).toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -130,12 +139,35 @@ class _GrenadeTagEditorState extends State<GrenadeTagEditor> {
         _allTags.isEmpty
             ? const Text('暂无标签，点击右上角创建',
                 style: TextStyle(color: Colors.grey, fontSize: 12))
-            : Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _sortTagsForDisplay(_allTags)
-                    .map((tag) => _buildTagChip(tag))
-                    .toList(),
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children:
+                        visibleTags.map((tag) => _buildTagChip(tag)).toList(),
+                  ),
+                  if (sortedTags.length > _collapsedTagCount)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: () =>
+                            setState(() => _showAllTags = !_showAllTags),
+                        icon: Icon(
+                          _showAllTags ? Icons.expand_less : Icons.expand_more,
+                          size: 18,
+                        ),
+                        label: Text(_showAllTags
+                            ? '收起'
+                            : '显示更多（${sortedTags.length - visibleTags.length}）'),
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                        ),
+                      ),
+                    ),
+                ],
               ),
       ],
     );
@@ -244,7 +276,7 @@ class _QuickCreateTagDialogState extends State<_QuickCreateTagDialog> {
 }
 
 /// 显示道具标签的只读展示组件
-class GrenadeTagDisplay extends StatelessWidget {
+class GrenadeTagDisplay extends StatefulWidget {
   final List<Tag> tags;
   final bool compact;
 
@@ -252,25 +284,62 @@ class GrenadeTagDisplay extends StatelessWidget {
       {super.key, required this.tags, this.compact = false});
 
   @override
+  State<GrenadeTagDisplay> createState() => _GrenadeTagDisplayState();
+}
+
+class _GrenadeTagDisplayState extends State<GrenadeTagDisplay> {
+  bool _showAllTags = false;
+
+  @override
   Widget build(BuildContext context) {
-    if (tags.isEmpty) return const SizedBox.shrink();
-    final sortedTags = _sortTagsForDisplay(tags);
-    return Wrap(
-      spacing: 4,
-      runSpacing: 4,
-      children: sortedTags.map((tag) {
-        final color = Color(tag.colorValue);
-        return Container(
-          padding: EdgeInsets.symmetric(
-              horizontal: compact ? 6 : 8, vertical: compact ? 2 : 4),
-          decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(compact ? 8 : 12),
-              border: Border.all(color: color.withValues(alpha: 0.3))),
-          child: Text(tag.name,
-              style: TextStyle(fontSize: compact ? 10 : 12, color: color)),
-        );
-      }).toList(),
+    if (widget.tags.isEmpty) return const SizedBox.shrink();
+    final sortedTags = _sortTagsForDisplay(widget.tags);
+    final visibleTags = _showAllTags
+        ? sortedTags
+        : sortedTags.take(_collapsedTagCount).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 4,
+          runSpacing: 4,
+          children: visibleTags.map((tag) {
+            final color = Color(tag.colorValue);
+            return Container(
+              padding: EdgeInsets.symmetric(
+                horizontal: widget.compact ? 6 : 8,
+                vertical: widget.compact ? 2 : 4,
+              ),
+              decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(widget.compact ? 8 : 12),
+                  border: Border.all(color: color.withValues(alpha: 0.3))),
+              child: Text(tag.name,
+                  style: TextStyle(
+                      fontSize: widget.compact ? 10 : 12, color: color)),
+            );
+          }).toList(),
+        ),
+        if (sortedTags.length > _collapsedTagCount)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => setState(() => _showAllTags = !_showAllTags),
+              icon: Icon(
+                _showAllTags ? Icons.expand_less : Icons.expand_more,
+                size: 18,
+              ),
+              label: Text(_showAllTags
+                  ? '收起'
+                  : '显示更多（${sortedTags.length - visibleTags.length}）'),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

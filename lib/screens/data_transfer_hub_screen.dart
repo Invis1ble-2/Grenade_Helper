@@ -35,7 +35,11 @@ class DataTransferHubScreen extends StatelessWidget {
     ];
 
     return Scaffold(
-      appBar: AppBar(title: const Text('数据传输')),
+      backgroundColor: Colors.transparent,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        title: const Text('数据传输'),
+      ),
       body: LayoutBuilder(
         builder: (context, constraints) {
           final columns = constraints.maxWidth >= 1100
@@ -98,6 +102,7 @@ class _TransferTileState extends State<_TransferTile> {
         duration: AppMotion.quick,
         curve: AppMotion.enter,
         child: Card(
+          color: Colors.transparent,
           child: InkWell(
             borderRadius: BorderRadius.circular(8),
             onTap: () => Navigator.of(context).push(

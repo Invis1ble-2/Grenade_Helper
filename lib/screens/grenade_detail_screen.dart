@@ -228,6 +228,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
   final _stepScrollController = ScrollController();
   final Map<int, GlobalKey> _stepKeys = <int, GlobalKey>{};
   String? _originalTitle; // 存原始标题
+  List<Tag>? _grenadeTags; // 缓存道具的标签
 
   @override
   void initState() {
@@ -273,6 +274,9 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
         _titleController.text = grenade!.title;
         _originalTitle = grenade!.title; // 存原始标题
       }
+      // 加载标签数据
+      final tagService = TagService(isar);
+      _grenadeTags = await tagService.getGrenadeTags(grenade!.id);
     }
     if (mounted) {
       setState(() {});
@@ -2233,19 +2237,10 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                 sendOverlayCommand('reload_data');
               },
             )
-          : FutureBuilder<List<Tag>>(
-              future: tagService.getGrenadeTags(grenade!.id),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const SizedBox(
-                    height: 28,
-                    child: Center(
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  );
-                }
-
-                final tags = snapshot.data ?? const <Tag>[];
+          : Builder(
+              builder: (context) {
+                // 使用缓存的标签数据
+                final tags = _grenadeTags ?? const <Tag>[];
                 if (tags.isEmpty) {
                   return const Text(
                     '未绑定标签',

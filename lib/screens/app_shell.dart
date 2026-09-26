@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -62,7 +63,15 @@ class _AppShellState extends State<AppShell> {
     if (mobile) {
       return Scaffold(
         extendBody: true,
-        body: content,
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            const Positioned.fill(
+              child: _ShellPanningBackground(),
+            ),
+            content,
+          ],
+        ),
         bottomNavigationBar: _LiquidGlassNavigationBar(
           selectedIndex: _index,
           onDestinationSelected: (value) => setState(() => _index = value),
@@ -70,44 +79,159 @@ class _AppShellState extends State<AppShell> {
       );
     }
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
-      body: Row(
+      body: Stack(
+        fit: StackFit.expand,
         children: [
-          NavigationRail(
-            extended: expanded,
-            selectedIndex: _index,
-            onDestinationSelected: (value) => setState(() => _index = value),
-            leading: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              child: expanded
-                  ? Row(mainAxisSize: MainAxisSize.min, children: [
-                      const _AppLogo(size: 30),
-                      const SizedBox(width: 10),
-                      const Text('Grenade Helper',
-                          style: TextStyle(fontWeight: FontWeight.w700))
-                    ])
-                  : const Tooltip(
-                      message: 'Grenade Helper', child: _AppLogo(size: 32)),
-            ),
-            trailing: Expanded(
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: IconButton(
-                    tooltip: '关于',
-                    icon: const Icon(Icons.info_outline_rounded),
-                    onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const AboutScreen())),
+          const Positioned.fill(
+            child: _ShellPanningBackground(),
+          ),
+          Row(
+            children: [
+              ClipRect(
+                child: BackdropFilter(
+                  filter: ui.ImageFilter.blur(sigmaX: 3, sigmaY: 3),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: (isDark ? const Color(0xFF14181D) : Colors.white)
+                          .withValues(alpha: isDark ? 0.16 : 0.1),
+                    ),
+                    child: NavigationRail(
+                      backgroundColor: Colors.transparent,
+                      extended: expanded,
+                      selectedIndex: _index,
+                      onDestinationSelected: (value) =>
+                          setState(() => _index = value),
+                      leading: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        child: expanded
+                            ? Row(mainAxisSize: MainAxisSize.min, children: [
+                                const _AppLogo(size: 30),
+                                const SizedBox(width: 10),
+                                const Text('Grenade Helper',
+                                    style:
+                                        TextStyle(fontWeight: FontWeight.w700))
+                              ])
+                            : const Tooltip(
+                                message: 'Grenade Helper',
+                                child: _AppLogo(size: 32)),
+                      ),
+                      trailing: Expanded(
+                        child: Align(
+                          alignment: Alignment.bottomCenter,
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: IconButton(
+                              tooltip: '关于',
+                              icon: const Icon(Icons.info_outline_rounded),
+                              onPressed: () => Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                      builder: (_) => const AboutScreen())),
+                            ),
+                          ),
+                        ),
+                      ),
+                      destinations: _destinations,
+                    ),
                   ),
                 ),
               ),
-            ),
-            destinations: _destinations,
+              VerticalDivider(width: 1, color: context.appTheme.subtleBorder),
+              Expanded(child: content),
+            ],
           ),
-          VerticalDivider(width: 1, color: context.appTheme.subtleBorder),
-          Expanded(child: content),
         ],
+      ),
+    );
+  }
+}
+
+class _ShellPanningBackground extends StatefulWidget {
+  const _ShellPanningBackground();
+
+  @override
+  State<_ShellPanningBackground> createState() =>
+      _ShellPanningBackgroundState();
+}
+
+class _ShellPanningBackgroundState extends State<_ShellPanningBackground>
+    with SingleTickerProviderStateMixin {
+  static const double _imageAspectRatio = 3072 / 2048;
+  late final AnimationController _controller;
+  late final Animation<double> _progress;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 28),
+    )..repeat(reverse: true);
+    _progress = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeInOutSine,
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final assetPath = isDark
+        ? 'assets/backgrounds/home_bg_dark.png'
+        : 'assets/backgrounds/home_bg_light.png';
+
+    return RepaintBoundary(
+      child: IgnorePointer(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final viewportWidth = constraints.maxWidth;
+            final viewportHeight = constraints.maxHeight;
+            final canvasWidth = math.max(
+              viewportWidth * 1.35,
+              viewportHeight * _imageAspectRatio,
+            );
+            final canvasHeight = canvasWidth / _imageAspectRatio;
+            final maxDx = canvasWidth - viewportWidth;
+            final dy = (viewportHeight - canvasHeight) / 2;
+
+            return ClipRect(
+              child: AnimatedBuilder(
+                animation: _progress,
+                child: OverflowBox(
+                  alignment: Alignment.topLeft,
+                  minWidth: canvasWidth,
+                  maxWidth: canvasWidth,
+                  minHeight: canvasHeight,
+                  maxHeight: canvasHeight,
+                  child: Image.asset(
+                    assetPath,
+                    width: canvasWidth,
+                    height: canvasHeight,
+                    fit: BoxFit.fill,
+                    isAntiAlias: true,
+                    filterQuality: FilterQuality.medium,
+                    gaplessPlayback: true,
+                  ),
+                ),
+                builder: (context, child) {
+                  final dx = -maxDx * _progress.value;
+                  return Transform.translate(
+                    offset: Offset(dx, dy),
+                    child: child,
+                  );
+                },
+              ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -128,7 +252,7 @@ class _LiquidGlassNavigationBar extends StatefulWidget {
 }
 
 class _LiquidGlassNavigationBarState extends State<_LiquidGlassNavigationBar> {
-  late final Future<ui.FragmentProgram> _glassProgram;
+  Future<ui.FragmentProgram>? _glassProgram;
   ui.FragmentShader? _barShader;
   ui.FragmentShader? _indicatorShader;
   ui.ImageFilter? _barFilter;
@@ -137,7 +261,12 @@ class _LiquidGlassNavigationBarState extends State<_LiquidGlassNavigationBar> {
   @override
   void initState() {
     super.initState();
-    _glassProgram = ui.FragmentProgram.fromAsset('shaders/liquid_glass.frag');
+    if (ui.ImageFilter.isShaderFilterSupported) {
+      _glassProgram = ui.FragmentProgram.fromAsset('shaders/liquid_glass.frag');
+    } else {
+      _barFilter = ui.ImageFilter.blur(sigmaX: 14, sigmaY: 14);
+      _indicatorFilter = ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10);
+    }
   }
 
   @override
@@ -155,6 +284,9 @@ class _LiquidGlassNavigationBarState extends State<_LiquidGlassNavigationBar> {
 
   @override
   Widget build(BuildContext context) {
+    if (!ui.ImageFilter.isShaderFilterSupported) {
+      return _buildBar(context);
+    }
     return FutureBuilder<ui.FragmentProgram>(
       future: _glassProgram,
       builder: (context, snapshot) {
@@ -368,8 +500,7 @@ class _LiquidGlassNavigationItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final muted =
-        Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.72);
+    const muted = Colors.white;
     return Semantics(
       button: true,
       selected: selected,

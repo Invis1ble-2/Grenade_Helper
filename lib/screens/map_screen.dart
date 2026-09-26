@@ -2426,7 +2426,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         ref.read(typeFilterProvider.notifier).state = newSet;
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
         decoration: BoxDecoration(
             color: isSelected
                 ? activeColor.withValues(alpha: 0.2)
@@ -2435,7 +2435,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 color: isSelected
                     ? activeColor
                     : unselectedColor.withValues(alpha: 0.4)),
-            borderRadius: BorderRadius.circular(8)),
+            borderRadius: BorderRadius.circular(9)),
         child: Row(children: [
           GrenadeTypeIcon(
             type: type,
@@ -2460,7 +2460,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     return GestureDetector(
       onTap: () => ref.read(teamFilterProvider.notifier).state = value,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
             color:
                 isSelected ? color.withValues(alpha: 0.2) : Colors.transparent,
@@ -2468,7 +2468,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 color: isSelected
                     ? color
                     : unselectedColor.withValues(alpha: 0.4)),
-            borderRadius: BorderRadius.circular(20)),
+            borderRadius: BorderRadius.circular(10)),
         child: Text(label,
             style: TextStyle(
                 color: isSelected ? color : unselectedColor,
@@ -3285,9 +3285,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           onTap: () => setState(
               () => _isSpawnSidebarExpanded = !_isSpawnSidebarExpanded),
           child: Container(
-            width: 20,
+            width: 22,
             decoration: BoxDecoration(
-              color: const Color(0xFF1A1D21).withValues(alpha: 0.9),
+              color: const Color(0xFF15181C).withValues(alpha: 0.86),
               border: Border(
                   left: BorderSide(color: Colors.white.withValues(alpha: 0.1))),
             ),
@@ -3305,9 +3305,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         // 侧边栏内容
         if (_isSpawnSidebarExpanded)
           Container(
-            width: 75,
+            width: 78,
             decoration: BoxDecoration(
-              color: const Color(0xFF1A1D21).withValues(alpha: 0.9),
+              color: const Color(0xFF15181C).withValues(alpha: 0.86),
+              border: Border(
+                  left:
+                      BorderSide(color: Colors.white.withValues(alpha: 0.08))),
             ),
             child: Column(
               children: [
@@ -3443,7 +3446,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       BuildContext context, FavoriteFolderService folderService) {
     return Container(
       height: 60,
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(
+          top: BorderSide(
+            color: Theme.of(context).dividerColor.withValues(alpha: 0.7),
+          ),
+        ),
+      ),
       child: StreamBuilder<List<FolderWithGrenades>>(
         stream: folderService.watchMapFavorites(widget.gameMap.id),
         builder: (context, snapshot) {
@@ -4269,6 +4279,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     return Scaffold(
       resizeToAvoidBottomInset: false,
       appBar: AppBar(
+        toolbarHeight: isMobile ? 58 : kToolbarHeight,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         titleSpacing: 0,
         title: Row(
           children: [
@@ -4284,8 +4296,15 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   constraints: BoxConstraints(
                       maxWidth: AppBreakpoints.isMobile(context) ? 240 : 360),
                   child: Container(
-                    height: 34,
+                    height: 36,
                     padding: const EdgeInsets.symmetric(horizontal: 10),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .surfaceContainerHighest
+                          .withValues(alpha: 0.72),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                     child: Row(
                       children: [
                         // 地图名作为搜索栏前缀
@@ -4298,15 +4317,15 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                           ),
                         ),
                         Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 8),
+                          margin: const EdgeInsets.symmetric(horizontal: 9),
                           width: 1,
-                          height: 16,
+                          height: 18,
                           color: Theme.of(context)
                               .dividerColor
                               .withValues(alpha: 0.3),
                         ),
                         Icon(Icons.search,
-                            color: Theme.of(context).hintColor, size: 16),
+                            color: Theme.of(context).hintColor, size: 17),
                         const SizedBox(width: 6),
                         Expanded(
                           child: Autocomplete<Grenade>(
@@ -5185,84 +5204,100 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                         ))),
                 // 画布过滤器：不占用地图的垂直空间。
                 Positioned(
-                  top: 12,
-                  left: 82,
-                  right: 82,
+                  top: 10,
+                  left: 72,
+                  right: 72,
                   child: Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 6),
-                      decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.82),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.white12)),
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          _buildFilterChip(
-                              '全部', TeamType.all, teamFilter, Colors.grey),
-                          const SizedBox(width: 6),
-                          _buildFilterChip(
-                              '通用', TeamType.onlyAll, teamFilter, Colors.white),
-                          const SizedBox(width: 6),
-                          _buildFilterChip(
-                              'CT', TeamType.ct, teamFilter, Colors.blueAccent),
-                          const SizedBox(width: 6),
-                          _buildFilterChip(
-                              'T', TeamType.t, teamFilter, Colors.amber),
-                          const SizedBox(width: 10),
-                          IconButton(
-                            tooltip: '仅显示收藏',
-                            visualDensity: VisualDensity.compact,
-                            onPressed: () => ref
-                                .read(onlyFavoritesProvider.notifier)
-                                .state = !onlyFav,
-                            icon: Icon(
-                                onlyFav
-                                    ? Icons.star_rounded
-                                    : Icons.star_border_rounded,
-                                color: onlyFav ? Colors.amber : Colors.white70,
-                                size: 19),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.58),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.16)),
                           ),
-                          IconButton(
-                            tooltip: '显示出生点',
-                            visualDensity: VisualDensity.compact,
-                            onPressed: () => ref
-                                .read(showSpawnPointsProvider.notifier)
-                                .state = !showSpawnPoints,
-                            icon: Icon(Icons.my_location_rounded,
-                                color: showSpawnPoints
-                                    ? Colors.greenAccent
-                                    : Colors.white70,
-                                size: 18),
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child:
+                                Row(mainAxisSize: MainAxisSize.min, children: [
+                              _buildFilterChip(
+                                  '全部', TeamType.all, teamFilter, Colors.grey),
+                              const SizedBox(width: 5),
+                              _buildFilterChip('通用', TeamType.onlyAll,
+                                  teamFilter, Colors.white),
+                              const SizedBox(width: 5),
+                              _buildFilterChip('CT', TeamType.ct, teamFilter,
+                                  Colors.blueAccent),
+                              const SizedBox(width: 5),
+                              _buildFilterChip(
+                                  'T', TeamType.t, teamFilter, Colors.amber),
+                              const SizedBox(width: 5),
+                              IconButton(
+                                tooltip: '仅显示收藏',
+                                visualDensity: VisualDensity.compact,
+                                padding: const EdgeInsets.all(5),
+                                constraints: const BoxConstraints(
+                                    minWidth: 32, minHeight: 32),
+                                onPressed: () => ref
+                                    .read(onlyFavoritesProvider.notifier)
+                                    .state = !onlyFav,
+                                icon: Icon(
+                                    onlyFav
+                                        ? Icons.star_rounded
+                                        : Icons.star_border_rounded,
+                                    color:
+                                        onlyFav ? Colors.amber : Colors.white70,
+                                    size: 19),
+                              ),
+                              IconButton(
+                                tooltip: '显示出生点',
+                                visualDensity: VisualDensity.compact,
+                                padding: const EdgeInsets.all(5),
+                                constraints: const BoxConstraints(
+                                    minWidth: 32, minHeight: 32),
+                                onPressed: () => ref
+                                    .read(showSpawnPointsProvider.notifier)
+                                    .state = !showSpawnPoints,
+                                icon: Icon(Icons.my_location_rounded,
+                                    color: showSpawnPoints
+                                        ? Colors.greenAccent
+                                        : Colors.white70,
+                                    size: 18),
+                              ),
+                            ]),
                           ),
-                        ]),
+                        ),
                       ),
                     ),
                   ),
                 ),
                 Positioned(
-                  top: 74,
-                  left: 12,
+                  top: 68,
+                  left: 10,
                   child: Container(
-                    padding: const EdgeInsets.all(6),
+                    padding: const EdgeInsets.all(5),
                     decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.84),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.white12)),
+                        color: Colors.black.withValues(alpha: 0.62),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.white24)),
                     child: Column(children: [
                       _buildTypeFilterBtn(selectedTypes, GrenadeType.smoke, '烟',
                           context.appTheme.smoke),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
                       _buildTypeFilterBtn(selectedTypes, GrenadeType.flash, '闪',
                           context.appTheme.flash),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
                       _buildTypeFilterBtn(selectedTypes, GrenadeType.molotov,
                           '火', context.appTheme.molotov),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
                       _buildTypeFilterBtn(selectedTypes, GrenadeType.he, '雷',
                           context.appTheme.he),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
                       _buildTypeFilterBtn(selectedTypes, GrenadeType.wallbang,
                           '穿', context.appTheme.wallbang),
                     ]),
@@ -5274,8 +5309,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   bottom: floatingButtonsBottomInset, // 与右边按钮组保持一致
                   child: FloatingActionButton.small(
                     heroTag: 'impact_mode_toggle',
-                    backgroundColor:
-                        _isImpactMode ? Colors.redAccent : Colors.blueGrey,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(13)),
+                    elevation: 3,
+                    backgroundColor: _isImpactMode
+                        ? Colors.redAccent
+                        : const Color(0xFF536D78),
                     onPressed: () {
                       setState(() {
                         _isImpactMode = !_isImpactMode;
@@ -5306,17 +5345,23 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                     children: [
                       FloatingActionButton.small(
                         heroTag: "btn_tag_filter",
-                        backgroundColor: Colors.blueGrey,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(13)),
+                        elevation: 3,
+                        backgroundColor: const Color(0xFF536D78),
                         onPressed: () => _showTagFilterSheet(currentLayer.id),
                         child: const Icon(Icons.label_outline,
                             color: Colors.white),
                       ),
                       if (layers.length > 1) ...[
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 8),
                         FloatingActionButton.small(
                             heroTag: "btn_up",
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(13)),
+                            elevation: 3,
                             backgroundColor: layerIndex < layers.length - 1
-                                ? Colors.orange
+                                ? Theme.of(context).colorScheme.primary
                                 : Colors.grey[800],
                             onPressed: layerIndex < layers.length - 1
                                 ? () => ref
@@ -5325,20 +5370,24 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                 : null,
                             child: const Icon(Icons.arrow_upward)),
                         Container(
-                            margin: const EdgeInsets.symmetric(vertical: 8),
+                            margin: const EdgeInsets.symmetric(vertical: 5),
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 4),
+                                horizontal: 9, vertical: 4),
                             decoration: BoxDecoration(
-                                color: Colors.black87,
-                                borderRadius: BorderRadius.circular(4)),
+                                color: Colors.black.withValues(alpha: 0.68),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.white24)),
                             child: Text("F${layerIndex + 1}",
                                 style: const TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.bold))),
                         FloatingActionButton.small(
                             heroTag: "btn_down",
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(13)),
+                            elevation: 3,
                             backgroundColor: layerIndex > 0
-                                ? Colors.orange
+                                ? Theme.of(context).colorScheme.primary
                                 : Colors.grey[800],
                             onPressed: layerIndex > 0
                                 ? () => ref
