@@ -177,10 +177,12 @@ class _AreaAutoTagPreviewScreenState
                 ?.toDouble(),
           ).clamp(_minBrushRatio, _maxBrushRatio);
           final isEraser = _parseIsEraser(stroke['isEraser'] ?? stroke['e']);
+          final isShape = _parseIsEraser(stroke['isShape'] ?? stroke['s']);
           return _AreaPreviewStroke(
             points: points,
             widthRatio: widthRatio,
             isEraser: isEraser,
+            isShape: isShape,
           );
         }
 
@@ -190,6 +192,7 @@ class _AreaAutoTagPreviewScreenState
           points: points,
           widthRatio: _defaultBrushRatio,
           isEraser: false,
+          isShape: false,
         );
       }).toList();
     } catch (_) {
@@ -653,9 +656,26 @@ class _AreaScopePainter extends CustomPainter {
         imageBounds.offsetY + ratio.dy * imageBounds.height,
       );
 
-  void _drawStroke(
-      Canvas canvas, List<Offset> points, double widthRatio, bool isEraser) {
+  void _drawStroke(Canvas canvas, List<Offset> points, double widthRatio,
+      bool isEraser, bool isShape) {
     if (points.isEmpty) return;
+    final screenPoints = points.map(_toScreen).toList(growable: false);
+
+    if (isShape && screenPoints.length >= 3) {
+      final polyPaint = isEraser
+          ? (Paint()
+            ..blendMode = BlendMode.clear
+            ..style = PaintingStyle.fill
+            ..isAntiAlias = true)
+          : (Paint()
+            ..color = color.withValues(alpha: 1.0)
+            ..style = PaintingStyle.fill
+            ..isAntiAlias = true);
+      final path = Path()..addPolygon(screenPoints, true);
+      canvas.drawPath(path, polyPaint);
+      return;
+    }
+
     final diameterPx = (widthRatio * imageBounds.width).clamp(3.0, 120.0);
     final radiusPx = diameterPx / 2;
 
@@ -683,7 +703,6 @@ class _AreaScopePainter extends CustomPainter {
           ..strokeWidth = diameterPx
           ..isAntiAlias = true);
 
-    final screenPoints = points.map(_toScreen).toList(growable: false);
     for (int i = 0; i < screenPoints.length; i++) {
       canvas.drawCircle(screenPoints[i], radiusPx, fillPaint);
       if (i > 0) {
@@ -700,7 +719,8 @@ class _AreaScopePainter extends CustomPainter {
     );
 
     for (final stroke in strokes) {
-      _drawStroke(canvas, stroke.points, stroke.widthRatio, stroke.isEraser);
+      _drawStroke(
+          canvas, stroke.points, stroke.widthRatio, stroke.isEraser, stroke.isShape);
     }
 
     canvas.restore();
@@ -716,10 +736,12 @@ class _AreaPreviewStroke {
   final List<Offset> points;
   final double widthRatio;
   final bool isEraser;
+  final bool isShape;
 
   const _AreaPreviewStroke({
     required this.points,
     required this.widthRatio,
     required this.isEraser,
+    this.isShape = false,
   });
 }

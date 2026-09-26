@@ -201,8 +201,9 @@ const Map<String, Map<String, List<BuiltinAreaPreset>>> builtinAreaRegionPresets
 
       final compact = <Map<String, dynamic>>[];
       for (final stroke in strokes) {
-        final simplified =
-            _simplifyStrokePoints(stroke.points, stroke.widthRatio);
+        final simplified = stroke.isShape
+            ? stroke.points
+            : _simplifyStrokePoints(stroke.points, stroke.widthRatio);
         if (simplified.isEmpty) continue;
 
         final points = <List<double>>[];
@@ -229,6 +230,9 @@ const Map<String, Map<String, List<BuiltinAreaPreset>>> builtinAreaRegionPresets
         if (stroke.isEraser) {
           entry['e'] = 1;
         }
+        if (stroke.isShape) {
+          entry['s'] = 1;
+        }
         compact.add(entry);
       }
 
@@ -250,11 +254,13 @@ const Map<String, Map<String, List<BuiltinAreaPreset>>> builtinAreaRegionPresets
         if (points.isEmpty) continue;
         final widthRatio = _parseWidthRatio(stroke);
         final isEraser = _parseIsEraser(stroke);
+        final isShape = _parseIsShape(stroke);
         result.add(
           _ExportStroke(
             points: points,
             widthRatio: widthRatio,
             isEraser: isEraser,
+            isShape: isShape,
           ),
         );
         continue;
@@ -300,6 +306,13 @@ const Map<String, Map<String, List<BuiltinAreaPreset>>> builtinAreaRegionPresets
 
   bool _parseIsEraser(Map stroke) {
     final raw = stroke['isEraser'] ?? stroke['e'];
+    if (raw is bool) return raw;
+    if (raw is num) return raw != 0;
+    return false;
+  }
+
+  bool _parseIsShape(Map stroke) {
+    final raw = stroke['isShape'] ?? stroke['s'];
     if (raw is bool) return raw;
     if (raw is num) return raw != 0;
     return false;
@@ -479,11 +492,13 @@ class _ExportStroke {
   final List<_Pt> points;
   final double widthRatio;
   final bool isEraser;
+  final bool isShape;
 
   const _ExportStroke({
     required this.points,
     required this.widthRatio,
     required this.isEraser,
+    this.isShape = false,
   });
 }
 

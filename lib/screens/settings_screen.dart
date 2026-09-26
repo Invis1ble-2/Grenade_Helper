@@ -7,7 +7,6 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:isar_community/isar.dart';
 import '../services/settings_service.dart';
-import '../services/seasonal_theme_service.dart';
 import '../services/data_service.dart';
 import '../services/map_management_service.dart';
 import '../services/lan_sync/lan_sync_local_store.dart';
@@ -471,8 +470,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             },
           ),
         ),
-        if (SeasonalThemeManager.getActiveTheme() != null)
-          _buildSeasonalThemeToggle(),
         if (_isDesktop)
           SwitchListTile(
             title: const Text('关闭按钮最小化到托盘'),
@@ -1540,33 +1537,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         );
       }
     }
-  }
-
-  /// 节日开关组件
-  Widget _buildSeasonalThemeToggle() {
-    final seasonalTheme = SeasonalThemeManager.getActiveTheme();
-    if (seasonalTheme == null) return const SizedBox.shrink();
-
-    final enabled = ref.watch(seasonalThemeEnabledProvider);
-
-    return SwitchListTile(
-      title: Row(
-        children: [
-          Text(seasonalTheme.emoji, style: const TextStyle(fontSize: 20)),
-          const SizedBox(width: 8),
-          Text('${seasonalTheme.name}主题'),
-        ],
-      ),
-      subtitle: Text(enabled ? '享受节日氛围吧！' : '已关闭节日装饰'),
-      value: enabled,
-      onChanged: (value) async {
-        ref.read(seasonalThemeEnabledProvider.notifier).state = value;
-        if (widget.settingsService != null) {
-          await widget.settingsService!.setSeasonalThemeEnabled(value);
-        }
-      },
-      activeThumbColor: Theme.of(context).colorScheme.primary,
-    );
   }
 
   Widget _buildSection({

@@ -22,7 +22,6 @@ import 'services/overlay_state_service.dart';
 import 'services/update_service.dart';
 import 'services/migration_service.dart';
 import 'services/tag_service.dart';
-import 'themes/christmas_theme.dart';
 import 'theme/app_design_system.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -428,9 +427,6 @@ Future<void> _runMainWindow() async {
       sendOverlayCommand('scroll_down');
     });
   }
-
-  // 初始化节日主题系统
-  initializeSeasonalThemes();
 
   runApp(
     // 4. 注入 Riverpod 和 Isar
@@ -1059,9 +1055,6 @@ class _MainAppState extends ConsumerState<MainApp> {
     if (globalSettingsService != null) {
       final savedTheme = globalSettingsService!.getThemeMode();
       ref.read(themeModeProvider.notifier).state = savedTheme;
-      // 加载节日主题开关设置
-      final seasonalEnabled = globalSettingsService!.getSeasonalThemeEnabled();
-      ref.read(seasonalThemeEnabledProvider.notifier).state = seasonalEnabled;
       // 加载地图连线设置
       ref.read(mapLineColorProvider.notifier).state =
           globalSettingsService!.getMapLineColor();
@@ -1371,46 +1364,14 @@ class _MainAppState extends ConsumerState<MainApp> {
   @override
   Widget build(BuildContext context) {
     final themeMode = ref.watch(themeModeProvider);
-    final seasonalTheme = ref.watch(activeSeasonalThemeProvider);
-
-    ThemeData baseDarkTheme = AppTheme.dark();
-    ThemeData baseLightTheme = AppTheme.light();
-
-    // 如果有激活的节日主题，应用节日配色
-    ThemeData darkTheme = baseDarkTheme;
-    ThemeData lightTheme = baseLightTheme;
-
-    if (seasonalTheme != null) {
-      final darkColorScheme = seasonalTheme.getDarkColorScheme();
-      final lightColorScheme = seasonalTheme.getLightColorScheme();
-
-      darkTheme = baseDarkTheme.copyWith(
-        colorScheme: darkColorScheme,
-        primaryColor: darkColorScheme.primary,
-        scaffoldBackgroundColor: darkColorScheme.surface,
-        appBarTheme: baseDarkTheme.appBarTheme.copyWith(
-          backgroundColor: darkColorScheme.surface,
-        ),
-      );
-
-      lightTheme = baseLightTheme.copyWith(
-        colorScheme: lightColorScheme,
-        primaryColor: lightColorScheme.primary,
-        scaffoldBackgroundColor: lightColorScheme.surface,
-        appBarTheme: baseLightTheme.appBarTheme.copyWith(
-          backgroundColor: lightColorScheme.primaryContainer,
-          foregroundColor: lightColorScheme.onPrimaryContainer,
-        ),
-      );
-    }
 
     return MaterialApp(
       navigatorKey: _navigatorKey,
       title: 'Grenade Helper',
       debugShowCheckedModeBanner: false,
       themeMode: intToThemeMode(themeMode),
-      darkTheme: darkTheme,
-      theme: lightTheme,
+      darkTheme: AppTheme.dark(),
+      theme: AppTheme.light(),
       home: AppShell(
         settingsService: globalSettingsService,
         onHotkeyChanged: (action, config) async {

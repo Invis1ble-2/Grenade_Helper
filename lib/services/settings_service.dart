@@ -174,7 +174,6 @@ class SettingsService {
   static const String _keyJoystickSpeed = 'joystick_speed';
   static const String _keyOverlayNavSpeed = 'overlay_nav_speed';
   static const String _keyDataPath = 'custom_data_path';
-  static const String _keySeasonalThemeEnabled = 'seasonal_theme_enabled';
   static const String _keyLaunchCount = 'app_launch_count';
   static const String _keyDonationDialogShown = 'donation_dialog_shown';
   static const String _keyMapLineColor = 'map_line_color'; // int value of color
@@ -330,11 +329,6 @@ class SettingsService {
       }
       if (prefs.containsKey(_keyThemeMode)) {
         _cache[_keyThemeMode] = prefs.getInt(_keyThemeMode);
-        migrated = true;
-      }
-      if (prefs.containsKey(_keySeasonalThemeEnabled)) {
-        _cache[_keySeasonalThemeEnabled] =
-            prefs.getBool(_keySeasonalThemeEnabled);
         migrated = true;
       }
       if (prefs.containsKey(_keyOverlayNavSpeed)) {
@@ -649,23 +643,6 @@ class SettingsService {
       await _saveValue(_keyThemeMode, value);
     } else {
       await _prefs?.setInt(_keyThemeMode, value);
-    }
-  }
-
-  /// 节日主题
-  bool getSeasonalThemeEnabled() {
-    if (isDesktop) {
-      return _cache[_keySeasonalThemeEnabled] as bool? ?? true;
-    }
-    return _prefs?.getBool(_keySeasonalThemeEnabled) ?? true;
-  }
-
-  Future<void> setSeasonalThemeEnabled(bool value) async {
-    if (isDesktop) {
-      _cache[_keySeasonalThemeEnabled] = value;
-      await _saveValue(_keySeasonalThemeEnabled, value);
-    } else {
-      await _prefs?.setBool(_keySeasonalThemeEnabled, value);
     }
   }
 

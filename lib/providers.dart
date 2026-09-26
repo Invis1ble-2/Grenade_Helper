@@ -3,23 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:isar_community/isar.dart';
 import 'models.dart';
-import 'services/seasonal_theme_service.dart';
 
 // 全局 Isar 数据库
 final isarProvider = Provider<Isar>((ref) => throw UnimplementedError());
 
 // 主题模式 Provider
 final themeModeProvider = StateProvider<int>((ref) => 2);
-
-// 节日主题开关 Provider
-final seasonalThemeEnabledProvider = StateProvider<bool>((ref) => true);
-
-// 当前激活的节日主题 Provider
-final activeSeasonalThemeProvider = Provider<SeasonalTheme?>((ref) {
-  final enabled = ref.watch(seasonalThemeEnabledProvider);
-  if (!enabled) return null;
-  return SeasonalThemeManager.getActiveTheme();
-});
 
 /// 将 int 转换为 Flutter ThemeMode
 ThemeMode intToThemeMode(int value) {

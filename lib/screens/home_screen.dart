@@ -10,15 +10,12 @@ import '../models.dart';
 import '../providers.dart';
 import '../services/map_management_service.dart';
 import '../services/tag_service.dart';
-import '../widgets/fireworks_effect.dart';
-import '../widgets/snowfall_effect.dart';
 import '../widgets/map_icon.dart';
 import '../widgets/path_image_provider.dart';
 import '../widgets/grenade_type_icon.dart';
 import '../theme/app_design_system.dart';
 import 'map_screen.dart';
 import 'grenade_detail_screen.dart';
-import '../widgets/spring_festival_banner.dart';
 
 // 全局搜索
 class GlobalSearchDelegate extends SearchDelegate {
@@ -515,19 +512,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final visibleMaps = maps
         .where((map) => !_pendingDeleteMapIds.contains(map.id))
         .toList(growable: false);
-    final seasonalTheme = ref.watch(activeSeasonalThemeProvider);
-    final seasonalThemeId = seasonalTheme?.id;
-    final isChristmasTheme = seasonalThemeId == 'christmas';
-    final isSpringFestivalTheme = seasonalThemeId == 'spring_festival';
 
-    Widget body = Scaffold(
+    return Scaffold(
       backgroundColor: Colors.transparent,
       body: SafeArea(
         bottom: !widget.embedded,
         child: Column(
           children: [
-            if (isChristmasTheme) const ChristmasLights(height: 20),
-            if (isSpringFestivalTheme) const SpringFestivalBanner(),
             Padding(
               padding: EdgeInsets.fromLTRB(
                   AppBreakpoints.isMobile(context) ? 16 : 24,
@@ -540,17 +531,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(children: [
-                          Text('地图库',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .headlineSmall
-                                  ?.copyWith(fontWeight: FontWeight.w800)),
-                          if (seasonalTheme != null) ...[
-                            const SizedBox(width: 8),
-                            Text(seasonalTheme.emoji)
-                          ],
-                        ]),
+                        Text('地图库',
+                            style: Theme.of(context)
+                                .textTheme
+                                .headlineSmall
+                                ?.copyWith(fontWeight: FontWeight.w800)),
                         const SizedBox(height: 4),
                         Text('${visibleMaps.length} 张地图',
                             style: Theme.of(context)
@@ -616,21 +601,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ),
       ),
     );
-
-    // 节日装饰（互斥触发）
-    if (isChristmasTheme) {
-      body = SnowfallEffect(
-        snowflakeCount: 25,
-        child: body,
-      );
-    } else if (isSpringFestivalTheme) {
-      body = FireworksEffect(
-        maxFireworks: 4,
-        child: body,
-      );
-    }
-
-    return body;
   }
 }
 

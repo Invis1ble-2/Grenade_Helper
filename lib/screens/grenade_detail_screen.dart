@@ -28,6 +28,7 @@ import '../services/tag_service.dart';
 import '../widgets/instant_hide_desktop_video_controls.dart';
 import '../widgets/grenade_tag_editor.dart';
 import '../main.dart' show sendOverlayCommand;
+import 'area_draw_screen.dart';
 import 'impact_point_picker_screen.dart';
 
 // 视频播放组件
@@ -2147,14 +2148,10 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                               await Navigator.push<Map<String, dynamic>>(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => ImpactPointPickerScreen(
-                                grenadeId: grenade!.id,
-                                initialX: grenade!.impactXRatio,
-                                initialY: grenade!.impactYRatio,
-                                throwX: grenade!.xRatio,
-                                throwY: grenade!.yRatio,
-                                layerId: layer.id,
-                                isDrawingMode: true,
+                              builder: (_) => AreaDrawScreen.impactArea(
+                                layer: layer,
+                                impactX: grenade!.impactXRatio,
+                                impactY: grenade!.impactYRatio,
                                 existingStrokes: grenade!.impactAreaStrokes,
                                 grenadeType: grenade!.type,
                               ),

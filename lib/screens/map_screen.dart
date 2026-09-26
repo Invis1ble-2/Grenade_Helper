@@ -29,7 +29,7 @@ import '../models/tag.dart';
 import '../models/grenade_tag.dart';
 import '../models/map_area.dart';
 import 'grenade_detail_screen.dart';
-import 'impact_point_picker_screen.dart';
+import 'area_draw_screen.dart';
 import 'tag_manager_screen.dart';
 import 'area_manager_screen.dart';
 
@@ -1882,14 +1882,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final result = await Navigator.push<Map<String, dynamic>>(
       context,
       MaterialPageRoute(
-        builder: (_) => ImpactPointPickerScreen(
-          grenadeId: grenade.id,
-          initialX: grenade.impactXRatio,
-          initialY: grenade.impactYRatio,
-          throwX: grenade.xRatio,
-          throwY: grenade.yRatio,
+        builder: (_) => AreaDrawScreen.impactArea(
           layerId: layerId,
-          isDrawingMode: true,
+          impactX: grenade.impactXRatio,
+          impactY: grenade.impactYRatio,
           existingStrokes: grenade.impactAreaStrokes,
           grenadeType: grenade.type,
         ),
@@ -1955,18 +1951,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final result = await Navigator.push<Map<String, dynamic>>(
       context,
       MaterialPageRoute(
-        builder: (_) => ImpactPointPickerScreen(
-          grenadeId: referenceGrenade.id,
-          initialX: referenceGrenade.impactXRatio,
-          initialY: referenceGrenade.impactYRatio,
-          throwX: referenceGrenade.xRatio,
-          throwY: referenceGrenade.yRatio,
+        builder: (_) => AreaDrawScreen.impactArea(
           layerId: layerId,
-          isDrawingMode: true,
+          impactX: referenceGrenade.impactXRatio,
+          impactY: referenceGrenade.impactYRatio,
           existingStrokes: existingStrokes,
           grenadeType: group.type == GrenadeType.molotov
               ? GrenadeType.molotov
-              : GrenadeType.smoke, // 强制使用分组类型对应的绘制颜色
+              : GrenadeType.smoke,
         ),
       ),
     );
@@ -2414,8 +2406,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   Widget _buildTypeFilterBtn(
       Set<int> selectedTypes, int type, String label, Color activeColor) {
     final isSelected = selectedTypes.contains(type);
-    const unselectedColor = Colors.white70;
-    return InkWell(
+    const unselectedColor = Colors.white38;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: () {
         final newSet = Set<int>.from(selectedTypes);
         if (isSelected) {
@@ -2425,30 +2418,34 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         }
         ref.read(typeFilterProvider.notifier).state = newSet;
       },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      child: AnimatedContainer(
+        duration: AppMotion.quick,
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
         decoration: BoxDecoration(
-            color: isSelected
-                ? activeColor.withValues(alpha: 0.2)
-                : Colors.transparent,
-            border: Border.all(
-                color: isSelected
-                    ? activeColor
-                    : unselectedColor.withValues(alpha: 0.4)),
-            borderRadius: BorderRadius.circular(9)),
-        child: Row(children: [
-          GrenadeTypeIcon(
-            type: type,
-            size: 16,
-            color: isSelected ? activeColor : unselectedColor,
-          ),
-          const SizedBox(width: 4),
-          Text(label,
+          color: isSelected
+              ? activeColor.withValues(alpha: 0.18)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            GrenadeTypeIcon(
+              type: type,
+              size: 15,
+              color: isSelected ? activeColor : unselectedColor,
+            ),
+            const SizedBox(width: 5),
+            Text(
+              label,
               style: TextStyle(
-                  color: isSelected ? activeColor : unselectedColor,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold))
-        ]),
+                color: isSelected ? activeColor : unselectedColor,
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2456,24 +2453,27 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   Widget _buildFilterChip(
       String label, int value, int groupValue, Color color) {
     final isSelected = value == groupValue;
-    const unselectedColor = Colors.white70;
+    final activeTextColor = value == TeamType.all ? Colors.white : color;
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: () => ref.read(teamFilterProvider.notifier).state = value,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      child: AnimatedContainer(
+        duration: AppMotion.quick,
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
         decoration: BoxDecoration(
-            color:
-                isSelected ? color.withValues(alpha: 0.2) : Colors.transparent,
-            border: Border.all(
-                color: isSelected
-                    ? color
-                    : unselectedColor.withValues(alpha: 0.4)),
-            borderRadius: BorderRadius.circular(10)),
-        child: Text(label,
-            style: TextStyle(
-                color: isSelected ? color : unselectedColor,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                fontSize: 12)),
+          color: isSelected
+              ? activeTextColor.withValues(alpha: 0.2)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? activeTextColor : Colors.white60,
+            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+            fontSize: 12,
+          ),
+        ),
       ),
     );
   }
@@ -3277,126 +3277,112 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   /// 构建出生点侧边栏（可折叠）
   Widget _buildSpawnPointSidebar(
       MapSpawnConfig config, int layerId, bool isEditMode) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // 折叠/展开按钮
-        GestureDetector(
-          onTap: () => setState(
-              () => _isSpawnSidebarExpanded = !_isSpawnSidebarExpanded),
-          child: Container(
-            width: 22,
-            decoration: BoxDecoration(
-              color: const Color(0xFF15181C).withValues(alpha: 0.86),
-              border: Border(
-                  left: BorderSide(color: Colors.white.withValues(alpha: 0.1))),
-            ),
-            child: Center(
-              child: Icon(
-                _isSpawnSidebarExpanded
-                    ? Icons.chevron_right
-                    : Icons.chevron_left,
-                color: Colors.greenAccent,
-                size: 16,
-              ),
-            ),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.56),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
           ),
-        ),
-        // 侧边栏内容
-        if (_isSpawnSidebarExpanded)
-          Container(
-            width: 78,
-            decoration: BoxDecoration(
-              color: const Color(0xFF15181C).withValues(alpha: 0.86),
-              border: Border(
-                  left:
-                      BorderSide(color: Colors.white.withValues(alpha: 0.08))),
-            ),
-            child: Column(
-              children: [
-                // 标题
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.3),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.place, color: Colors.greenAccent, size: 14),
-                      SizedBox(width: 4),
-                      Text("出生点",
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold)),
-                    ],
-                  ),
-                ),
-                // 列表
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(6),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // CT 标题
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Container(
-                              width: 8,
-                              height: 8,
-                              decoration: BoxDecoration(
-                                color: Colors.blueAccent.withValues(alpha: 0.8),
-                                borderRadius: BorderRadius.circular(2),
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            const Text("CT",
-                                style: TextStyle(
-                                    color: Colors.blueAccent,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold)),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        // CT 出生点列表
-                        ...config.ctSpawns.map((spawn) => _buildSpawnListItem(
-                            spawn, true, layerId, isEditMode)),
-                        const SizedBox(height: 8),
-                        // T 标题
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Container(
-                              width: 8,
-                              height: 8,
-                              decoration: BoxDecoration(
-                                color: Colors.amber.withValues(alpha: 0.8),
-                                borderRadius: BorderRadius.circular(2),
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            const Text("T",
-                                style: TextStyle(
-                                    color: Colors.amber,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold)),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        // T 出生点列表
-                        ...config.tSpawns.map((spawn) => _buildSpawnListItem(
-                            spawn, false, layerId, isEditMode)),
-                      ],
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(
+                    () => _isSpawnSidebarExpanded = !_isSpawnSidebarExpanded),
+                child: SizedBox(
+                  width: 24,
+                  child: Center(
+                    child: Icon(
+                      _isSpawnSidebarExpanded
+                          ? Icons.chevron_right_rounded
+                          : Icons.chevron_left_rounded,
+                      color: Colors.greenAccent,
+                      size: 18,
                     ),
                   ),
                 ),
+              ),
+              if (_isSpawnSidebarExpanded) ...[
+                Container(
+                  width: 1,
+                  color: Colors.white.withValues(alpha: 0.1),
+                ),
+                SizedBox(
+                  width: 72,
+                  child: Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 8, horizontal: 6),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.my_location_rounded,
+                                color: Colors.greenAccent, size: 13),
+                            const SizedBox(width: 4),
+                            const Text(
+                              "出生点",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        height: 1,
+                        color: Colors.white.withValues(alpha: 0.08),
+                      ),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 6),
+                          child: Column(
+                            children: [
+                              const Text(
+                                "CT",
+                                style: TextStyle(
+                                  color: Colors.blueAccent,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              ...config.ctSpawns.map((spawn) =>
+                                  _buildSpawnListItem(
+                                      spawn, true, layerId, isEditMode)),
+                              const SizedBox(height: 8),
+                              const Text(
+                                "T",
+                                style: TextStyle(
+                                  color: Colors.amber,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              ...config.tSpawns.map((spawn) =>
+                                  _buildSpawnListItem(
+                                      spawn, false, layerId, isEditMode)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ],
-            ),
+            ],
           ),
-      ],
+        ),
+      ),
     );
   }
 
@@ -3405,37 +3391,23 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       SpawnPoint spawn, bool isCT, int layerId, bool isEditMode) {
     final color = isCT ? Colors.blueAccent : Colors.amber;
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: () => _showSpawnPointBottomSheet(spawn, isCT, layerId),
-      child: Center(
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 3),
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: color.withValues(alpha: 0.3), width: 1),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 20,
-                height: 20,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Center(
-                  child: Text(
-                    '${spawn.id}',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ),
-            ],
+      child: Container(
+        width: 34,
+        height: 24,
+        margin: const EdgeInsets.only(bottom: 4),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(7),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          '${spawn.id}',
+          style: TextStyle(
+            color: color,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
           ),
         ),
       ),
@@ -3444,185 +3416,130 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
   Widget _buildFavoritesBar(
       BuildContext context, FavoriteFolderService folderService) {
-    return Container(
-      height: 60,
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        border: Border(
-          top: BorderSide(
-            color: Theme.of(context).dividerColor.withValues(alpha: 0.7),
-          ),
-        ),
-      ),
-      child: StreamBuilder<List<FolderWithGrenades>>(
-        stream: folderService.watchMapFavorites(widget.gameMap.id),
-        builder: (context, snapshot) {
-          final allFolders = snapshot.data ?? const <FolderWithGrenades>[];
-          final visibleFolders =
-              allFolders.where((f) => f.grenades.isNotEmpty).toList();
+    return StreamBuilder<List<FolderWithGrenades>>(
+      stream: folderService.watchMapFavorites(widget.gameMap.id),
+      builder: (context, snapshot) {
+        final allFolders = snapshot.data ?? const <FolderWithGrenades>[];
+        final visibleFolders =
+            allFolders.where((f) => f.grenades.isNotEmpty).toList();
 
-          return Row(
-            children: [
-              IconButton(
-                tooltip: '管理收藏夹',
-                onPressed: () => _showFavoriteFolderManager(folderService),
-                icon: const Icon(Icons.folder_open),
-                color: Colors.orangeAccent,
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+            child: Container(
+              height: 42,
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.56),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.12),
+                ),
               ),
-              Expanded(
-                child: snapshot.connectionState == ConnectionState.waiting
-                    ? const Center(
-                        child: SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      )
-                    : visibleFolders.isEmpty
-                        ? Center(
-                            child: Text(
-                              "暂无收藏夹道具",
+              child: visibleFolders.isEmpty
+                  ? InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () => _showFavoriteFolderManager(folderService),
+                      child: const Padding(
+                        padding:
+                            EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.folder_open_rounded,
+                              size: 17,
+                              color: Colors.orangeAccent,
+                            ),
+                            SizedBox(width: 6),
+                            Text(
+                              '收藏夹',
                               style: TextStyle(
-                                color: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.color,
+                                color: Colors.white70,
                                 fontSize: 12,
+                                fontWeight: FontWeight.w500,
                               ),
                             ),
-                          )
-                        : ListView.separated(
+                          ],
+                        ),
+                      ),
+                    )
+                  : Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: '管理收藏夹',
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.all(6),
+                          constraints: const BoxConstraints(
+                              minWidth: 30, minHeight: 30),
+                          onPressed: () =>
+                              _showFavoriteFolderManager(folderService),
+                          icon: const Icon(
+                            Icons.folder_open_rounded,
+                            size: 17,
+                            color: Colors.orangeAccent,
+                          ),
+                        ),
+                        Container(
+                          width: 1,
+                          height: 16,
+                          margin: const EdgeInsets.symmetric(horizontal: 4),
+                          color: Colors.white.withValues(alpha: 0.16),
+                        ),
+                        Flexible(
+                          child: ListView.separated(
+                            shrinkWrap: true,
                             scrollDirection: Axis.horizontal,
-                            padding: const EdgeInsets.only(
-                                left: 4, right: 16, top: 8, bottom: 8),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 6),
                             itemCount: visibleFolders.length,
                             separatorBuilder: (_, __) =>
-                                const SizedBox(width: 10),
+                                const SizedBox(width: 6),
                             itemBuilder: (_, index) {
                               final folderData = visibleFolders[index];
-                              return ActionChip(
-                                backgroundColor: Theme.of(context)
-                                    .colorScheme
-                                    .surfaceContainer,
-                                avatar: const Icon(Icons.folder,
-                                    size: 14, color: Colors.orangeAccent),
-                                label: Text(
-                                  '${folderData.folder.name} (${folderData.grenades.length})',
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                                onPressed: () => _showFavoriteFolderItemsSheet(
+                              return GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => _showFavoriteFolderItemsSheet(
                                     folderService, folderData.folder.id),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 9, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(9),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        Icons.folder_rounded,
+                                        size: 13,
+                                        color: Colors.orangeAccent,
+                                      ),
+                                      const SizedBox(width: 5),
+                                      Text(
+                                        '${folderData.folder.name} (${folderData.grenades.length})',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               );
                             },
                           ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildFavoritesSidePanel(FavoriteFolderService folderService) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.34),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.18),
-                blurRadius: 18,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          child: StreamBuilder<List<FolderWithGrenades>>(
-            stream: folderService.watchMapFavorites(widget.gameMap.id),
-            builder: (context, snapshot) {
-              final folders = (snapshot.data ?? const <FolderWithGrenades>[])
-                  .where((folder) => folder.grenades.isNotEmpty)
-                  .toList();
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 10, 6, 8),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.star_rounded,
-                            size: 18, color: Colors.amber),
-                        const SizedBox(width: 8),
-                        const Expanded(
-                          child: Text('收藏夹',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700)),
-                        ),
-                        IconButton(
-                          tooltip: '管理收藏夹',
-                          color: Colors.white70,
-                          onPressed: () =>
-                              _showFavoriteFolderManager(folderService),
-                          icon: const Icon(Icons.settings_outlined, size: 18),
                         ),
                       ],
                     ),
-                  ),
-                  Divider(color: Colors.white.withValues(alpha: 0.14)),
-                  Expanded(
-                    child: snapshot.connectionState == ConnectionState.waiting
-                        ? const Center(child: CircularProgressIndicator())
-                        : folders.isEmpty
-                            ? Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(18),
-                                  child: Text(
-                                    '收藏常用道具后会显示在这里',
-                                    textAlign: TextAlign.center,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
-                                        ?.copyWith(color: Colors.white60),
-                                  ),
-                                ),
-                              )
-                            : ListView.separated(
-                                padding: const EdgeInsets.all(8),
-                                itemCount: folders.length,
-                                separatorBuilder: (_, __) =>
-                                    const SizedBox(height: 4),
-                                itemBuilder: (context, index) {
-                                  final folder = folders[index];
-                                  return ListTile(
-                                    dense: true,
-                                    textColor: Colors.white,
-                                    shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(6)),
-                                    leading: const Icon(Icons.folder_outlined,
-                                        size: 19, color: Colors.orangeAccent),
-                                    title: Text(folder.folder.name,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis),
-                                    trailing: Text('${folder.grenades.length}',
-                                        style:
-                                            TextStyle(color: Colors.white70)),
-                                    onTap: () => _showFavoriteFolderItemsSheet(
-                                        folderService, folder.folder.id),
-                                  );
-                                },
-                              ),
-                  ),
-                ],
-              );
-            },
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -4264,12 +4181,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     }
 
     final grenadesAsync = ref.watch(_filteredGrenadesProvider(currentLayer.id));
+    final selectedTagIds = ref.watch(selectedTagIdsProvider);
     final showMapGrenadeListPanel =
         globalSettingsService?.getShowMapGrenadeList() ?? false;
     final showFavoritesBar = !isEditMode && _selectedClusterForImpact == null;
     final isMobile = AppBreakpoints.isMobile(context);
-    final floatingButtonsBottomInset = showFavoritesBar ? 80.0 : 30.0;
-    final spawnSidebarBottomInset = showFavoritesBar ? 60.0 : 0.0;
 
     final folderService = _favoriteFolderService;
     final allMapGrenades = _cachedAllMapGrenades;
@@ -4279,53 +4195,61 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     return Scaffold(
       resizeToAvoidBottomInset: false,
       appBar: AppBar(
-        toolbarHeight: isMobile ? 58 : kToolbarHeight,
+        toolbarHeight: isMobile ? 54 : kToolbarHeight,
         backgroundColor: Theme.of(context).colorScheme.surface,
+        surfaceTintColor: Colors.transparent,
         titleSpacing: 0,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(
+            height: 1,
+            color: context.appTheme.subtleBorder,
+          ),
+        ),
         title: Row(
           children: [
             Hero(
               tag: 'map-icon-${widget.gameMap.id}',
-              child: MapIcon(path: widget.gameMap.iconPath, size: 28),
+              child: MapIcon(path: widget.gameMap.iconPath, size: 26),
             ),
             const SizedBox(width: 10),
-            Flexible(
+            Expanded(
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
-                      maxWidth: AppBreakpoints.isMobile(context) ? 240 : 360),
+                    maxWidth: isMobile ? double.infinity : 380,
+                  ),
                   child: Container(
                     height: 36,
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 11),
                     decoration: BoxDecoration(
                       color: Theme.of(context)
                           .colorScheme
                           .surfaceContainerHighest
-                          .withValues(alpha: 0.72),
+                          .withValues(alpha: 0.55),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
                       children: [
-                        // 地图名作为搜索栏前缀
                         Text(
                           widget.gameMap.name,
                           style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13.5,
                             color: Theme.of(context).colorScheme.primary,
                           ),
                         ),
                         Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 9),
+                          margin: const EdgeInsets.symmetric(horizontal: 8),
                           width: 1,
-                          height: 18,
+                          height: 14,
                           color: Theme.of(context)
                               .dividerColor
-                              .withValues(alpha: 0.3),
+                              .withValues(alpha: 0.28),
                         ),
-                        Icon(Icons.search,
-                            color: Theme.of(context).hintColor, size: 17),
+                        Icon(Icons.search_rounded,
+                            color: Theme.of(context).hintColor, size: 16),
                         const SizedBox(width: 6),
                         Expanded(
                           child: Autocomplete<Grenade>(
@@ -4429,16 +4353,58 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         ),
         actions: [
           if (isMobile)
-            IconButton(
-              tooltip: isEditMode ? '切换至浏览模式' : '切换至编辑模式',
-              icon: Icon(
-                isEditMode ? Icons.edit_outlined : Icons.visibility_outlined,
+            Padding(
+              padding: const EdgeInsets.only(left: 8, right: 12),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  final value = !isEditMode;
+                  ref.read(isEditModeProvider.notifier).state = value;
+                  _showGrenadeCreateModeHint(value);
+                },
+                child: AnimatedContainer(
+                  duration: AppMotion.quick,
+                  height: 34,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  decoration: BoxDecoration(
+                    color: isEditMode
+                        ? Theme.of(context)
+                            .colorScheme
+                            .primary
+                            .withValues(alpha: 0.18)
+                        : Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest
+                            .withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isEditMode
+                            ? Icons.edit_rounded
+                            : Icons.visibility_outlined,
+                        size: 16,
+                        color: isEditMode
+                            ? Theme.of(context).colorScheme.primary
+                            : Theme.of(context).iconTheme.color,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        isEditMode ? '编辑' : '浏览',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: isEditMode
+                              ? Theme.of(context).colorScheme.primary
+                              : Theme.of(context).textTheme.bodyMedium?.color,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              onPressed: () {
-                final value = !isEditMode;
-                ref.read(isEditModeProvider.notifier).state = value;
-                _showGrenadeCreateModeHint(value);
-              },
             )
           else
             Padding(
@@ -5202,200 +5168,340 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                             },
                           ),
                         ))),
-                // 画布过滤器：不占用地图的垂直空间。
+                // 顶部聚合筛选面板（阵营 + 快捷开关 + 道具类型）
                 Positioned(
                   top: 10,
-                  left: 72,
-                  right: 72,
+                  left: 16,
+                  right: 16,
                   child: Center(
                     child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(15),
                       child: BackdropFilter(
                         filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 7, vertical: 5),
                           decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.58),
-                            borderRadius: BorderRadius.circular(12),
+                            color: Colors.black.withValues(alpha: 0.56),
+                            borderRadius: BorderRadius.circular(15),
                             border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.16)),
+                                color: Colors.white.withValues(alpha: 0.12)),
                           ),
                           child: SingleChildScrollView(
                             scrollDirection: Axis.horizontal,
-                            child:
-                                Row(mainAxisSize: MainAxisSize.min, children: [
-                              _buildFilterChip(
-                                  '全部', TeamType.all, teamFilter, Colors.grey),
-                              const SizedBox(width: 5),
-                              _buildFilterChip('通用', TeamType.onlyAll,
-                                  teamFilter, Colors.white),
-                              const SizedBox(width: 5),
-                              _buildFilterChip('CT', TeamType.ct, teamFilter,
-                                  Colors.blueAccent),
-                              const SizedBox(width: 5),
-                              _buildFilterChip(
-                                  'T', TeamType.t, teamFilter, Colors.amber),
-                              const SizedBox(width: 5),
-                              IconButton(
-                                tooltip: '仅显示收藏',
-                                visualDensity: VisualDensity.compact,
-                                padding: const EdgeInsets.all(5),
-                                constraints: const BoxConstraints(
-                                    minWidth: 32, minHeight: 32),
-                                onPressed: () => ref
-                                    .read(onlyFavoritesProvider.notifier)
-                                    .state = !onlyFav,
-                                icon: Icon(
-                                    onlyFav
-                                        ? Icons.star_rounded
-                                        : Icons.star_border_rounded,
-                                    color:
-                                        onlyFav ? Colors.amber : Colors.white70,
-                                    size: 19),
+                            child: IntrinsicWidth(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          _buildFilterChip('全部', TeamType.all,
+                                              teamFilter, Colors.grey),
+                                          const SizedBox(width: 2),
+                                          _buildFilterChip(
+                                              '通用',
+                                              TeamType.onlyAll,
+                                              teamFilter,
+                                              Colors.white),
+                                          const SizedBox(width: 2),
+                                          _buildFilterChip('CT', TeamType.ct,
+                                              teamFilter, Colors.blueAccent),
+                                          const SizedBox(width: 2),
+                                          _buildFilterChip('T', TeamType.t,
+                                              teamFilter, Colors.amber),
+                                        ],
+                                      ),
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Container(
+                                            width: 1,
+                                            height: 15,
+                                            margin: const EdgeInsets.symmetric(
+                                                horizontal: 6),
+                                            color: Colors.white
+                                                .withValues(alpha: 0.16),
+                                          ),
+                                          IconButton(
+                                            tooltip: '仅显示收藏',
+                                            visualDensity:
+                                                VisualDensity.compact,
+                                            padding: const EdgeInsets.all(5),
+                                            constraints: const BoxConstraints(
+                                                minWidth: 28, minHeight: 28),
+                                            onPressed: () => ref
+                                                .read(onlyFavoritesProvider
+                                                    .notifier)
+                                                .state = !onlyFav,
+                                            icon: Icon(
+                                                onlyFav
+                                                    ? Icons.star_rounded
+                                                    : Icons.star_border_rounded,
+                                                color: onlyFav
+                                                    ? Colors.amber
+                                                    : Colors.white60,
+                                                size: 18),
+                                          ),
+                                          IconButton(
+                                            tooltip: '显示出生点',
+                                            visualDensity:
+                                                VisualDensity.compact,
+                                            padding: const EdgeInsets.all(5),
+                                            constraints: const BoxConstraints(
+                                                minWidth: 28, minHeight: 28),
+                                            onPressed: () => ref
+                                                .read(showSpawnPointsProvider
+                                                    .notifier)
+                                                .state = !showSpawnPoints,
+                                            icon: Icon(
+                                                Icons.my_location_rounded,
+                                                color: showSpawnPoints
+                                                    ? Colors.greenAccent
+                                                    : Colors.white60,
+                                                size: 17),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                  Container(
+                                    height: 1,
+                                    margin:
+                                        const EdgeInsets.symmetric(vertical: 4),
+                                    color: Colors.white.withValues(alpha: 0.08),
+                                  ),
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      _buildTypeFilterBtn(
+                                          selectedTypes,
+                                          GrenadeType.smoke,
+                                          '烟',
+                                          context.appTheme.smoke),
+                                      const SizedBox(width: 3),
+                                      _buildTypeFilterBtn(
+                                          selectedTypes,
+                                          GrenadeType.flash,
+                                          '闪',
+                                          context.appTheme.flash),
+                                      const SizedBox(width: 3),
+                                      _buildTypeFilterBtn(
+                                          selectedTypes,
+                                          GrenadeType.molotov,
+                                          '火',
+                                          context.appTheme.molotov),
+                                      const SizedBox(width: 3),
+                                      _buildTypeFilterBtn(
+                                          selectedTypes,
+                                          GrenadeType.he,
+                                          '雷',
+                                          context.appTheme.he),
+                                      const SizedBox(width: 3),
+                                      _buildTypeFilterBtn(
+                                          selectedTypes,
+                                          GrenadeType.wallbang,
+                                          '穿',
+                                          context.appTheme.wallbang),
+                                    ],
+                                  ),
+                                ],
                               ),
-                              IconButton(
-                                tooltip: '显示出生点',
-                                visualDensity: VisualDensity.compact,
-                                padding: const EdgeInsets.all(5),
-                                constraints: const BoxConstraints(
-                                    minWidth: 32, minHeight: 32),
-                                onPressed: () => ref
-                                    .read(showSpawnPointsProvider.notifier)
-                                    .state = !showSpawnPoints,
-                                icon: Icon(Icons.my_location_rounded,
-                                    color: showSpawnPoints
-                                        ? Colors.greenAccent
-                                        : Colors.white70,
-                                    size: 18),
-                              ),
-                            ]),
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
                 ),
+                // 右下角工具胶囊（楼层切换 + 爆点切换 + 标签筛选）
                 Positioned(
-                  top: 68,
-                  left: 10,
-                  child: Container(
-                    padding: const EdgeInsets.all(5),
-                    decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.62),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.white24)),
-                    child: Column(children: [
-                      _buildTypeFilterBtn(selectedTypes, GrenadeType.smoke, '烟',
-                          context.appTheme.smoke),
-                      const SizedBox(height: 4),
-                      _buildTypeFilterBtn(selectedTypes, GrenadeType.flash, '闪',
-                          context.appTheme.flash),
-                      const SizedBox(height: 4),
-                      _buildTypeFilterBtn(selectedTypes, GrenadeType.molotov,
-                          '火', context.appTheme.molotov),
-                      const SizedBox(height: 4),
-                      _buildTypeFilterBtn(selectedTypes, GrenadeType.he, '雷',
-                          context.appTheme.he),
-                      const SizedBox(height: 4),
-                      _buildTypeFilterBtn(selectedTypes, GrenadeType.wallbang,
-                          '穿', context.appTheme.wallbang),
-                    ]),
-                  ),
-                ),
-                // 爆点模式切换按钮
-                Positioned(
-                  left: 16,
-                  bottom: floatingButtonsBottomInset, // 与右边按钮组保持一致
-                  child: FloatingActionButton.small(
-                    heroTag: 'impact_mode_toggle',
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(13)),
-                    elevation: 3,
-                    backgroundColor: _isImpactMode
-                        ? Colors.redAccent
-                        : const Color(0xFF536D78),
-                    onPressed: () {
-                      setState(() {
-                        _isImpactMode = !_isImpactMode;
-                        // 切换模式时清除选中状态
-                        _selectedClusterForImpact = null;
-                      });
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text(_isImpactMode ? "已开启爆点浏览模式" : "已切换回标准模式"),
-                        duration: const Duration(seconds: 2),
-                        behavior: SnackBarBehavior.floating,
-                      ));
-                    },
-                    child: Icon(
-                      _isImpactMode
-                          ? FontAwesomeIcons.crosshairs
-                          : FontAwesomeIcons.locationDot,
-                      color: Colors.white,
-                      size: 18,
-                    ),
-                  ),
-                ),
-
-                // 右下角按钮组（标签筛选 + 楼层切换）
-                Positioned(
-                  right: 16,
-                  bottom: floatingButtonsBottomInset,
+                  right: 12,
+                  bottom: 16,
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      FloatingActionButton.small(
-                        heroTag: "btn_tag_filter",
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(13)),
-                        elevation: 3,
-                        backgroundColor: const Color(0xFF536D78),
-                        onPressed: () => _showTagFilterSheet(currentLayer.id),
-                        child: const Icon(Icons.label_outline,
-                            color: Colors.white),
-                      ),
                       if (layers.length > 1) ...[
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: BackdropFilter(
+                            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                            child: Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.56),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.12),
+                                ),
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    tooltip: '上一层',
+                                    visualDensity: VisualDensity.compact,
+                                    padding: const EdgeInsets.all(6),
+                                    constraints: const BoxConstraints(
+                                        minWidth: 32, minHeight: 32),
+                                    onPressed: layerIndex < layers.length - 1
+                                        ? () => ref
+                                            .read(selectedLayerIndexProvider
+                                                .notifier)
+                                            .state++
+                                        : null,
+                                    icon: Icon(
+                                      Icons.keyboard_arrow_up_rounded,
+                                      size: 20,
+                                      color: layerIndex < layers.length - 1
+                                          ? Colors.white
+                                          : Colors.white24,
+                                    ),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    child: Text(
+                                      'F${layerIndex + 1}',
+                                      style: TextStyle(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primary,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: '下一层',
+                                    visualDensity: VisualDensity.compact,
+                                    padding: const EdgeInsets.all(6),
+                                    constraints: const BoxConstraints(
+                                        minWidth: 32, minHeight: 32),
+                                    onPressed: layerIndex > 0
+                                        ? () => ref
+                                            .read(selectedLayerIndexProvider
+                                                .notifier)
+                                            .state--
+                                        : null,
+                                    icon: Icon(
+                                      Icons.keyboard_arrow_down_rounded,
+                                      size: 20,
+                                      color: layerIndex > 0
+                                          ? Colors.white
+                                          : Colors.white24,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
                         const SizedBox(height: 8),
-                        FloatingActionButton.small(
-                            heroTag: "btn_up",
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(13)),
-                            elevation: 3,
-                            backgroundColor: layerIndex < layers.length - 1
-                                ? Theme.of(context).colorScheme.primary
-                                : Colors.grey[800],
-                            onPressed: layerIndex < layers.length - 1
-                                ? () => ref
-                                    .read(selectedLayerIndexProvider.notifier)
-                                    .state++
-                                : null,
-                            child: const Icon(Icons.arrow_upward)),
-                        Container(
-                            margin: const EdgeInsets.symmetric(vertical: 5),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 9, vertical: 4),
-                            decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.68),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.white24)),
-                            child: Text("F${layerIndex + 1}",
-                                style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold))),
-                        FloatingActionButton.small(
-                            heroTag: "btn_down",
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(13)),
-                            elevation: 3,
-                            backgroundColor: layerIndex > 0
-                                ? Theme.of(context).colorScheme.primary
-                                : Colors.grey[800],
-                            onPressed: layerIndex > 0
-                                ? () => ref
-                                    .read(selectedLayerIndexProvider.notifier)
-                                    .state--
-                                : null,
-                            child: const Icon(Icons.arrow_downward)),
                       ],
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                          child: Container(
+                            height: 42,
+                            padding: const EdgeInsets.symmetric(horizontal: 5),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.56),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.12),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  tooltip:
+                                      _isImpactMode ? '切换回投掷点模式' : '开启爆点浏览模式',
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.all(6),
+                                  constraints: const BoxConstraints(
+                                      minWidth: 32, minHeight: 32),
+                                  style: IconButton.styleFrom(
+                                    backgroundColor: _isImpactMode
+                                        ? Colors.redAccent
+                                            .withValues(alpha: 0.22)
+                                        : Colors.transparent,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                  ),
+                                  onPressed: () {
+                                    setState(() {
+                                      _isImpactMode = !_isImpactMode;
+                                      _selectedClusterForImpact = null;
+                                    });
+                                    ScaffoldMessenger.of(context)
+                                        .showSnackBar(SnackBar(
+                                      content: Text(_isImpactMode
+                                          ? "已开启爆点浏览模式"
+                                          : "已切换回标准模式"),
+                                      duration: const Duration(seconds: 2),
+                                      behavior: SnackBarBehavior.floating,
+                                    ));
+                                  },
+                                  icon: Icon(
+                                    _isImpactMode
+                                        ? FontAwesomeIcons.crosshairs
+                                        : FontAwesomeIcons.locationDot,
+                                    color: _isImpactMode
+                                        ? Colors.redAccent
+                                        : Colors.white70,
+                                    size: 16,
+                                  ),
+                                ),
+                                Container(
+                                  width: 1,
+                                  height: 16,
+                                  margin:
+                                      const EdgeInsets.symmetric(horizontal: 4),
+                                  color: Colors.white.withValues(alpha: 0.16),
+                                ),
+                                IconButton(
+                                  tooltip: '标签筛选',
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.all(6),
+                                  constraints: const BoxConstraints(
+                                      minWidth: 32, minHeight: 32),
+                                  style: IconButton.styleFrom(
+                                    backgroundColor: selectedTagIds.isNotEmpty
+                                        ? Theme.of(context)
+                                            .colorScheme
+                                            .primary
+                                            .withValues(alpha: 0.22)
+                                        : Colors.transparent,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                  ),
+                                  onPressed: () =>
+                                      _showTagFilterSheet(currentLayer.id),
+                                  icon: Icon(
+                                    Icons.label_outline_rounded,
+                                    color: selectedTagIds.isNotEmpty
+                                        ? Theme.of(context).colorScheme.primary
+                                        : Colors.white70,
+                                    size: 18,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -5404,37 +5510,22 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                     spawnConfig != null &&
                     _selectedClusterForImpact == null)
                   Positioned(
-                    right: 0,
-                    top: 0,
-                    bottom: spawnSidebarBottomInset,
+                    right: 12,
+                    top: 62,
+                    bottom: 68,
                     child: _buildSpawnPointSidebar(
                         spawnConfig, currentLayer.id, isEditMode),
                   ),
-                // 底部收藏栏（仅在未选中点位时显示）
-                if (showFavoritesBar &&
-                    constraints.maxWidth >= AppBreakpoints.mobile &&
-                    !showSpawnPoints)
+                // 左下角收藏夹胶囊
+                if (showFavoritesBar)
                   Positioned(
-                    top: 74,
-                    right: 12,
-                    height: 368,
-                    width: 190,
-                    child: AnimatedSlide(
-                      offset: Offset.zero,
-                      duration: AppMotion.panel,
-                      curve: AppMotion.enter,
-                      child: Align(
-                        alignment: Alignment.topCenter,
-                        child: _buildFavoritesSidePanel(folderService),
-                      ),
+                    left: 12,
+                    right: 112,
+                    bottom: 16,
+                    child: Align(
+                      alignment: Alignment.bottomLeft,
+                      child: _buildFavoritesBar(context, folderService),
                     ),
-                  )
-                else if (showFavoritesBar)
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: _buildFavoritesBar(context, folderService),
                   ),
               ]);
             }),
@@ -7267,9 +7358,25 @@ class _ImpactAreaPainter extends CustomPainter {
         Paint()..color = Colors.white.withValues(alpha: opacity));
 
     for (final stroke in strokes) {
-      final points =
-          (stroke['points'] as List).map((p) => Offset(p[0], p[1])).toList();
-      final width = (stroke['strokeWidth'] as num).toDouble();
+      final rawPoints = stroke['points'] ?? stroke['p'];
+      if (rawPoints is! List) continue;
+      final points = <Offset>[];
+      for (final p in rawPoints) {
+        if (p is List && p.length >= 2 && p[0] is num && p[1] is num) {
+          points.add(Offset((p[0] as num).toDouble(), (p[1] as num).toDouble()));
+        } else if (p is Map && p['x'] is num && p['y'] is num) {
+          points.add(
+              Offset((p['x'] as num).toDouble(), (p['y'] as num).toDouble()));
+        }
+      }
+      if (points.isEmpty) continue;
+      final widthRatio =
+          ((stroke['widthRatio'] as num?) ?? (stroke['w'] as num?))?.toDouble();
+      final width = widthRatio != null
+          ? ((widthRatio > 1.0 ? widthRatio / 1000.0 : widthRatio) *
+                  imageBounds.width)
+              .clamp(3.0, 120.0)
+          : ((stroke['strokeWidth'] as num?)?.toDouble() ?? 15.0);
       final isEraser = stroke['isEraser'] as bool? ?? false;
       final isShape = stroke['isShape'] as bool? ?? false;
       _drawStroke(canvas, points, width, isEraser, isShape: isShape);

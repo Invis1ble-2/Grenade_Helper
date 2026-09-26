@@ -543,12 +543,14 @@ class AreaService {
                 ?.toDouble(),
           ).clamp(_minBrushRatio, _maxBrushRatio);
           final isEraser = _parseIsEraser(stroke['isEraser'] ?? stroke['e']);
+          final isShape = _parseIsEraser(stroke['isShape'] ?? stroke['s']);
           final points =
               _parseStrokePoints(pointsRaw, isDeltaPacked: stroke['q'] != null);
           return _AreaStroke(
             points: points,
             widthRatio: widthRatio,
             isEraser: isEraser,
+            isShape: isShape,
           );
         }
 
@@ -558,6 +560,7 @@ class AreaService {
           points: points,
           widthRatio: _defaultBrushRatio,
           isEraser: false,
+          isShape: false,
         );
       }).toList();
     } catch (e) {
@@ -644,6 +647,9 @@ class AreaService {
 
   bool _isPointOnStroke(Offset point, _AreaStroke stroke) {
     final points = stroke.points;
+    if (stroke.isShape && points.length >= 3) {
+      return _isPointInPolygon(point, points);
+    }
     final radius =
         (stroke.widthRatio / 2).clamp(_minBrushRatio / 2, _maxBrushRatio / 2);
     final radiusSquared = radius * radius;
@@ -661,6 +667,20 @@ class AreaService {
       }
     }
     return false;
+  }
+
+  bool _isPointInPolygon(Offset point, List<Offset> polygon) {
+    var inside = false;
+    for (int i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      final xi = polygon[i].dx, yi = polygon[i].dy;
+      final xj = polygon[j].dx, yj = polygon[j].dy;
+      final intersect = ((yi > point.dy) != (yj > point.dy)) &&
+          (point.dx <
+              (xj - xi) * (point.dy - yi) / ((yj - yi) == 0 ? 1e-12 : (yj - yi)) +
+                  xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
   }
 
   double _distanceSquaredToSegment(Offset p, Offset a, Offset b) {
@@ -686,10 +706,12 @@ class _AreaStroke {
   final List<Offset> points;
   final double widthRatio;
   final bool isEraser;
+  final bool isShape;
 
   const _AreaStroke({
     required this.points,
     required this.widthRatio,
     required this.isEraser,
+    this.isShape = false,
   });
 }

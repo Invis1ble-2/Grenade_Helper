@@ -158,9 +158,9 @@ class _ShellPanningBackground extends StatefulWidget {
 
 class _ShellPanningBackgroundState extends State<_ShellPanningBackground>
     with SingleTickerProviderStateMixin {
+  static const int _sourceImageWidth = 3072;
   static const double _imageAspectRatio = 3072 / 2048;
   late final AnimationController _controller;
-  late final Animation<double> _progress;
 
   @override
   void initState() {
@@ -169,10 +169,6 @@ class _ShellPanningBackgroundState extends State<_ShellPanningBackground>
       vsync: this,
       duration: const Duration(seconds: 28),
     )..repeat(reverse: true);
-    _progress = CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeInOutSine,
-    );
   }
 
   @override
@@ -187,6 +183,7 @@ class _ShellPanningBackgroundState extends State<_ShellPanningBackground>
     final assetPath = isDark
         ? 'assets/backgrounds/home_bg_dark.png'
         : 'assets/backgrounds/home_bg_light.png';
+    final dpr = MediaQuery.devicePixelRatioOf(context);
 
     return RepaintBoundary(
       child: IgnorePointer(
@@ -201,28 +198,34 @@ class _ShellPanningBackgroundState extends State<_ShellPanningBackground>
             final canvasHeight = canvasWidth / _imageAspectRatio;
             final maxDx = canvasWidth - viewportWidth;
             final dy = (viewportHeight - canvasHeight) / 2;
+            final cacheWidth = math.min(
+              _sourceImageWidth,
+              math.max(1, (canvasWidth * dpr).round()),
+            );
 
             return ClipRect(
               child: AnimatedBuilder(
-                animation: _progress,
+                animation: _controller,
                 child: OverflowBox(
                   alignment: Alignment.topLeft,
                   minWidth: canvasWidth,
                   maxWidth: canvasWidth,
                   minHeight: canvasHeight,
                   maxHeight: canvasHeight,
-                  child: Image.asset(
-                    assetPath,
-                    width: canvasWidth,
-                    height: canvasHeight,
-                    fit: BoxFit.fill,
-                    isAntiAlias: true,
-                    filterQuality: FilterQuality.medium,
-                    gaplessPlayback: true,
+                  child: RepaintBoundary(
+                    child: Image.asset(
+                      assetPath,
+                      width: canvasWidth,
+                      height: canvasHeight,
+                      cacheWidth: cacheWidth,
+                      fit: BoxFit.fill,
+                      filterQuality: FilterQuality.low,
+                      gaplessPlayback: true,
+                    ),
                   ),
                 ),
                 builder: (context, child) {
-                  final dx = -maxDx * _progress.value;
+                  final dx = -maxDx * _controller.value;
                   return Transform.translate(
                     offset: Offset(dx, dy),
                     child: child,
