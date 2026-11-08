@@ -5667,17 +5667,49 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             }),
           ),
           // 底部道具列表面板（选中点位时显示）
-          if (_selectedClusterForImpact != null)
-            _buildClusterListPanel(currentLayer.id, isEditMode)
-          else if (showMapGrenadeListPanel)
-            _buildAllMapGrenadesPanel(
-              allMapGrenadeEntries
-                  .where((e) => _passesGrenadeFilter(
-                      e.grenade, selectedTypes, teamFilter, onlyFav, tagMatchedIds))
-                  .toList(),
-              isEditMode,
-              currentLayer.id,
+          SizedBox(
+            width: double.infinity,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 280),
+              reverseDuration: const Duration(milliseconds: 200),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              layoutBuilder: (current, previous) => Stack(
+                alignment: Alignment.bottomCenter,
+                children: [...previous, if (current != null) current],
+              ),
+              transitionBuilder: (child, animation) => ClipRect(
+                child: SizeTransition(
+                  sizeFactor: animation,
+                  axisAlignment: 1,
+                  child: child,
+                ),
+              ),
+              child: _selectedClusterForImpact != null
+                  ? KeyedSubtree(
+                      key: const ValueKey('clusterPanel'),
+                      child:
+                          _buildClusterListPanel(currentLayer.id, isEditMode),
+                    )
+                  : showMapGrenadeListPanel
+                      ? KeyedSubtree(
+                          key: const ValueKey('allMapPanel'),
+                          child: _buildAllMapGrenadesPanel(
+                            allMapGrenadeEntries
+                                .where((e) => _passesGrenadeFilter(
+                                    e.grenade,
+                                    selectedTypes,
+                                    teamFilter,
+                                    onlyFav,
+                                    tagMatchedIds))
+                                .toList(),
+                            isEditMode,
+                            currentLayer.id,
+                          ),
+                        )
+                      : null,
             ),
+          ),
         ],
       ),
     );
