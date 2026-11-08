@@ -19,6 +19,8 @@ class ImpactPointPickerScreen extends ConsumerStatefulWidget {
   final String? existingStrokes;
   final int grenadeType;
   final bool readOnly;
+  // 投掷点模式：爆点固定(initialX/Y)，点击地图设置投掷点(throwX/Y为初始值)
+  final bool pickThrowPoint;
 
   const ImpactPointPickerScreen({
     super.key,
@@ -31,6 +33,7 @@ class ImpactPointPickerScreen extends ConsumerStatefulWidget {
     this.existingStrokes,
     this.grenadeType = GrenadeType.smoke,
     this.readOnly = false,
+    this.pickThrowPoint = false,
   });
 
   @override
@@ -45,15 +48,30 @@ class _ImpactPointPickerScreenState
 
   double? _selectedX;
   double? _selectedY;
+  late final Offset _fixedPoint;
   MapLayer? _layer;
   List<Map<String, dynamic>> _drawingStrokes = [];
+
+  bool get _throwMode => widget.pickThrowPoint;
+  String get _targetName => _throwMode ? '投掷点' : '爆点';
 
   @override
   void initState() {
     super.initState();
     _photoViewController = PhotoViewController();
-    _selectedX = widget.initialX;
-    _selectedY = widget.initialY;
+    if (_throwMode) {
+      _fixedPoint = Offset(widget.initialX!, widget.initialY!);
+      // 投掷点与爆点重合视为未设置
+      if (widget.throwX != widget.initialX ||
+          widget.throwY != widget.initialY) {
+        _selectedX = widget.throwX;
+        _selectedY = widget.throwY;
+      }
+    } else {
+      _fixedPoint = Offset(widget.throwX, widget.throwY);
+      _selectedX = widget.initialX;
+      _selectedY = widget.initialY;
+    }
     _loadLayer();
 
     if (widget.readOnly && widget.existingStrokes != null) {
@@ -140,7 +158,7 @@ class _ImpactPointPickerScreenState
       Navigator.pop(context, Offset(_selectedX!, _selectedY!));
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先点击地图选择爆点位置')),
+        SnackBar(content: Text('请先点击地图选择$_targetName位置')),
       );
     }
   }
@@ -204,7 +222,7 @@ class _ImpactPointPickerScreenState
           icon: const Icon(Icons.close),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text(widget.readOnly ? '查看爆点位置' : '选择爆点位置'),
+        title: Text(widget.readOnly ? '查看爆点位置' : '选择$_targetName位置'),
         centerTitle: true,
         actions: [
           if (!widget.readOnly)
@@ -293,13 +311,19 @@ class _ImpactPointPickerScreenState
     double markerScale,
   ) {
     final color = _getTypeColor();
+    final selected = _selectedX != null && _selectedY != null
+        ? Offset(_selectedX!, _selectedY!)
+        : null;
+    final throwPoint = _throwMode ? selected : _fixedPoint;
+    final impactPoint = _throwMode ? _fixedPoint : selected;
 
     return [
-      _buildThrowPointMarker(imageBounds, markerScale),
-      if (_selectedX != null && _selectedY != null)
-        _buildConnectionLine(imageBounds),
-      if (_selectedX != null && _selectedY != null)
-        _buildImpactMarker(imageBounds, markerScale),
+      if (throwPoint != null)
+        _buildThrowPointMarker(imageBounds, markerScale, throwPoint),
+      if (throwPoint != null && impactPoint != null)
+        _buildConnectionLine(imageBounds, throwPoint, impactPoint),
+      if (impactPoint != null)
+        _buildImpactMarker(imageBounds, markerScale, impactPoint),
       if (widget.readOnly && _drawingStrokes.isNotEmpty)
         Positioned.fill(
           child: IgnorePointer(
@@ -378,7 +402,9 @@ class _ImpactPointPickerScreenState
               ],
               Flexible(
                 child: Text(
-                  _selectedX != null ? '已选择爆点，点击确认保存' : '点击地图任意位置设置爆点',
+                  _selectedX != null
+                      ? '已选择$_targetName，点击确认保存'
+                      : '点击地图任意位置设置$_targetName',
                   style: TextStyle(
                     color: _selectedX != null
                         ? theme.colorScheme.primary
@@ -401,12 +427,13 @@ class _ImpactPointPickerScreenState
         double offsetX,
         double offsetY
       }) imageBounds,
-      double markerScale) {
+      double markerScale,
+      Offset point) {
     const double baseHalfSize = 10.0;
     final left =
-        imageBounds.offsetX + widget.throwX * imageBounds.width - baseHalfSize;
+        imageBounds.offsetX + point.dx * imageBounds.width - baseHalfSize;
     final top =
-        imageBounds.offsetY + widget.throwY * imageBounds.height - baseHalfSize;
+        imageBounds.offsetY + point.dy * imageBounds.height - baseHalfSize;
 
     return Positioned(
       left: left,
@@ -442,12 +469,13 @@ class _ImpactPointPickerScreenState
         double offsetX,
         double offsetY
       }) imageBounds,
-      double markerScale) {
+      double markerScale,
+      Offset point) {
     const double baseHalfSize = 10.0;
     final left =
-        imageBounds.offsetX + _selectedX! * imageBounds.width - baseHalfSize;
+        imageBounds.offsetX + point.dx * imageBounds.width - baseHalfSize;
     final top =
-        imageBounds.offsetY + _selectedY! * imageBounds.height - baseHalfSize;
+        imageBounds.offsetY + point.dy * imageBounds.height - baseHalfSize;
 
     return Positioned(
       left: left,
@@ -482,11 +510,13 @@ class _ImpactPointPickerScreenState
         double height,
         double offsetX,
         double offsetY
-      }) imageBounds) {
-    final startX = imageBounds.offsetX + widget.throwX * imageBounds.width;
-    final startY = imageBounds.offsetY + widget.throwY * imageBounds.height;
-    final endX = imageBounds.offsetX + _selectedX! * imageBounds.width;
-    final endY = imageBounds.offsetY + _selectedY! * imageBounds.height;
+      }) imageBounds,
+      Offset from,
+      Offset to) {
+    final startX = imageBounds.offsetX + from.dx * imageBounds.width;
+    final startY = imageBounds.offsetY + from.dy * imageBounds.height;
+    final endX = imageBounds.offsetX + to.dx * imageBounds.width;
+    final endY = imageBounds.offsetY + to.dy * imageBounds.height;
 
     return Positioned.fill(
       child: IgnorePointer(

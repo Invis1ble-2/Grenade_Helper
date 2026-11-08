@@ -14,6 +14,7 @@ import '../services/tag_service.dart';
 import '../models.dart';
 import '../providers.dart';
 import '../widgets/map_icon.dart';
+import '../widgets/grenade_type_icon.dart';
 import '../theme/app_design_system.dart';
 import '../main.dart' show sendOverlayCommand;
 import 'grenade_select_delete_screen.dart';
@@ -540,11 +541,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ),
         SwitchListTile(
-          title: const Text('地图界面使用旧版标识'),
-          subtitle: const Text('仅切换地图上的道具标记，其他界面保持新版标识'),
+          title: const Text('使用旧版道具图标'),
+          subtitle: const Text('所有界面的道具类型图标统一切换为旧版'),
           value: _mapMarkerUseEmoji,
           onChanged: (value) async {
             setState(() => _mapMarkerUseEmoji = value);
+            GrenadeTypeIcon.useLegacy = value;
+            sendOverlayCommand('set_legacy_icons', {'value': value});
             if (widget.settingsService != null) {
               await widget.settingsService!.setMapMarkerUseEmoji(value);
             }
