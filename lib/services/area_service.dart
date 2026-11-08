@@ -1,10 +1,12 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:ui';
 import 'package:isar_community/isar.dart';
 import '../models/map_area.dart';
 import '../models/tag.dart';
 import '../models/grenade_tag.dart';
 import '../models.dart';
+import '../widgets/square_brush.dart';
 import 'lan_sync/lan_sync_local_store.dart';
 import 'tag_uuid_service.dart';
 
@@ -551,6 +553,7 @@ class AreaService {
             widthRatio: widthRatio,
             isEraser: isEraser,
             isShape: isShape,
+            isSquare: parseSquareBrush(stroke),
           );
         }
 
@@ -652,6 +655,17 @@ class AreaService {
     }
     final radius =
         (stroke.widthRatio / 2).clamp(_minBrushRatio / 2, _maxBrushRatio / 2);
+    if (stroke.isSquare) {
+      if (points.length == 1) {
+        return _isPointInSquareSweep(point, points.first, points.first, radius);
+      }
+      for (int i = 0; i < points.length - 1; i++) {
+        if (_isPointInSquareSweep(point, points[i], points[i + 1], radius)) {
+          return true;
+        }
+      }
+      return false;
+    }
     final radiusSquared = radius * radius;
 
     if (points.length == 1) {
@@ -667,6 +681,24 @@ class AreaService {
       }
     }
     return false;
+  }
+
+  /// 点是否在轴对齐方块沿线段 a→b 扫过的区域内（切比雪夫距离 ≤ h）
+  bool _isPointInSquareSweep(Offset p, Offset a, Offset b, double h) {
+    var lo = 0.0;
+    var hi = 1.0;
+    for (final (r, d) in [(p.dx - a.dx, b.dx - a.dx), (p.dy - a.dy, b.dy - a.dy)]) {
+      if (d.abs() < 1e-12) {
+        if (r.abs() > h) return false;
+        continue;
+      }
+      final t1 = (r - h) / d;
+      final t2 = (r + h) / d;
+      lo = math.max(lo, math.min(t1, t2));
+      hi = math.min(hi, math.max(t1, t2));
+      if (lo > hi) return false;
+    }
+    return true;
   }
 
   bool _isPointInPolygon(Offset point, List<Offset> polygon) {
@@ -707,11 +739,13 @@ class _AreaStroke {
   final double widthRatio;
   final bool isEraser;
   final bool isShape;
+  final bool isSquare;
 
   const _AreaStroke({
     required this.points,
     required this.widthRatio,
     required this.isEraser,
     this.isShape = false,
+    this.isSquare = false,
   });
 }

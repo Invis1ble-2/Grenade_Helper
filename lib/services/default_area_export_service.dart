@@ -4,6 +4,7 @@ import 'package:isar_community/isar.dart';
 import '../models.dart';
 import '../models/map_area.dart';
 import '../models/tag.dart';
+import '../widgets/square_brush.dart';
 
 class DefaultAreaExportService {
   const DefaultAreaExportService();
@@ -233,6 +234,9 @@ const Map<String, Map<String, List<BuiltinAreaPreset>>> builtinAreaRegionPresets
         if (stroke.isShape) {
           entry['s'] = 1;
         }
+        if (stroke.isSquare) {
+          entry['b'] = 1;
+        }
         compact.add(entry);
       }
 
@@ -261,6 +265,7 @@ const Map<String, Map<String, List<BuiltinAreaPreset>>> builtinAreaRegionPresets
             widthRatio: widthRatio,
             isEraser: isEraser,
             isShape: isShape,
+            isSquare: parseSquareBrush(stroke),
           ),
         );
         continue;
@@ -493,12 +498,14 @@ class _ExportStroke {
   final double widthRatio;
   final bool isEraser;
   final bool isShape;
+  final bool isSquare;
 
   const _ExportStroke({
     required this.points,
     required this.widthRatio,
     required this.isEraser,
     this.isShape = false,
+    this.isSquare = false,
   });
 }
 

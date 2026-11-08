@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:grenade_helper/models/map_area.dart';
 import 'package:isar_community/isar.dart';
@@ -12,6 +13,7 @@ import '../providers.dart';
 import '../services/area_service.dart';
 import '../widgets/color_picker_widget.dart';
 import '../widgets/path_image_provider.dart';
+import '../widgets/square_brush.dart';
 
 enum _DrawTool {
   move,
@@ -78,9 +80,7 @@ class AreaDrawScreen extends ConsumerStatefulWidget {
 
 class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
   static const String _lastUsedColorKey = 'area_draw_last_used_color';
-  static const List<double> _brushPresets = [0.006, 0.012, 0.018, 0.02, 0.03];
-  static const int _defaultBrushLevel = 2;
-  static final double _defaultBrushRatio = _brushPresets[_defaultBrushLevel];
+  static const double _defaultBrushRatio = 0.018;
   static const double _minBrushRatio = 0.004;
   static const double _maxBrushRatio = 0.08;
 
@@ -91,6 +91,7 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
   final List<_DrawStroke> _strokes = [];
   List<Offset> _currentStroke = [];
   double _currentStrokeWidthRatio = _defaultBrushRatio;
+  bool _currentStrokeSquare = false;
 
   // 钢笔工具锚点状态
   final List<Offset> _penPoints = [];
@@ -98,12 +99,16 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
 
   // 形状工具状态
   double _shapeSize = 0.05;
+  _DrawStroke? _activeShape;
+
+  // 重做栈：元素为被撤销的笔画或钢笔锚点
+  final List<Object> _redoStack = [];
 
   final _nameController = TextEditingController();
   int _selectedColor = 0xFF4CAF50;
   _DrawTool _activeTool = _DrawTool.move;
   double _brushRatio = _defaultBrushRatio;
-  int _brushLevel = _defaultBrushLevel;
+  bool _squareBrush = false;
   Map<int, MapArea> _tagAreasByLayerId = {};
   final Map<int, _LayerDraft> _draftByLayerId = {};
   int? _lastUsedColor;
@@ -267,6 +272,8 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
       _strokes.clear();
       _currentStroke = [];
       _penPoints.clear();
+      _activeShape = null;
+      _redoStack.clear();
 
       if (draft != null) {
         if (!widget.lockName) {
@@ -304,8 +311,7 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
     if (brushStrokes.isNotEmpty) {
       _brushRatio =
           brushStrokes.last.widthRatio.clamp(_minBrushRatio, _maxBrushRatio);
-      _brushLevel = _nearestBrushLevel(_brushRatio);
-      _brushRatio = _brushPresets[_brushLevel];
+      _squareBrush = brushStrokes.last.isSquare;
     }
   }
 
@@ -326,7 +332,8 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
               final rawWidthRatio =
                   ((stroke['widthRatio'] as num?) ?? (stroke['w'] as num?))
                       ?.toDouble();
-              final rawStrokeWidth = (stroke['strokeWidth'] as num?)?.toDouble();
+              final rawStrokeWidth =
+                  (stroke['strokeWidth'] as num?)?.toDouble();
               final widthRatio = (rawWidthRatio != null
                       ? _normalizeWidthRatio(rawWidthRatio)
                       : (rawStrokeWidth != null
@@ -355,6 +362,7 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
                 isShape: isShape,
                 shapeType: shapeType,
                 center: center,
+                isSquare: parseSquareBrush(stroke),
               );
             }
 
@@ -384,6 +392,7 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
             isShape: stroke.isShape,
             shapeType: stroke.shapeType,
             center: stroke.center,
+            isSquare: stroke.isSquare,
           ),
         )
         .toList(growable: true);
@@ -401,6 +410,7 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
         points: List<Offset>.from(_currentStroke),
         widthRatio: _currentStrokeWidthRatio,
         isEraser: _isEraserMode,
+        isSquare: _currentStrokeSquare,
       ));
     }
     if (_penPoints.length >= 3) {
@@ -493,19 +503,6 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
       points.add(Offset(x, y));
     }
     return points;
-  }
-
-  int _nearestBrushLevel(double value) {
-    var best = 0;
-    var bestDelta = (value - _brushPresets.first).abs();
-    for (var i = 1; i < _brushPresets.length; i++) {
-      final d = (value - _brushPresets[i]).abs();
-      if (d < bestDelta) {
-        best = i;
-        bestDelta = d;
-      }
-    }
-    return best;
   }
 
   @override
@@ -615,6 +612,7 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
       ));
       _penPoints.clear();
       _draggingPenPointIndex = null;
+      _redoStack.clear();
       _cacheCurrentLayerDraft();
     } else if (clearIfIncomplete && _penPoints.isNotEmpty) {
       _penPoints.clear();
@@ -658,22 +656,37 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
         ? _generateCirclePoints(center, _shapeSize, 32)
         : _generateSquarePoints(center, _shapeSize);
 
+    final shape = _DrawStroke(
+      points: points,
+      widthRatio: _defaultBrushRatio,
+      isEraser: false,
+      isShape: true,
+      shapeType: shapeType,
+      center: center,
+    );
     setState(() {
-      _strokes.removeWhere((s) => s.isShape && s.shapeType > 0);
-      _strokes.add(_DrawStroke(
-        points: points,
-        widthRatio: _defaultBrushRatio,
-        isEraser: false,
-        isShape: true,
-        shapeType: shapeType,
-        center: center,
-      ));
+      final idx = _activeShapeIndex;
+      if (idx == -1) {
+        _strokes.add(shape);
+        _redoStack.clear();
+      } else {
+        _strokes[idx] = shape;
+      }
+      _activeShape = shape;
     });
     _cacheCurrentLayerDraft();
   }
 
+  int get _activeShapeIndex => _activeShape == null
+      ? -1
+      : _strokes.indexWhere((s) => identical(s, _activeShape));
+
+  void _startNewShape() {
+    setState(() => _activeShape = null);
+  }
+
   void _updateActivePresetShape({int? targetShapeType}) {
-    final idx = _strokes.lastIndexWhere((s) => s.isShape && s.shapeType > 0);
+    final idx = _activeShapeIndex;
     if (idx == -1) return;
 
     final existing = _strokes[idx];
@@ -684,7 +697,7 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
         : _generateSquarePoints(center, _shapeSize);
 
     setState(() {
-      _strokes[idx] = _DrawStroke(
+      final updated = _DrawStroke(
         points: points,
         widthRatio: existing.widthRatio,
         isEraser: false,
@@ -692,6 +705,8 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
         shapeType: shapeType,
         center: center,
       );
+      _strokes[idx] = updated;
+      _activeShape = updated;
     });
     _cacheCurrentLayerDraft();
   }
@@ -728,7 +743,10 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
       if (hitIdx != null) {
         return;
       }
-      setState(() => _penPoints.add(ratio));
+      setState(() {
+        _penPoints.add(ratio);
+        _redoStack.clear();
+      });
       _cacheCurrentLayerDraft();
       return;
     }
@@ -742,6 +760,7 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
       setState(() {
         _currentStroke = [ratio];
         _currentStrokeWidthRatio = _brushRatio;
+        _currentStrokeSquare = _squareBrush;
       });
     }
   }
@@ -777,6 +796,7 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
       setState(() {
         _currentStroke = [ratio];
         _currentStrokeWidthRatio = _brushRatio;
+        _currentStrokeSquare = _squareBrush;
       });
     }
   }
@@ -845,8 +865,10 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
           points: List.from(_currentStroke),
           widthRatio: _currentStrokeWidthRatio,
           isEraser: _isEraserMode,
+          isSquare: _currentStrokeSquare,
         ));
         _currentStroke = [];
+        _redoStack.clear();
       });
       _cacheCurrentLayerDraft();
     }
@@ -868,13 +890,27 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
   }
 
   bool get _canUndo => _penPoints.isNotEmpty || _strokes.isNotEmpty;
+  bool get _canRedo => _redoStack.isNotEmpty;
 
   void _undo() {
     setState(() {
       if (_penPoints.isNotEmpty) {
-        _penPoints.removeLast();
+        _redoStack.add(_penPoints.removeLast());
       } else if (_strokes.isNotEmpty) {
-        _strokes.removeLast();
+        _redoStack.add(_strokes.removeLast());
+      }
+    });
+    _cacheCurrentLayerDraft();
+  }
+
+  void _redo() {
+    if (_redoStack.isEmpty) return;
+    setState(() {
+      final item = _redoStack.removeLast();
+      if (item is Offset) {
+        _penPoints.add(item);
+      } else if (item is _DrawStroke) {
+        _strokes.add(item);
       }
     });
     _cacheCurrentLayerDraft();
@@ -886,6 +922,8 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
       _currentStroke = [];
       _penPoints.clear();
       _draggingPenPointIndex = null;
+      _activeShape = null;
+      _redoStack.clear();
     });
     _cacheCurrentLayerDraft();
   }
@@ -900,6 +938,7 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
               'widthRatio': stroke.widthRatio,
               'strokeWidth': (stroke.widthRatio * 800.0).clamp(4.0, 64.0),
               'isEraser': stroke.isEraser,
+              if (stroke.isSquare) 'brushShape': 1,
               if (stroke.isShape) 'isShape': true,
               if (stroke.shapeType > 0) 'shapeType': stroke.shapeType,
               if (stroke.center != null)
@@ -1089,9 +1128,7 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: Text(
-          widget.isImpactAreaMode
-              ? '绘制爆点区域'
-              : '绘制区域 - ${_selectedLayer!.name}',
+          widget.isImpactAreaMode ? '绘制爆点区域' : '绘制区域 - ${_selectedLayer!.name}',
         ),
         actions: [
           if (!widget.isImpactAreaMode && _availableLayers.length > 1)
@@ -1103,7 +1140,12 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
           IconButton(
             icon: const Icon(Icons.undo),
             onPressed: _canUndo ? _undo : null,
-            tooltip: '撤销',
+            tooltip: '撤销 (Ctrl+Z)',
+          ),
+          IconButton(
+            icon: const Icon(Icons.redo),
+            onPressed: _canRedo ? _redo : null,
+            tooltip: '重做 (Ctrl+Y)',
           ),
           IconButton(
             icon: const Icon(Icons.delete_outline),
@@ -1112,164 +1154,177 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          if (!widget.isImpactAreaMode)
-            Container(
-              padding: const EdgeInsets.all(12),
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              child: Row(
-                children: [
-                  if (!widget.lockName)
-                    Expanded(
-                      child: TextField(
-                        controller: _nameController,
-                        decoration: const InputDecoration(
-                          labelText: '区域名称',
-                          hintText: '如: A大, 中路...',
-                          border: OutlineInputBorder(),
-                          isDense: true,
+      body: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.keyY, control: true): _redo,
+          const SingleActivator(LogicalKeyboardKey.keyZ, control: true): () {
+            if (_canUndo) _undo();
+          },
+        },
+        child: Focus(
+          autofocus: true,
+          child: Column(
+            children: [
+              if (!widget.isImpactAreaMode)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  child: Row(
+                    children: [
+                      if (!widget.lockName)
+                        Expanded(
+                          child: TextField(
+                            controller: _nameController,
+                            decoration: const InputDecoration(
+                              labelText: '区域名称',
+                              hintText: '如: A大, 中路...',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                          ),
+                        )
+                      else
+                        Expanded(
+                          child: Container(
+                            height: 40,
+                            alignment: Alignment.centerLeft,
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .outlineVariant),
+                            ),
+                            child: Text(
+                              '绑定标签：${_nameController.text.trim().isEmpty ? "未命名标签" : _nameController.text.trim()}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                          ),
+                        ),
+                      const SizedBox(width: 12),
+                      GestureDetector(
+                        onTap: () async {
+                          final color = await showTagColorPickerDialog(context,
+                              initialColor: _selectedColor);
+                          if (color != null) {
+                            setState(() => _selectedColor = color);
+                            _cacheCurrentLayerDraft();
+                            _rememberLastUsedColor(color);
+                          }
+                        },
+                        child: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color:
+                                Color(_selectedColor).withValues(alpha: 0.22),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Color(_selectedColor)),
+                          ),
+                          child: Icon(Icons.palette,
+                              color: Color(_selectedColor), size: 20),
                         ),
                       ),
-                    )
-                  else
-                    Expanded(
-                      child: Container(
-                        height: 40,
-                        alignment: Alignment.centerLeft,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .outlineVariant),
-                        ),
-                        child: Text(
-                          '绑定标签：${_nameController.text.trim().isEmpty ? "未命名标签" : _nameController.text.trim()}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 13),
-                        ),
-                      ),
-                    ),
-                  const SizedBox(width: 12),
-                  GestureDetector(
-                    onTap: () async {
-                      final color = await showTagColorPickerDialog(context,
-                          initialColor: _selectedColor);
-                      if (color != null) {
-                        setState(() => _selectedColor = color);
-                        _cacheCurrentLayerDraft();
-                        _rememberLastUsedColor(color);
-                      }
-                    },
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: Color(_selectedColor).withValues(alpha: 0.22),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Color(_selectedColor)),
-                      ),
-                      child: Icon(Icons.palette,
-                          color: Color(_selectedColor), size: 20),
-                    ),
+                    ],
                   ),
-                ],
-              ),
-            ),
-          Expanded(
-            child: ClipRect(
-              child: LayoutBuilder(builder: (context, constraints) {
-                final imageBounds = _getImageBounds(
-                    constraints.maxWidth, constraints.maxHeight);
-                return Listener(
-                  onPointerSignal: (event) {
-                    if (event is PointerScrollEvent) {
-                      _handleMouseWheelZoom(event, constraints);
-                    }
-                  },
-                  child: PhotoView.customChild(
-                    controller: _photoViewController,
-                    backgroundDecoration:
-                        const BoxDecoration(color: Colors.black),
-                    minScale: PhotoViewComputedScale.contained * 0.8,
-                    maxScale: PhotoViewComputedScale.covered * 3,
-                    initialScale: PhotoViewComputedScale.contained,
-                    child: StreamBuilder<PhotoViewControllerValue>(
-                      stream: _photoViewController.outputStateStream,
-                      builder: (context, snapshot) {
-                        final scale = snapshot.data?.scale ?? 1.0;
-                        final markerScale = 1.0 / scale;
+                ),
+              Expanded(
+                child: ClipRect(
+                  child: LayoutBuilder(builder: (context, constraints) {
+                    final imageBounds = _getImageBounds(
+                        constraints.maxWidth, constraints.maxHeight);
+                    return Listener(
+                      onPointerSignal: (event) {
+                        if (event is PointerScrollEvent) {
+                          _handleMouseWheelZoom(event, constraints);
+                        }
+                      },
+                      child: PhotoView.customChild(
+                        controller: _photoViewController,
+                        backgroundDecoration:
+                            const BoxDecoration(color: Colors.black),
+                        minScale: PhotoViewComputedScale.contained * 0.8,
+                        maxScale: PhotoViewComputedScale.covered * 3,
+                        initialScale: PhotoViewComputedScale.contained,
+                        child: StreamBuilder<PhotoViewControllerValue>(
+                          stream: _photoViewController.outputStateStream,
+                          builder: (context, snapshot) {
+                            final scale = snapshot.data?.scale ?? 1.0;
+                            final markerScale = 1.0 / scale;
 
-                        return Stack(
-                          key: _stackKey,
-                          children: [
-                            Builder(builder: (context) {
-                              final provider = imageProviderFromPath(
-                                  _selectedLayer!.assetPath);
-                              if (provider == null) {
-                                return Container(
-                                  width: constraints.maxWidth,
-                                  height: constraints.maxHeight,
-                                  color: Colors.black,
-                                );
-                              }
-                              return Image(
-                                image: provider,
-                                width: constraints.maxWidth,
-                                height: constraints.maxHeight,
-                                fit: BoxFit.contain,
-                              );
-                            }),
-                            if (widget.isImpactAreaMode &&
-                                widget.impactX != null &&
-                                widget.impactY != null)
-                              _buildImpactReferenceMarker(
-                                  imageBounds, markerScale),
-                            Positioned.fill(
-                              child: IgnorePointer(
-                                ignoring: !_isDrawingActive,
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTapDown: (d) =>
-                                      _onCanvasTapDown(d, imageBounds, scale),
-                                  onTapUp: _onCanvasTapUp,
-                                  onPanStart: (d) =>
-                                      _onPanStart(d, imageBounds, scale),
-                                  onPanUpdate: (d) =>
-                                      _onPanUpdate(d, imageBounds),
-                                  onPanEnd: _onPanEnd,
-                                  child: CustomPaint(
-                                    size: constraints.biggest,
-                                    painter: _StrokePainter(
-                                      strokes: _strokes,
-                                      currentStroke: _currentStroke,
-                                      currentStrokeWidthRatio:
-                                          _currentStrokeWidthRatio,
-                                      currentIsEraser: _isEraserMode,
-                                      penPoints: _penPoints,
-                                      color: drawColor,
-                                      opacity: overlayOpacity,
-                                      imageBounds: imageBounds,
-                                      markerScale: markerScale,
+                            return Stack(
+                              key: _stackKey,
+                              children: [
+                                Builder(builder: (context) {
+                                  final provider = imageProviderFromPath(
+                                      _selectedLayer!.assetPath);
+                                  if (provider == null) {
+                                    return Container(
+                                      width: constraints.maxWidth,
+                                      height: constraints.maxHeight,
+                                      color: Colors.black,
+                                    );
+                                  }
+                                  return Image(
+                                    image: provider,
+                                    width: constraints.maxWidth,
+                                    height: constraints.maxHeight,
+                                    fit: BoxFit.contain,
+                                  );
+                                }),
+                                if (widget.isImpactAreaMode &&
+                                    widget.impactX != null &&
+                                    widget.impactY != null)
+                                  _buildImpactReferenceMarker(
+                                      imageBounds, markerScale),
+                                Positioned.fill(
+                                  child: IgnorePointer(
+                                    ignoring: !_isDrawingActive,
+                                    child: GestureDetector(
+                                      behavior: HitTestBehavior.opaque,
+                                      onTapDown: (d) => _onCanvasTapDown(
+                                          d, imageBounds, scale),
+                                      onTapUp: _onCanvasTapUp,
+                                      onPanStart: (d) =>
+                                          _onPanStart(d, imageBounds, scale),
+                                      onPanUpdate: (d) =>
+                                          _onPanUpdate(d, imageBounds),
+                                      onPanEnd: _onPanEnd,
+                                      child: CustomPaint(
+                                        size: constraints.biggest,
+                                        painter: _StrokePainter(
+                                          strokes: _strokes,
+                                          currentStroke: _currentStroke,
+                                          currentStrokeWidthRatio:
+                                              _currentStrokeWidthRatio,
+                                          currentIsEraser: _isEraserMode,
+                                          currentIsSquare: _currentStrokeSquare,
+                                          penPoints: _penPoints,
+                                          color: drawColor,
+                                          opacity: overlayOpacity,
+                                          imageBounds: imageBounds,
+                                          markerScale: markerScale,
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ),
-                              ),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                  ),
-                );
-              }),
-            ),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+                    );
+                  }),
+                ),
+              ),
+              _buildBottomToolbar(isCompactToolbar, drawColor),
+            ],
           ),
-          _buildBottomToolbar(isCompactToolbar, drawColor),
-        ],
+        ),
       ),
     );
   }
@@ -1415,61 +1470,50 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
             const SizedBox(height: 8),
             Row(
               children: [
+                _buildBrushShapeButton(
+                  icon: Icons.circle,
+                  tooltip: '圆形笔刷',
+                  square: false,
+                ),
+                const SizedBox(width: 6),
+                _buildBrushShapeButton(
+                  icon: Icons.square,
+                  tooltip: '方形笔刷',
+                  square: true,
+                ),
+                const SizedBox(width: 12),
                 Text(
-                  '画刷档位',
+                  '粗细',
                   style: TextStyle(
                     fontSize: 12,
                     color: theme.textTheme.bodySmall?.color,
                   ),
                 ),
-                const SizedBox(width: 10),
                 Expanded(
-                  child: Row(
-                    children: [
-                      for (int i = 0; i < _brushPresets.length; i++) ...[
-                        if (i > 0) const SizedBox(width: 6),
-                        Expanded(
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: () {
-                              setState(() {
-                                _brushLevel = i;
-                                _brushRatio = _brushPresets[i];
-                              });
-                            },
-                            child: Container(
-                              height: 30,
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: _brushLevel == i
-                                    ? theme.colorScheme.primary
-                                        .withValues(alpha: 0.2)
-                                    : Colors.transparent,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: _brushLevel == i
-                                      ? theme.colorScheme.primary
-                                      : theme.dividerColor
-                                          .withValues(alpha: 0.3),
-                                ),
-                              ),
-                              child: Text(
-                                '${i + 1}',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: _brushLevel == i
-                                      ? FontWeight.w700
-                                      : FontWeight.w500,
-                                  color: _brushLevel == i
-                                      ? theme.colorScheme.primary
-                                      : theme.textTheme.bodyMedium?.color,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
+                  child: SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      trackHeight: 4,
+                      thumbShape:
+                          const RoundSliderThumbShape(enabledThumbRadius: 7),
+                    ),
+                    child: Slider(
+                      value: _brushRatio,
+                      min: _minBrushRatio,
+                      max: _maxBrushRatio,
+                      activeColor: theme.colorScheme.primary,
+                      onChanged: (val) => setState(() => _brushRatio = val),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 40,
+                  child: Text(
+                    '${(_brushRatio * 100).toStringAsFixed(1)}%',
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: theme.textTheme.bodySmall?.color,
+                    ),
                   ),
                 ),
               ],
@@ -1550,10 +1594,54 @@ class _AreaDrawScreenState extends ConsumerState<AreaDrawScreen> {
                     ),
                   ),
                 ),
+                IconButton(
+                  icon: const Icon(Icons.add_circle_outline_rounded),
+                  tooltip: '新建形状',
+                  iconSize: 22,
+                  visualDensity: VisualDensity.compact,
+                  color: accentColor,
+                  onPressed: _activeShapeIndex == -1 ? null : _startNewShape,
+                ),
               ],
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildBrushShapeButton({
+    required IconData icon,
+    required String tooltip,
+    required bool square,
+  }) {
+    final theme = Theme.of(context);
+    final selected = _squareBrush == square;
+    final color = selected
+        ? theme.colorScheme.primary
+        : theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.6);
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => _squareBrush = square),
+        child: Container(
+          width: 30,
+          height: 30,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected
+                ? theme.colorScheme.primary.withValues(alpha: 0.2)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: selected
+                  ? theme.colorScheme.primary
+                  : theme.dividerColor.withValues(alpha: 0.3),
+            ),
+          ),
+          child: Icon(icon, size: 14, color: color),
+        ),
       ),
     );
   }
@@ -1617,6 +1705,7 @@ class _StrokePainter extends CustomPainter {
   final List<Offset> currentStroke;
   final double currentStrokeWidthRatio;
   final bool currentIsEraser;
+  final bool currentIsSquare;
   final List<Offset> penPoints;
   final Color color;
   final double opacity;
@@ -1633,6 +1722,7 @@ class _StrokePainter extends CustomPainter {
     required this.currentStroke,
     required this.currentStrokeWidthRatio,
     required this.currentIsEraser,
+    required this.currentIsSquare,
     required this.penPoints,
     required this.color,
     required this.opacity,
@@ -1650,8 +1740,9 @@ class _StrokePainter extends CustomPainter {
     List<Offset> points,
     double widthRatio,
     bool isEraser,
-    bool isShape,
-  ) {
+    bool isShape, {
+    bool isSquare = false,
+  }) {
     if (points.isEmpty) return;
     final screenPoints = points.map(_toScreen).toList(growable: false);
 
@@ -1682,6 +1773,11 @@ class _StrokePainter extends CustomPainter {
           ..color = color.withValues(alpha: 1.0)
           ..style = PaintingStyle.fill
           ..isAntiAlias = true);
+
+    if (isSquare) {
+      paintSquareBrush(canvas, screenPoints, diameterPx, fillPaint);
+      return;
+    }
 
     final bridgePaint = isEraser
         ? (Paint()
@@ -1755,6 +1851,7 @@ class _StrokePainter extends CustomPainter {
         stroke.widthRatio,
         stroke.isEraser,
         stroke.isShape,
+        isSquare: stroke.isSquare,
       );
     }
 
@@ -1765,6 +1862,7 @@ class _StrokePainter extends CustomPainter {
         currentStrokeWidthRatio,
         currentIsEraser,
         false,
+        isSquare: currentIsSquare,
       );
     }
 
@@ -1796,6 +1894,7 @@ class _DrawStroke {
   final bool isShape;
   final int shapeType;
   final Offset? center;
+  final bool isSquare;
 
   const _DrawStroke({
     required this.points,
@@ -1804,6 +1903,7 @@ class _DrawStroke {
     this.isShape = false,
     this.shapeType = 0,
     this.center,
+    this.isSquare = false,
   });
 }
 

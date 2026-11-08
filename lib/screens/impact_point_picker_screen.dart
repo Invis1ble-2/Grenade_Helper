@@ -7,6 +7,7 @@ import '../models.dart';
 import '../providers.dart';
 import '../widgets/app_svg_icon.dart';
 import '../widgets/path_image_provider.dart';
+import '../widgets/square_brush.dart';
 
 /// 爆点坐标选择/查看页面
 class ImpactPointPickerScreen extends ConsumerStatefulWidget {
@@ -559,6 +560,14 @@ class _ImpactAreaPainter extends CustomPainter {
       final width = _extractStrokeWidth(stroke);
       final isEraser = stroke['isEraser'] == true || stroke['e'] == 1;
       final isShape = stroke['isShape'] == true || stroke['s'] == 1;
+      if (!isShape && parseSquareBrush(stroke)) {
+        final paint = Paint()
+          ..color = isEraser ? Colors.transparent : color.withValues(alpha: 1.0)
+          ..blendMode = isEraser ? BlendMode.clear : BlendMode.srcOver;
+        paintSquareBrush(
+            canvas, points.map(_limitPoint).toList(), width, paint);
+        continue;
+      }
       _drawStroke(canvas, points, width, isEraser, isShape);
     }
 

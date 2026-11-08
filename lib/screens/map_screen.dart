@@ -18,6 +18,7 @@ import '../main.dart';
 import '../spawn_point_data.dart';
 import '../widgets/joystick_widget.dart';
 import '../widgets/path_image_provider.dart';
+import '../widgets/square_brush.dart';
 import '../widgets/app_svg_icon.dart';
 import '../widgets/grenade_type_icon.dart';
 import '../widgets/map_icon.dart';
@@ -3472,8 +3473,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                           tooltip: '管理收藏夹',
                           visualDensity: VisualDensity.compact,
                           padding: const EdgeInsets.all(6),
-                          constraints: const BoxConstraints(
-                              minWidth: 30, minHeight: 30),
+                          constraints:
+                              const BoxConstraints(minWidth: 30, minHeight: 30),
                           onPressed: () =>
                               _showFavoriteFolderManager(folderService),
                           icon: const Icon(
@@ -5531,14 +5532,42 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             }),
           ),
           // 底部道具列表面板（选中点位时显示）
-          if (_selectedClusterForImpact != null)
-            _buildClusterListPanel(currentLayer.id, isEditMode)
-          else if (showMapGrenadeListPanel)
-            _buildAllMapGrenadesPanel(
-              allMapGrenadeEntries,
-              isEditMode,
-              currentLayer.id,
+          SizedBox(
+            width: double.infinity,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 280),
+              reverseDuration: const Duration(milliseconds: 250),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              layoutBuilder: (current, previous) => Stack(
+                alignment: Alignment.bottomCenter,
+                children: [...previous, if (current != null) current],
+              ),
+              transitionBuilder: (child, animation) => ClipRect(
+                child: SizeTransition(
+                  sizeFactor: animation,
+                  axisAlignment: 1,
+                  child: child,
+                ),
+              ),
+              child: _selectedClusterForImpact != null
+                  ? KeyedSubtree(
+                      key: const ValueKey('clusterPanel'),
+                      child:
+                          _buildClusterListPanel(currentLayer.id, isEditMode),
+                    )
+                  : showMapGrenadeListPanel
+                      ? KeyedSubtree(
+                          key: const ValueKey('allMapPanel'),
+                          child: _buildAllMapGrenadesPanel(
+                            allMapGrenadeEntries,
+                            isEditMode,
+                            currentLayer.id,
+                          ),
+                        )
+                      : null,
             ),
+          ),
         ],
       ),
     );
@@ -7363,7 +7392,8 @@ class _ImpactAreaPainter extends CustomPainter {
       final points = <Offset>[];
       for (final p in rawPoints) {
         if (p is List && p.length >= 2 && p[0] is num && p[1] is num) {
-          points.add(Offset((p[0] as num).toDouble(), (p[1] as num).toDouble()));
+          points
+              .add(Offset((p[0] as num).toDouble(), (p[1] as num).toDouble()));
         } else if (p is Map && p['x'] is num && p['y'] is num) {
           points.add(
               Offset((p['x'] as num).toDouble(), (p['y'] as num).toDouble()));
@@ -7379,6 +7409,14 @@ class _ImpactAreaPainter extends CustomPainter {
           : ((stroke['strokeWidth'] as num?)?.toDouble() ?? 15.0);
       final isEraser = stroke['isEraser'] as bool? ?? false;
       final isShape = stroke['isShape'] as bool? ?? false;
+      if (!isShape && parseSquareBrush(stroke)) {
+        final paint = Paint()
+          ..color = isEraser ? Colors.transparent : color.withValues(alpha: 1.0)
+          ..blendMode = isEraser ? BlendMode.clear : BlendMode.srcOver;
+        paintSquareBrush(
+            canvas, points.map(_limitPoint).toList(), width, paint);
+        continue;
+      }
       _drawStroke(canvas, points, width, isEraser, isShape: isShape);
     }
 

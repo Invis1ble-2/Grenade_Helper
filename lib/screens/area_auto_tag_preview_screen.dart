@@ -8,6 +8,7 @@ import '../models/map_area.dart';
 import '../providers.dart';
 import '../services/area_service.dart';
 import '../widgets/path_image_provider.dart';
+import '../widgets/square_brush.dart';
 
 class AreaAutoTagPreviewScreen extends ConsumerStatefulWidget {
   final GameMap gameMap;
@@ -183,6 +184,7 @@ class _AreaAutoTagPreviewScreenState
             widthRatio: widthRatio,
             isEraser: isEraser,
             isShape: isShape,
+            isSquare: parseSquareBrush(stroke),
           );
         }
 
@@ -657,7 +659,7 @@ class _AreaScopePainter extends CustomPainter {
       );
 
   void _drawStroke(Canvas canvas, List<Offset> points, double widthRatio,
-      bool isEraser, bool isShape) {
+      bool isEraser, bool isShape, {bool isSquare = false}) {
     if (points.isEmpty) return;
     final screenPoints = points.map(_toScreen).toList(growable: false);
 
@@ -689,6 +691,11 @@ class _AreaScopePainter extends CustomPainter {
           ..style = PaintingStyle.fill
           ..isAntiAlias = true);
 
+    if (isSquare) {
+      paintSquareBrush(canvas, screenPoints, diameterPx, fillPaint);
+      return;
+    }
+
     final bridgePaint = isEraser
         ? (Paint()
           ..blendMode = BlendMode.clear
@@ -719,8 +726,9 @@ class _AreaScopePainter extends CustomPainter {
     );
 
     for (final stroke in strokes) {
-      _drawStroke(
-          canvas, stroke.points, stroke.widthRatio, stroke.isEraser, stroke.isShape);
+      _drawStroke(canvas, stroke.points, stroke.widthRatio, stroke.isEraser,
+          stroke.isShape,
+          isSquare: stroke.isSquare);
     }
 
     canvas.restore();
@@ -737,11 +745,13 @@ class _AreaPreviewStroke {
   final double widthRatio;
   final bool isEraser;
   final bool isShape;
+  final bool isSquare;
 
   const _AreaPreviewStroke({
     required this.points,
     required this.widthRatio,
     required this.isEraser,
     this.isShape = false,
+    this.isSquare = false,
   });
 }
