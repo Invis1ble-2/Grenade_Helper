@@ -51,49 +51,58 @@ final _grenadeTagRevisionProvider =
   }
 });
 
+// 选中标签（含区域标签）匹配到的道具 ID，未选标签时为 null
+final _tagMatchedGrenadeIdsProvider =
+    FutureProvider.autoDispose<Set<int>?>((ref) async {
+  final isar = ref.watch(isarProvider);
+  final selectedTagIds = ref.watch(selectedTagIdsProvider);
+  ref.watch(_grenadeTagRevisionProvider);
+  if (selectedTagIds.isEmpty) return null;
+  final matchedGrenadeIds = <int>{};
+  for (final tagId in selectedTagIds) {
+    final links = await isar.grenadeTags.filter().tagIdEqualTo(tagId).findAll();
+    for (final link in links) {
+      matchedGrenadeIds.add(link.grenadeId);
+    }
+  }
+  return matchedGrenadeIds;
+});
+
+bool _passesGrenadeFilter(Grenade g, Set<int> selectedTypes, int teamFilter,
+    bool onlyFav, Set<int>? tagMatchedIds) {
+  if (!selectedTypes.contains(g.type)) return false;
+  if (teamFilter == TeamType.onlyAll && g.team != TeamType.all) return false;
+  if (teamFilter == TeamType.ct && g.team != TeamType.ct) return false;
+  if (teamFilter == TeamType.t && g.team != TeamType.t) return false;
+  if (onlyFav && !g.isFavorite) return false;
+  if (tagMatchedIds != null && !tagMatchedIds.contains(g.id)) return false;
+  return true;
+}
+
 final _filteredGrenadesProvider =
     StreamProvider.autoDispose.family<List<Grenade>, int>((ref, layerId) {
   final isar = ref.watch(isarProvider);
   final teamFilter = ref.watch(teamFilterProvider);
   final onlyFav = ref.watch(onlyFavoritesProvider);
   final selectedTypes = ref.watch(typeFilterProvider);
-  final selectedTagIds = ref.watch(selectedTagIdsProvider);
-  ref.watch(_grenadeTagRevisionProvider);
+  final tagMatchedIdsFuture = ref.watch(_tagMatchedGrenadeIdsProvider.future);
 
   return isar.grenades
       .filter()
       .layer((q) => q.idEqualTo(layerId))
       .watch(fireImmediately: true)
       .asyncMap((allGrenades) async {
-    var filtered = allGrenades.where((g) {
-      if (!selectedTypes.contains(g.type)) return false;
-      if (teamFilter == TeamType.onlyAll && g.team != TeamType.all) {
-        return false;
-      }
-      if (teamFilter == TeamType.ct && g.team != TeamType.ct) return false;
-      if (teamFilter == TeamType.t && g.team != TeamType.t) return false;
-      if (onlyFav && !g.isFavorite) return false;
-      return true;
-    }).toList();
-
-    if (selectedTagIds.isNotEmpty) {
-      final matchedGrenadeIds = <int>{};
-      for (final tagId in selectedTagIds) {
-        final links =
-            await isar.grenadeTags.filter().tagIdEqualTo(tagId).findAll();
-        for (final link in links) {
-          matchedGrenadeIds.add(link.grenadeId);
-        }
-      }
-      filtered =
-          filtered.where((g) => matchedGrenadeIds.contains(g.id)).toList();
-    }
-
-    return filtered;
+    final tagMatchedIds = await tagMatchedIdsFuture;
+    return allGrenades
+        .where((g) => _passesGrenadeFilter(
+            g, selectedTypes, teamFilter, onlyFav, tagMatchedIds))
+        .toList();
   });
 });
 
 // 聚合模型
+typedef _ImpactEntry = ({GrenadeCluster cluster, MapLayer layer, String name});
+
 class GrenadeCluster {
   final double xRatio;
   final double yRatio;
@@ -244,22 +253,8 @@ List<GrenadeCluster> clusterGrenadesByImpact(List<Grenade> grenades,
   );
 }
 
-IconData _mapMarkerLegacyIconForType(int type) {
-  switch (type) {
-    case GrenadeType.smoke:
-      return Icons.cloud;
-    case GrenadeType.flash:
-      return Icons.flash_on;
-    case GrenadeType.molotov:
-      return Icons.local_fire_department;
-    case GrenadeType.he:
-      return Icons.trip_origin;
-    case GrenadeType.wallbang:
-      return Icons.apps;
-    default:
-      return Icons.circle;
-  }
-}
+IconData _mapMarkerLegacyIconForType(int type) =>
+    GrenadeTypeIcon.legacyIconForType(type);
 
 void _paintMapMarkerLegacyIcon(
   Canvas canvas,
@@ -354,8 +349,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   final Map<int, PictureInfo> _grenadeTypePictures = {};
   bool _isLoadingGrenadeTypePictures = false;
 
-  bool get _useLegacyMapMarkers =>
-      globalSettingsService?.getMapMarkerUseEmoji() ?? false;
+  bool get _useLegacyMapMarkers => GrenadeTypeIcon.useLegacy;
 
   @override
   void initState() {
@@ -1448,6 +1442,21 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             final g = entry.grenade;
             return g.title.toLowerCase().contains(query);
           }).toList();
+    final impactMode = _isImpactMode;
+    final impactEntries =
+        impactMode ? _groupImpactEntries(sortedEntries) : const <_ImpactEntry>[];
+    final filteredImpactEntries = query.isEmpty
+        ? impactEntries
+        : impactEntries
+            .where((e) =>
+                e.name.toLowerCase().contains(query) ||
+                e.cluster.grenades
+                    .any((g) => g.title.toLowerCase().contains(query)))
+            .toList();
+    final totalCount = impactMode ? impactEntries.length : sortedEntries.length;
+    final shownCount =
+        impactMode ? filteredImpactEntries.length : filteredEntries.length;
+    final listTitle = impactMode ? '地图爆点列表' : '地图道具列表';
 
     return ValueListenableBuilder<double>(
       valueListenable: _allMapListPanelHeightNotifier,
@@ -1507,8 +1516,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                           Expanded(
                             child: Text(
                               showExpandedContent
-                                  ? '地图道具列表（${filteredEntries.length}/${sortedEntries.length}）'
-                                  : '地图道具列表（${sortedEntries.length}）',
+                                  ? '$listTitle（$shownCount/$totalCount）'
+                                  : '$listTitle（$totalCount）',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
@@ -1521,7 +1530,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                             Padding(
                               padding: const EdgeInsets.only(right: 4),
                               child: Text(
-                                isEditMode ? '点击编辑，右侧可删' : '点击查看',
+                                impactMode
+                                    ? '点击定位爆点'
+                                    : (isEditMode ? '点击编辑，右侧可删' : '点击查看'),
                                 style: TextStyle(
                                   color: Theme.of(context).hintColor,
                                   fontSize: 11,
@@ -1561,7 +1572,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                     style: const TextStyle(fontSize: 11),
                     decoration: InputDecoration(
                       isDense: true,
-                      hintText: '搜索道具名称',
+                      hintText: impactMode ? '搜索分组或道具名称' : '搜索道具名称',
                       prefixIcon: const Icon(Icons.search, size: 16),
                       prefixIconConstraints: const BoxConstraints(
                         minWidth: 30,
@@ -1604,7 +1615,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 ),
               if (showExpandedContent)
                 Expanded(
-                  child: sortedEntries.isEmpty
+                  child: impactMode
+                      ? _buildImpactEntryList(
+                          impactEntries, filteredImpactEntries, currentLayerId)
+                      : sortedEntries.isEmpty
                       ? const Center(
                           child: Text(
                             '当前地图暂无道具',
@@ -1715,6 +1729,122 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     );
   }
 
+  // 按楼层聚合已标记爆点，阈值与地图默认缩放下一致
+  List<_ImpactEntry> _groupImpactEntries(
+      List<({Grenade grenade, MapLayer layer})> entries) {
+    final byLayer = <int, ({MapLayer layer, List<Grenade> grenades})>{};
+    for (final e in entries) {
+      byLayer
+          .putIfAbsent(
+              e.layer.id, () => (layer: e.layer, grenades: <Grenade>[]))
+          .grenades
+          .add(e.grenade);
+    }
+    final clustered = <({GrenadeCluster cluster, MapLayer layer})>[];
+    for (final v in byLayer.values) {
+      final threshold = _getAdaptiveClusterThreshold(
+          scale: 1.0, grenadeCount: v.grenades.length);
+      for (final c in clusterGrenadesByImpact(v.grenades, threshold: threshold)) {
+        clustered.add((cluster: c, layer: v.layer));
+      }
+    }
+    final groupIds = <int>{
+      for (final e in clustered)
+        for (final g in e.cluster.grenades)
+          if (g.impactGroupId != null) g.impactGroupId!,
+    }.toList();
+    final groupNames = <int, String>{
+      for (final group in ref.read(isarProvider).impactGroups.getAllSync(groupIds))
+        if (group != null) group.id: group.name,
+    };
+    return clustered.map((e) {
+      final names = <String>{
+        for (final g in e.cluster.grenades)
+          if (groupNames[g.impactGroupId] != null) groupNames[g.impactGroupId]!,
+      };
+      // 无自定义分组时沿用爆点面板的命名规则
+      final name = names.isNotEmpty
+          ? names.join('、')
+          : (e.cluster.grenades.length == 1
+              ? (e.cluster.grenades.first.description ?? '未命名爆点')
+              : '未命名爆点');
+      return (cluster: e.cluster, layer: e.layer, name: name);
+    }).toList();
+  }
+
+  Widget _buildImpactEntryList(List<_ImpactEntry> allEntries,
+      List<_ImpactEntry> entries, int currentLayerId) {
+    if (allEntries.isEmpty) {
+      return const Center(
+        child: Text('当前地图暂无已标记爆点', style: TextStyle(color: Colors.grey)),
+      );
+    }
+    if (entries.isEmpty) {
+      return const Center(
+        child: Text('没有匹配的爆点', style: TextStyle(color: Colors.grey)),
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      itemCount: entries.length,
+      separatorBuilder: (_, __) => Divider(
+        height: 1,
+        color: Theme.of(context).dividerColor.withValues(alpha: 0.12),
+      ),
+      itemBuilder: (context, index) {
+        final entry = entries[index];
+        final cluster = entry.cluster;
+        final layer = entry.layer;
+        final count = cluster.grenades.length;
+        final color = count > 1
+            ? Colors.purpleAccent
+            : _getTypeColor(cluster.primaryType);
+        return ListTile(
+          dense: true,
+          visualDensity: VisualDensity.compact,
+          tileColor: layer.id == currentLayerId
+              ? Colors.blueAccent.withValues(alpha: 0.08)
+              : null,
+          leading: Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: Colors.black54,
+              shape: BoxShape.circle,
+              border: Border.all(color: color, width: 1.8),
+            ),
+            child: GrenadeTypeIcon(
+                type: cluster.primaryType, size: 14, color: color),
+          ),
+          title: Text(
+            entry.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12),
+          ),
+          subtitle: Text(
+            '${layer.name} • $count 个道具',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 10, color: Theme.of(context).hintColor),
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (cluster.hasFavorite)
+                const Icon(Icons.star, color: Colors.amber, size: 14),
+              const Icon(Icons.chevron_right, color: Colors.grey, size: 16),
+            ],
+          ),
+          onTap: () {
+            _switchToLayerById(layer.id, layerName: layer.name);
+            _showClusterBottomSheet(cluster, layer.id);
+          },
+        );
+      },
+    );
+  }
+
   void _showClusterBottomSheet(GrenadeCluster cluster, int layerId) async {
     // 选中状态
     setState(() {
@@ -1748,6 +1878,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final isar = ref.read(isarProvider);
     final layer = await isar.mapLayers.get(layerId);
     if (layer == null) return;
+    // 爆点模式下坐标为爆点，投掷点暂与爆点重合，待详情页设置
+    final impactMode = _isImpactMode;
     final grenade = Grenade(
         title: "新道具",
         type: GrenadeType.smoke,
@@ -1756,6 +1888,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         yRatio: cluster.yRatio,
         isNewImport: false,
         uniqueId: const Uuid().v4());
+    if (impactMode) {
+      grenade.impactXRatio = cluster.xRatio;
+      grenade.impactYRatio = cluster.yRatio;
+    }
     int id = 0;
     await isar.writeTxn(() async {
       id = await isar.grenades.put(grenade);
@@ -1766,8 +1902,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     Navigator.push(
         context,
         MaterialPageRoute(
-            builder: (_) =>
-                GrenadeDetailScreen(grenadeId: id, isEditing: true)));
+            builder: (_) => GrenadeDetailScreen(
+                grenadeId: id, isEditing: true, pickThrowPoint: impactMode)));
   }
 
   /// 批量删除
@@ -2329,9 +2465,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     required double size,
     required Color color,
   }) {
-    if (_useLegacyMapMarkers) {
-      return Icon(_mapMarkerLegacyIconForType(type), size: size, color: color);
-    }
     return GrenadeTypeIcon(type: type, size: size, color: color);
   }
 
@@ -2520,7 +2653,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final top =
         imageBounds.offsetY + effectiveY * imageBounds.height - baseHalfSize;
 
-    final isSelected = _selectedClusterForImpact == cluster;
+    final isSelected = _isSameCluster(_selectedClusterForImpact, cluster);
     final isDragging = _isSameCluster(_draggingImpactCluster, cluster);
     final isJoystickMoving = _isSameCluster(_joystickImpactCluster, cluster);
     final useGlowEffects =
@@ -4183,6 +4316,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
     final grenadesAsync = ref.watch(_filteredGrenadesProvider(currentLayer.id));
     final selectedTagIds = ref.watch(selectedTagIdsProvider);
+    final tagMatchedIds = selectedTagIds.isEmpty
+        ? null
+        : (ref.watch(_tagMatchedGrenadeIdsProvider).value ?? const <int>{});
     final showMapGrenadeListPanel =
         globalSettingsService?.getShowMapGrenadeList() ?? false;
     final showFavoritesBar = !isEditMode && _selectedClusterForImpact == null;
@@ -5536,7 +5672,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             width: double.infinity,
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 280),
-              reverseDuration: const Duration(milliseconds: 250),
+              reverseDuration: const Duration(milliseconds: 200),
               switchInCurve: Curves.easeOutCubic,
               switchOutCurve: Curves.easeInCubic,
               layoutBuilder: (current, previous) => Stack(
@@ -5560,7 +5696,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                       ? KeyedSubtree(
                           key: const ValueKey('allMapPanel'),
                           child: _buildAllMapGrenadesPanel(
-                            allMapGrenadeEntries,
+                            allMapGrenadeEntries
+                                .where((e) => _passesGrenadeFilter(
+                                    e.grenade,
+                                    selectedTypes,
+                                    teamFilter,
+                                    onlyFav,
+                                    tagMatchedIds))
+                                .toList(),
                             isEditMode,
                             currentLayer.id,
                           ),

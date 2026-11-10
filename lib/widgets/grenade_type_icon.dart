@@ -16,6 +16,26 @@ class GrenadeTypeIcon extends StatelessWidget {
     this.color,
   });
 
+  // 由设置“使用旧版图标”控制，启动及切换时同步
+  static bool useLegacy = false;
+
+  static IconData legacyIconForType(int type) {
+    switch (type) {
+      case GrenadeType.smoke:
+        return Icons.cloud;
+      case GrenadeType.flash:
+        return Icons.flash_on;
+      case GrenadeType.molotov:
+        return Icons.local_fire_department;
+      case GrenadeType.he:
+        return Icons.trip_origin;
+      case GrenadeType.wallbang:
+        return Icons.apps;
+      default:
+        return Icons.circle;
+    }
+  }
+
   static String assetForType(int type) {
     switch (type) {
       case GrenadeType.smoke:
@@ -36,6 +56,10 @@ class GrenadeTypeIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final resolvedColor = color ?? _defaultColor(context);
+    if (useLegacy) {
+      return Icon(legacyIconForType(type),
+          size: size, color: resolvedColor, semanticLabel: _label);
+    }
     return SvgPicture.asset(
       assetForType(type),
       width: size,

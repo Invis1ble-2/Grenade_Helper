@@ -214,9 +214,14 @@ class _GrenadeTypeBadge extends StatelessWidget {
 class GrenadeDetailScreen extends ConsumerStatefulWidget {
   final int grenadeId;
   final bool isEditing;
+  // 爆点已确定，位置卡片改为设置投掷点
+  final bool pickThrowPoint;
 
   const GrenadeDetailScreen(
-      {super.key, required this.grenadeId, required this.isEditing});
+      {super.key,
+      required this.grenadeId,
+      required this.isEditing,
+      this.pickThrowPoint = false});
 
   @override
   ConsumerState<GrenadeDetailScreen> createState() =>
@@ -525,6 +530,60 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     await _markAsLocallyEdited();
     _loadData(resetTitle: false);
     sendOverlayCommand('reload_data');
+  }
+
+  /// 选择投掷点（爆点固定）
+  Future<void> _pickThrowPoint() async {
+    if (grenade == null ||
+        grenade!.impactXRatio == null ||
+        grenade!.impactYRatio == null) {
+      return;
+    }
+    await grenade!.layer.load();
+    final layer = grenade!.layer.value;
+    if (layer == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('无法获取楼层信息'), duration: Duration(seconds: 1)),
+      );
+      return;
+    }
+
+    final result = await Navigator.push<Offset>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ImpactPointPickerScreen(
+          grenadeId: grenade!.id,
+          initialX: grenade!.impactXRatio,
+          initialY: grenade!.impactYRatio,
+          throwX: grenade!.xRatio,
+          throwY: grenade!.yRatio,
+          layerId: layer.id,
+          grenadeType: grenade!.type,
+          pickThrowPoint: true,
+        ),
+      ),
+    );
+
+    if (result == null) return;
+    final isar = ref.read(isarProvider);
+    grenade!.xRatio = result.dx;
+    grenade!.yRatio = result.dy;
+    grenade!.updatedAt = DateTime.now();
+    await isar.writeTxn(() async {
+      await isar.grenades.put(grenade!);
+    });
+    await _markAsLocallyEdited();
+    _loadData(resetTitle: false);
+    sendOverlayCommand('reload_data');
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('✓ 投掷点已设置'),
+        backgroundColor: Colors.green,
+        duration: Duration(seconds: 1),
+      ),
+    );
   }
 
   /// 选择爆点
@@ -1982,6 +2041,11 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
   Widget _buildImpactPointSection(bool isEditing) {
     final hasImpactPoint =
         grenade!.impactXRatio != null && grenade!.impactYRatio != null;
+    final throwMode = isEditing && widget.pickThrowPoint && hasImpactPoint;
+    // 投掷点与爆点重合视为未设置
+    final hasThrowPoint = grenade!.xRatio != grenade!.impactXRatio ||
+        grenade!.yRatio != grenade!.impactYRatio;
+    final pointSet = throwMode ? hasThrowPoint : hasImpactPoint;
 
     Future<void> openImpactPoint() async {
       await grenade!.layer.load();
@@ -2044,13 +2108,17 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('爆点位置',
-                        style: TextStyle(fontWeight: FontWeight.w700)),
+                    Text(throwMode ? '投掷点位置' : '爆点位置',
+                        style: const TextStyle(fontWeight: FontWeight.w700)),
                     const SizedBox(height: 2),
                     Text(
-                      hasImpactPoint
-                          ? '坐标 (${grenade!.impactXRatio!.toStringAsFixed(3)}, ${grenade!.impactYRatio!.toStringAsFixed(3)})'
-                          : '尚未设置爆点',
+                      throwMode
+                          ? (hasThrowPoint
+                              ? '坐标 (${grenade!.xRatio.toStringAsFixed(3)}, ${grenade!.yRatio.toStringAsFixed(3)})'
+                              : '尚未设置投掷点')
+                          : hasImpactPoint
+                              ? '坐标 (${grenade!.impactXRatio!.toStringAsFixed(3)}, ${grenade!.impactYRatio!.toStringAsFixed(3)})'
+                              : '尚未设置爆点',
                       style: Theme.of(context)
                           .textTheme
                           .bodySmall
@@ -2059,7 +2127,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                   ],
                 ),
               ),
-              if (hasImpactPoint)
+              if (pointSet)
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -2090,12 +2158,14 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
               children: [
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: _pickImpactPoint,
+                    onPressed: throwMode ? _pickThrowPoint : _pickImpactPoint,
                     icon: Icon(
-                      hasImpactPoint ? Icons.edit_location : Icons.add_location,
+                      pointSet ? Icons.edit_location : Icons.add_location,
                       size: 18,
                     ),
-                    label: Text(hasImpactPoint ? '修改爆点' : '设置爆点'),
+                    label: Text(throwMode
+                        ? (hasThrowPoint ? '修改投掷点' : '设置投掷点')
+                        : (hasImpactPoint ? '修改爆点' : '设置爆点')),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.purpleAccent,
                       foregroundColor: Colors.white,
@@ -2106,9 +2176,10 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                     ),
                   ),
                 ),
-                if (hasImpactPoint ||
-                    (grenade!.impactAreaStrokes != null &&
-                        grenade!.impactAreaStrokes!.isNotEmpty)) ...[
+                if (!throwMode &&
+                    (hasImpactPoint ||
+                        (grenade!.impactAreaStrokes != null &&
+                            grenade!.impactAreaStrokes!.isNotEmpty))) ...[
                   const SizedBox(width: 8),
                   OutlinedButton.icon(
                     onPressed: _clearImpactPoint,
@@ -2270,6 +2341,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     // 编辑模式：非穿点类型显示；非编辑模式：有爆点时显示
     final showImpactCard =
         (isEditing && grenade!.type != GrenadeType.wallbang) ||
+            (isEditing && widget.pickThrowPoint) ||
             (!isEditing && hasImpactPoint);
 
     if (steps.isEmpty && !showImpactCard) {
