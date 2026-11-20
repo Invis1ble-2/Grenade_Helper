@@ -57,7 +57,7 @@
 ### iOS
 1. **AltStore（推荐）**：下载 `.ipa` 文件，用 AltStore 签名安装。
 2. **SideStore**：支持免电脑续签。
-3. 详细教程见[官网 Wiki](https://grenade-helper.zeabur.app/docs.html#ios-sideload)。
+3. 详细教程见[官网 Wiki](https://grenade-helper.top/docs.html#ios-sideload)。
 
 ---
 

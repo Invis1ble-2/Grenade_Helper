@@ -7,10 +7,8 @@ import { spawnSync } from 'child_process';
 const OWNER = 'Invis1ble-2';
 const REPO = 'Grenade_Helper';
 
-// 【双服务器配置】同时向两个服务器上传，确保新旧版本App都能获取更新
 const SERVER_URLS = [
-  'https://cdn.grenade-helper.top:8443',  // 新服务器（日本VPS）
-  'https://app-grenade-helper.zeabur.app' // 旧服务器（Zeabur，兼容旧版App）
+  'https://cdn.grenade-helper.top:8443'
 ];
 
 // 主服务器（用于检查版本）
