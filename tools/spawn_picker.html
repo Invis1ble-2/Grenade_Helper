@@ -10,7 +10,9 @@
         @layer reset, base, components;
 
         @layer reset {
-            :where(html, body, main, div, span, h1, h2, h3, p, ul, li, label, select, button, img, pre, code, textarea) {
+            *,
+            *::before,
+            *::after {
                 margin: 0;
                 padding: 0;
                 box-sizing: border-box;
@@ -73,6 +75,11 @@
                 background-clip: text;
                 -webkit-text-fill-color: transparent;
                 color: transparent;
+            }
+
+            h1 .icon {
+                -webkit-text-fill-color: initial;
+                color: var(--color-text);
             }
 
             .controls {
@@ -334,12 +341,7 @@
                 cursor: pointer;
                 font-weight: bold;
                 font-size: 0.875rem;
-                translate: 0;
                 transition: box-shadow 0.2s;
-
-                @media (prefers-reduced-motion: no-preference) {
-                    transition: translate 0.2s, box-shadow 0.2s;
-                }
             }
 
             .btn-primary {
@@ -354,8 +356,14 @@
 
             .btn:hover {
                 box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+            }
 
-                @media (prefers-reduced-motion: no-preference) {
+            @media (prefers-reduced-motion: no-preference) {
+                .btn {
+                    transition: translate 0.2s, box-shadow 0.2s;
+                }
+
+                .btn:hover {
                     translate: 0 -2px;
                 }
             }
@@ -414,7 +422,7 @@
 
 <body>
     <main class="container">
-        <h1>CS2 出生点坐标拾取工具</h1>
+        <h1><span class="icon" aria-hidden="true">🎯</span> CS2 出生点坐标拾取工具</h1>
 
         <div class="controls">
             <div class="control-group">
@@ -461,7 +469,7 @@
             </div>
 
             <div class="sidebar">
-                <h2>已添加的出生点</h2>
+                <h2><span aria-hidden="true">📍</span> 已添加的出生点</h2>
                 <div id="ctList">
                     <h3 class="team-heading ct">CT 出生点</h3>
                     <ul class="spawn-list" id="ctSpawnList" role="list"></ul>
@@ -472,16 +480,15 @@
                 </div>
 
                 <div class="actions">
-                    <button type="button" class="btn btn-primary" id="copyCodeBtn" command="--copy"
-                        commandfor="codeOutput">复制 Dart 代码</button>
-                    <button type="button" class="btn btn-danger" id="clearMapBtn">清空当前地图</button>
+                    <button type="button" class="btn btn-primary" id="copyCodeBtn"><span aria-hidden="true">📋</span> 复制 Dart 代码</button>
+                    <button type="button" class="btn btn-danger" id="clearMapBtn"><span aria-hidden="true">🗑️</span> 清空当前地图</button>
                 </div>
 
                 <pre class="code-output" role="region" aria-label="生成的 Dart 代码"
                     tabindex="0"><code id="codeOutput">// 选择地图并添加出生点后，代码将显示在这里</code></pre>
             </div>
         </div>
-        <p class="tip">左键点击添加出生点 | 右键拖拽移动地图 | 滚轮缩放 | 数据自动保存</p>
+        <p class="tip"><span aria-hidden="true">💡</span> 左键点击添加出生点 | 右键拖拽移动地图 | 滚轮缩放 | 数据自动保存</p>
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -532,9 +539,7 @@
             function saveToStorage() {
                 try {
                     localStorage.setItem(STORAGE_KEY, JSON.stringify(spawnData));
-                } catch {
-                    // 忽略本地存储写入受限异常
-                }
+                } catch {}
             }
 
             function loadFromStorage() {
@@ -579,11 +584,13 @@
             }
 
             function initMapData(mapName) {
-                if (!Object.hasOwn(spawnData, mapName) || !spawnData[mapName]) {
+                const entry = Object.hasOwn(spawnData, mapName) ? spawnData[mapName] : null;
+                if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
                     spawnData[mapName] = { ct: [], t: [] };
+                    return;
                 }
-                if (!Array.isArray(spawnData[mapName].ct)) spawnData[mapName].ct = [];
-                if (!Array.isArray(spawnData[mapName].t)) spawnData[mapName].t = [];
+                if (!Array.isArray(entry.ct)) entry.ct = [];
+                if (!Array.isArray(entry.t)) entry.t = [];
             }
 
             function deleteSpawn(team, index) {
@@ -722,18 +729,12 @@
                 clearTimeout(toastHideTimer);
                 clearTimeout(toastClearTimer);
 
-                let announcement = msg;
-                if (announcement === lastToastMessage) {
-                    announcement += '\u00A0';
-                }
+                const announcement = msg === lastToastMessage ? `${msg}\u00A0` : msg;
                 lastToastMessage = announcement;
 
                 toast.classList.toggle('error', isError);
-                toast.textContent = '';
-                requestAnimationFrame(() => {
-                    toast.textContent = announcement;
-                    toast.classList.add('show');
-                });
+                toast.textContent = announcement;
+                toast.classList.add('show');
 
                 toastHideTimer = setTimeout(() => {
                     toast.classList.remove('show');
@@ -746,20 +747,9 @@
             zoomInBtn.addEventListener('click', zoomIn);
             zoomOutBtn.addEventListener('click', zoomOut);
             resetZoomBtn.addEventListener('click', resetZoom);
+            copyCodeBtn.addEventListener('click', copyDartCode);
             clearMapBtn.addEventListener('click', clearCurrentMap);
 
-            // 优先使用 Invoker Commands，不支持时回退到 click 监听
-            if ('CommandEvent' in window) {
-                document.addEventListener('command', (e) => {
-                    if (e.command === '--copy' && e.target === codeOutput) {
-                        copyDartCode();
-                    }
-                }, true);
-            } else {
-                copyCodeBtn.addEventListener('click', copyDartCode);
-            }
-
-            // 滚轮缩放需要阻止页面滚动，显式声明 passive: false
             mapWrapper.addEventListener('wheel', (e) => {
                 e.preventDefault();
                 if (e.deltaY < 0) {
