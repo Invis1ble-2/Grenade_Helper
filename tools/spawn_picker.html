@@ -4,332 +4,430 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
     <title>CS2 出生点坐标拾取工具</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        @layer reset, base, components;
+
+        @layer reset {
+            *,
+            *::before,
+            *::after {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
         }
 
-        body {
-            font-family: 'Segoe UI', system-ui, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            min-height: 100vh;
-            color: #fff;
-            padding: 20px;
+        @layer base {
+            :root {
+                color-scheme: dark;
+                --color-bg-start: #1a1a2e;
+                --color-bg-end: #16213e;
+                --color-surface-dark: #0a0a1a;
+                --color-sidebar-bg: rgba(30, 30, 50, 0.9);
+                --color-control-bg: #2a2a4a;
+                --color-control-border: #3a3a5a;
+                --color-ct: #4facfe;
+                --color-cyan: #00f2fe;
+                --color-t: #f5a623;
+                --color-danger: #e74c3c;
+                --color-danger-hover: #c0392b;
+                --color-success: #27ae60;
+                --color-text: #fff;
+                --color-text-muted: #aaa;
+                --color-text-subtle: #888;
+                --color-text-dim: #666;
+                --color-text-empty: #555;
+            }
+
+            body {
+                font-family: 'Segoe UI', system-ui, sans-serif;
+                background: linear-gradient(135deg, var(--color-bg-start) 0%, var(--color-bg-end) 100%);
+                min-block-size: 100vh;
+                color: var(--color-text);
+                padding: 20px;
+            }
+
+            select,
+            button {
+                font-family: inherit;
+            }
+
+            :where(button, select, [tabindex="0"]):focus-visible {
+                outline: 2px solid var(--color-ct);
+                outline-offset: 2px;
+            }
         }
 
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
+        @layer components {
+            .container {
+                max-inline-size: 1200px;
+                margin-inline: auto;
+            }
 
-        h1 {
-            text-align: center;
-            margin-bottom: 20px;
-            font-size: 24px;
-            background: linear-gradient(90deg, #4facfe, #00f2fe);
-            background-clip: text;
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
+            h1 {
+                text-align: center;
+                margin-block-end: 20px;
+                font-size: 1.5rem;
+                background: linear-gradient(90deg, var(--color-ct), var(--color-cyan));
+                -webkit-background-clip: text;
+                background-clip: text;
+                -webkit-text-fill-color: transparent;
+                color: transparent;
+            }
 
-        .controls {
-            display: flex;
-            gap: 20px;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-        }
+            h1 .icon {
+                -webkit-text-fill-color: initial;
+                color: var(--color-text);
+            }
 
-        .control-group {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
+            .controls {
+                display: flex;
+                gap: 20px;
+                align-items: center;
+                justify-content: center;
+                margin-block-end: 20px;
+                flex-wrap: wrap;
+            }
 
-        label {
-            font-size: 14px;
-            color: #aaa;
-        }
+            .control-group {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
 
-        select {
-            padding: 8px 16px;
-            border-radius: 8px;
-            border: 1px solid #3a3a5a;
-            background: #2a2a4a;
-            color: #fff;
-            font-size: 14px;
-            cursor: pointer;
-        }
+            label,
+            .control-label {
+                font-size: 0.875rem;
+                color: var(--color-text-muted);
+            }
 
-        .team-btns {
-            display: flex;
-            gap: 8px;
-        }
+            select {
+                padding: 8px 16px;
+                border-radius: 8px;
+                border: 1px solid var(--color-control-border);
+                background: var(--color-control-bg);
+                color: var(--color-text);
+                font-size: 0.875rem;
+                cursor: pointer;
+            }
 
-        .team-btn {
-            padding: 8px 20px;
-            border-radius: 8px;
-            border: 2px solid #555;
-            background: transparent;
-            color: #888;
-            cursor: pointer;
-            font-weight: bold;
-            transition: all 0.2s;
-        }
+            .team-btns {
+                display: flex;
+                gap: 8px;
+            }
 
-        .team-btn.ct.active {
-            border-color: #4facfe;
-            color: #4facfe;
-            background: rgba(79, 172, 254, 0.1);
-        }
+            .team-btn {
+                padding: 8px 20px;
+                border-radius: 8px;
+                border: 2px solid var(--color-text-empty);
+                background: transparent;
+                color: var(--color-text-subtle);
+                cursor: pointer;
+                font-weight: bold;
+                transition: border-color 0.2s, color 0.2s, background-color 0.2s, opacity 0.2s;
+            }
 
-        .team-btn.t.active {
-            border-color: #f5a623;
-            color: #f5a623;
-            background: rgba(245, 166, 35, 0.1);
-        }
+            .team-btn.ct.active {
+                border-color: var(--color-ct);
+                color: var(--color-ct);
+                background: rgba(79, 172, 254, 0.1);
+            }
 
-        .team-btn:hover {
-            opacity: 0.8;
-        }
+            .team-btn.t.active {
+                border-color: var(--color-t);
+                color: var(--color-t);
+                background: rgba(245, 166, 35, 0.1);
+            }
 
-        .map-container {
-            display: flex;
-            gap: 20px;
-            justify-content: center;
-            flex-wrap: wrap;
-        }
+            .team-btn:hover {
+                opacity: 0.8;
+            }
 
-        .map-wrapper {
-            position: relative;
-            background: #0a0a1a;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-        }
+            .map-container {
+                display: flex;
+                gap: 20px;
+                justify-content: center;
+                flex-wrap: wrap;
+            }
 
-        #mapImage {
-            display: block;
-            width: 800px;
-            height: 800px;
-            cursor: crosshair;
-            transition: none;
-            transform-origin: center center;
-            user-select: none;
-            -webkit-user-drag: none;
-        }
+            .map-wrapper {
+                position: relative;
+                background: var(--color-surface-dark);
+                border-radius: 12px;
+                overflow: hidden;
+                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            }
 
-        .map-wrapper.dragging #mapImage {
-            cursor: grabbing;
-        }
+            #mapImage {
+                display: block;
+                inline-size: 800px;
+                block-size: 800px;
+                cursor: crosshair;
+                user-select: none;
+                -webkit-user-drag: none;
+            }
 
-        .map-inner {
-            position: relative;
-            display: inline-block;
-        }
+            .map-wrapper.dragging #mapImage {
+                cursor: grabbing;
+            }
 
-        .zoom-controls {
-            position: absolute;
-            bottom: 10px;
-            right: 10px;
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-            z-index: 10;
-        }
+            .map-inner {
+                position: relative;
+                display: inline-block;
+                transform-origin: center center;
+                translate: var(--pan-x, 0px) var(--pan-y, 0px);
+                scale: var(--map-zoom, 1);
+            }
 
-        .zoom-btn {
-            width: 36px;
-            height: 36px;
-            border-radius: 8px;
-            border: none;
-            background: rgba(0, 0, 0, 0.7);
-            color: #fff;
-            font-size: 20px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background 0.2s;
-        }
+            .zoom-controls {
+                position: absolute;
+                bottom: 10px;
+                right: 10px;
+                display: flex;
+                flex-direction: column;
+                gap: 5px;
+                z-index: 10;
+            }
 
-        .zoom-btn:hover {
-            background: rgba(79, 172, 254, 0.8);
-        }
+            .zoom-btn {
+                align-self: flex-start;
+                min-inline-size: 2.25rem;
+                min-block-size: 2.25rem;
+                border-radius: 8px;
+                border: none;
+                background: rgba(0, 0, 0, 0.7);
+                color: var(--color-text);
+                font-size: 1.25rem;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: background-color 0.2s;
+            }
 
-        .zoom-level {
-            text-align: center;
-            font-size: 12px;
-            color: #aaa;
-            background: rgba(0, 0, 0, 0.5);
-            padding: 4px 8px;
-            border-radius: 4px;
-        }
+            .zoom-btn-reset {
+                font-size: 0.875rem;
+            }
 
-        .spawn-marker {
-            position: absolute;
-            width: 24px;
-            height: 24px;
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 12px;
-            font-weight: bold;
-            color: #fff;
-            cursor: pointer;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            /* 使用 transform-origin 确保从中心缩放 */
-            transform-origin: center center;
-        }
+            .zoom-btn:hover {
+                background: rgba(79, 172, 254, 0.8);
+            }
 
-        .spawn-marker:hover {
-            opacity: 0.8;
-        }
+            .zoom-level {
+                text-align: center;
+                font-size: 0.75rem;
+                color: var(--color-text-muted);
+                background: rgba(0, 0, 0, 0.5);
+                padding: 4px 8px;
+                border-radius: 4px;
+                user-select: none;
+            }
 
-        .spawn-marker.ct {
-            background: rgba(79, 172, 254, 0.9);
-        }
+            .spawn-marker {
+                position: absolute;
+                left: var(--marker-x, 0%);
+                top: var(--marker-y, 0%);
+                min-inline-size: 1.5rem;
+                min-block-size: 1.5rem;
+                padding-inline: 2px;
+                border-radius: 4px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 0.75rem;
+                font-weight: bold;
+                color: var(--color-text);
+                cursor: pointer;
+                border: 2px solid rgba(255, 255, 255, 0.3);
+                transform-origin: center center;
+                translate: -50% -50%;
+                scale: var(--marker-scale, 1);
+                transition: opacity 0.2s;
+            }
 
-        .spawn-marker.t {
-            background: rgba(245, 166, 35, 0.9);
-        }
+            .spawn-marker:hover {
+                opacity: 0.8;
+            }
 
-        .sidebar {
-            background: rgba(30, 30, 50, 0.9);
-            border-radius: 12px;
-            padding: 20px;
-            min-width: 300px;
-            max-height: 600px;
-            overflow-y: auto;
-        }
+            .spawn-marker.ct {
+                background: rgba(79, 172, 254, 0.9);
+            }
 
-        .sidebar h3 {
-            margin-bottom: 15px;
-            font-size: 16px;
-            color: #4facfe;
-        }
+            .spawn-marker.t {
+                background: rgba(245, 166, 35, 0.9);
+            }
 
-        .spawn-list {
-            list-style: none;
-        }
+            .sidebar {
+                background: var(--color-sidebar-bg);
+                border-radius: 12px;
+                padding: 20px;
+                min-inline-size: 300px;
+                max-block-size: 600px;
+                overflow-y: auto;
+            }
 
-        .spawn-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 12px;
-            margin-bottom: 8px;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 6px;
-            font-size: 13px;
-        }
+            .sidebar h2 {
+                margin-block-end: 15px;
+                font-size: 1rem;
+                color: var(--color-ct);
+            }
 
-        .spawn-item .coords {
-            color: #888;
-            font-family: monospace;
-        }
+            .team-heading {
+                margin-block: 10px 5px;
+                font-size: 0.8125rem;
+            }
 
-        .spawn-item .delete-btn {
-            background: #e74c3c;
-            border: none;
-            color: #fff;
-            padding: 4px 8px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 11px;
-        }
+            .team-heading.ct {
+                color: var(--color-ct);
+            }
 
-        .spawn-item .delete-btn:hover {
-            background: #c0392b;
-        }
+            .team-heading.t {
+                color: var(--color-t);
+            }
 
-        .actions {
-            display: flex;
-            gap: 10px;
-            margin-top: 20px;
-            flex-wrap: wrap;
-        }
+            .spawn-list {
+                list-style: none;
+            }
 
-        .btn {
-            padding: 12px 24px;
-            border-radius: 8px;
-            border: none;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 14px;
-            transition: all 0.2s;
-        }
+            .spawn-empty {
+                color: var(--color-text-empty);
+                font-size: 0.75rem;
+            }
 
-        .btn-primary {
-            background: linear-gradient(135deg, #4facfe, #00f2fe);
-            color: #000;
-        }
+            .spawn-item {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 8px 12px;
+                margin-block-end: 8px;
+                background: rgba(255, 255, 255, 0.05);
+                border-radius: 6px;
+                font-size: 0.8125rem;
+            }
 
-        .btn-danger {
-            background: #e74c3c;
-            color: #fff;
-        }
+            .spawn-item .coords {
+                color: var(--color-text-subtle);
+                font-family: monospace;
+            }
 
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
-        }
+            .spawn-item .delete-btn {
+                background: var(--color-danger);
+                border: none;
+                color: var(--color-text);
+                padding: 4px 8px;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 0.6875rem;
+                transition: background-color 0.2s;
+            }
 
-        .code-output {
-            margin-top: 20px;
-            background: #0a0a1a;
-            border-radius: 8px;
-            padding: 15px;
-            font-family: 'Consolas', monospace;
-            font-size: 12px;
-            color: #4facfe;
-            white-space: pre-wrap;
-            word-break: break-all;
-            max-height: 200px;
-            overflow-y: auto;
-        }
+            .spawn-item .delete-btn:hover {
+                background: var(--color-danger-hover);
+            }
 
-        .toast {
-            position: fixed;
-            bottom: 30px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 12px 24px;
-            background: #27ae60;
-            color: #fff;
-            border-radius: 8px;
-            font-weight: bold;
-            opacity: 0;
-            transition: opacity 0.3s;
-            z-index: 1000;
-        }
+            .actions {
+                display: flex;
+                gap: 10px;
+                margin-block-start: 20px;
+                flex-wrap: wrap;
+            }
 
-        .toast.show {
-            opacity: 1;
-        }
+            .btn {
+                padding: 12px 24px;
+                border-radius: 8px;
+                border: none;
+                cursor: pointer;
+                font-weight: bold;
+                font-size: 0.875rem;
+                transition: box-shadow 0.2s;
+            }
 
-        .tip {
-            text-align: center;
-            color: #666;
-            font-size: 12px;
-            margin-top: 10px;
+            .btn-primary {
+                background: linear-gradient(135deg, var(--color-ct), var(--color-cyan));
+                color: #000;
+            }
+
+            .btn-danger {
+                background: var(--color-danger);
+                color: var(--color-text);
+            }
+
+            .btn:hover {
+                box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+            }
+
+            @media (prefers-reduced-motion: no-preference) {
+                .btn {
+                    transition: translate 0.2s, box-shadow 0.2s;
+                }
+
+                .btn:hover {
+                    translate: 0 -2px;
+                }
+            }
+
+            .code-output {
+                margin-block-start: 20px;
+                background: var(--color-surface-dark);
+                border-radius: 8px;
+                padding: 15px;
+                font-family: 'Consolas', monospace;
+                font-size: 0.75rem;
+                color: var(--color-ct);
+                white-space: pre-wrap;
+                word-break: break-all;
+                max-block-size: 200px;
+                overflow-y: auto;
+            }
+
+            .code-output code {
+                font-family: inherit;
+            }
+
+            .toast {
+                position: fixed;
+                bottom: 30px;
+                left: 50%;
+                translate: -50% 0;
+                padding: 12px 24px;
+                background: var(--color-success);
+                color: var(--color-text);
+                border-radius: 8px;
+                font-weight: bold;
+                opacity: 0;
+                pointer-events: none;
+                transition: opacity 0.3s;
+                z-index: 1000;
+            }
+
+            .toast.error {
+                background: var(--color-danger);
+            }
+
+            .toast.show {
+                opacity: 1;
+            }
+
+            .tip {
+                text-align: center;
+                color: var(--color-text-dim);
+                font-size: 0.75rem;
+                margin-block-start: 10px;
+            }
         }
     </style>
 </head>
 
 <body>
-    <div class="container">
-        <h1>🎯 CS2 出生点坐标拾取工具</h1>
+    <main class="container">
+        <h1><span class="icon" aria-hidden="true">🎯</span> CS2 出生点坐标拾取工具</h1>
 
         <div class="controls">
             <div class="control-group">
-                <label>地图:</label>
-                <select id="mapSelect">
+                <label for="mapSelect">地图:</label>
+                <select id="mapSelect" name="map">
                     <option value="mirage">Mirage</option>
                     <option value="dust2">Dust2</option>
                     <option value="inferno">Inferno</option>
@@ -344,10 +442,10 @@
                 </select>
             </div>
             <div class="control-group">
-                <label>阵营:</label>
-                <div class="team-btns">
-                    <button class="team-btn ct active" data-team="ct">CT</button>
-                    <button class="team-btn t" data-team="t">T</button>
+                <span class="control-label" id="teamGroupLabel">阵营:</span>
+                <div class="team-btns" role="group" aria-labelledby="teamGroupLabel">
+                    <button type="button" class="team-btn ct active" data-team="ct" aria-pressed="true">CT</button>
+                    <button type="button" class="team-btn t" data-team="t" aria-pressed="false">T</button>
                 </div>
             </div>
         </div>
@@ -355,323 +453,385 @@
         <div class="map-container">
             <div class="map-wrapper" id="mapWrapper">
                 <div class="map-inner" id="mapInner">
-                    <img id="mapImage" src="../assets/maps/mirage.png" alt="Map">
+                    <img id="mapImage" src="../assets/maps/mirage.png" alt="Mirage 地图" width="800" height="800"
+                        draggable="false">
                     <div id="markersContainer"></div>
                 </div>
                 <div class="zoom-controls">
-                    <button class="zoom-btn" onclick="zoomIn()" title="放大">+</button>
+                    <button type="button" class="zoom-btn" id="zoomInBtn" aria-label="放大" title="放大"><span
+                            aria-hidden="true">+</span></button>
                     <div class="zoom-level" id="zoomLevel">100%</div>
-                    <button class="zoom-btn" onclick="zoomOut()" title="缩小">−</button>
-                    <button class="zoom-btn" onclick="resetZoom()" title="重置" style="font-size:14px;">↺</button>
+                    <button type="button" class="zoom-btn" id="zoomOutBtn" aria-label="缩小" title="缩小"><span
+                            aria-hidden="true">−</span></button>
+                    <button type="button" class="zoom-btn zoom-btn-reset" id="resetZoomBtn" aria-label="重置缩放"
+                        title="重置"><span aria-hidden="true">↺</span></button>
                 </div>
             </div>
 
             <div class="sidebar">
-                <h3>📍 已添加的出生点</h3>
+                <h2><span aria-hidden="true">📍</span> 已添加的出生点</h2>
                 <div id="ctList">
-                    <h4 style="color:#4facfe;margin:10px 0 5px;font-size:13px;">CT 出生点</h4>
-                    <ul class="spawn-list" id="ctSpawnList"></ul>
+                    <h3 class="team-heading ct">CT 出生点</h3>
+                    <ul class="spawn-list" id="ctSpawnList" role="list"></ul>
                 </div>
                 <div id="tList">
-                    <h4 style="color:#f5a623;margin:10px 0 5px;font-size:13px;">T 出生点</h4>
-                    <ul class="spawn-list" id="tSpawnList"></ul>
+                    <h3 class="team-heading t">T 出生点</h3>
+                    <ul class="spawn-list" id="tSpawnList" role="list"></ul>
                 </div>
 
                 <div class="actions">
-                    <button class="btn btn-primary" onclick="copyDartCode()">📋 复制 Dart 代码</button>
-                    <button class="btn btn-danger" onclick="clearCurrentMap()">🗑️ 清空当前地图</button>
+                    <button type="button" class="btn btn-primary" id="copyCodeBtn"><span aria-hidden="true">📋</span> 复制 Dart 代码</button>
+                    <button type="button" class="btn btn-danger" id="clearMapBtn"><span aria-hidden="true">🗑️</span> 清空当前地图</button>
                 </div>
 
-                <div class="code-output" id="codeOutput">// 选择地图并添加出生点后，代码将显示在这里</div>
+                <pre class="code-output" role="region" aria-label="生成的 Dart 代码"
+                    tabindex="0"><code id="codeOutput">// 选择地图并添加出生点后，代码将显示在这里</code></pre>
             </div>
         </div>
-        <p class="tip">💡 左键点击添加出生点 | 右键拖拽移动地图 | 滚轮缩放 | 数据自动保存</p>
-    </div>
+        <p class="tip"><span aria-hidden="true">💡</span> 左键点击添加出生点 | 右键拖拽移动地图 | 滚轮缩放 | 数据自动保存</p>
+    </main>
 
-    <div class="toast" id="toast">已复制到剪贴板</div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
     <script>
-        // 数据存储 - 从 localStorage 加载
-        const STORAGE_KEY = 'cs2_spawn_points';
-        let spawnData = loadFromStorage();
-        let currentMap = 'mirage';
-        let currentTeam = 'ct';
-        let currentZoom = 1;
-        let panX = 0, panY = 0;
-        const minZoom = 0.5;
-        const maxZoom = 5;
+        (() => {
+            'use strict';
 
-        // 拖拽状态
-        let isDragging = false;
-        let dragStartX = 0, dragStartY = 0;
-        let dragStartPanX = 0, dragStartPanY = 0;
+            const STORAGE_KEY = 'cs2_spawn_points';
+            const IMAGE_SIZE = 800;
+            const MIN_ZOOM = 0.5;
+            const MAX_ZOOM = 5;
 
-        // 保存到 localStorage
-        function saveToStorage() {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(spawnData));
-        }
+            let spawnData = loadFromStorage();
+            let currentMap = 'mirage';
+            let currentTeam = 'ct';
+            let currentZoom = 1;
+            let panX = 0;
+            let panY = 0;
 
-        // 从 localStorage 加载
-        function loadFromStorage() {
-            const saved = localStorage.getItem(STORAGE_KEY);
-            return saved ? JSON.parse(saved) : {};
-        }
+            let isDragging = false;
+            let dragStartX = 0;
+            let dragStartY = 0;
+            let dragStartPanX = 0;
+            let dragStartPanY = 0;
 
-        // 缩放和平移功能
-        const mapInner = document.getElementById('mapInner');
-        const mapWrapper = document.getElementById('mapWrapper');
+            let toastHideTimer = 0;
+            let toastClearTimer = 0;
+            let lastToastMessage = '';
 
-        function updateTransform() {
-            mapInner.style.transform = `translate(${panX}px, ${panY}px) scale(${currentZoom})`;
-            document.getElementById('zoomLevel').textContent = `${Math.round(currentZoom * 100)}%`;
-        }
+            const mapInner = document.getElementById('mapInner');
+            const mapWrapper = document.getElementById('mapWrapper');
+            const mapSelect = document.getElementById('mapSelect');
+            const mapImage = document.getElementById('mapImage');
+            const markersContainer = document.getElementById('markersContainer');
+            const zoomLevelEl = document.getElementById('zoomLevel');
+            const zoomInBtn = document.getElementById('zoomInBtn');
+            const zoomOutBtn = document.getElementById('zoomOutBtn');
+            const resetZoomBtn = document.getElementById('resetZoomBtn');
+            const ctSpawnList = document.getElementById('ctSpawnList');
+            const tSpawnList = document.getElementById('tSpawnList');
+            const codeOutput = document.getElementById('codeOutput');
+            const copyCodeBtn = document.getElementById('copyCodeBtn');
+            const clearMapBtn = document.getElementById('clearMapBtn');
+            const toast = document.getElementById('toast');
+            const teamBtns = document.querySelectorAll('.team-btn');
 
-        function zoomIn() {
-            currentZoom = Math.min(maxZoom, currentZoom + 0.25);
-            updateTransform();
-            updateMarkerScale();
-        }
-
-        function zoomOut() {
-            currentZoom = Math.max(minZoom, currentZoom - 0.25);
-            updateTransform();
-            updateMarkerScale();
-        }
-
-        function resetZoom() {
-            currentZoom = 1;
-            panX = 0;
-            panY = 0;
-            updateTransform();
-            updateMarkerScale();
-        }
-
-        // 滚轮缩放
-        mapWrapper.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            if (e.deltaY < 0) {
-                zoomIn();
-            } else {
-                zoomOut();
+            function saveToStorage() {
+                try {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(spawnData));
+                } catch {}
             }
-        });
 
-        // 右键拖拽平移
-        mapWrapper.addEventListener('mousedown', (e) => {
-            if (e.button === 2) { // 右键
-                e.preventDefault();
-                isDragging = true;
-                dragStartX = e.clientX;
-                dragStartY = e.clientY;
-                dragStartPanX = panX;
-                dragStartPanY = panY;
-                mapWrapper.classList.add('dragging');
+            function loadFromStorage() {
+                try {
+                    const saved = localStorage.getItem(STORAGE_KEY);
+                    const parsed = saved ? JSON.parse(saved) : null;
+                    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+                } catch {
+                    return {};
+                }
             }
-        });
 
-        document.addEventListener('mousemove', (e) => {
-            if (isDragging) {
-                panX = dragStartPanX + (e.clientX - dragStartX);
-                panY = dragStartPanY + (e.clientY - dragStartY);
+            function updateTransform() {
+                mapInner.style.setProperty('--pan-x', `${panX}px`);
+                mapInner.style.setProperty('--pan-y', `${panY}px`);
+                mapInner.style.setProperty('--map-zoom', String(currentZoom));
+                zoomLevelEl.textContent = `${Math.round(currentZoom * 100)}%`;
+            }
+
+            function updateMarkerScale() {
+                markersContainer.style.setProperty('--marker-scale', String(1 / currentZoom));
+            }
+
+            function zoomIn() {
+                currentZoom = Math.min(MAX_ZOOM, currentZoom + 0.25);
                 updateTransform();
+                updateMarkerScale();
             }
-        });
 
-        document.addEventListener('mouseup', (e) => {
-            if (e.button === 2 && isDragging) {
-                isDragging = false;
-                mapWrapper.classList.remove('dragging');
+            function zoomOut() {
+                currentZoom = Math.max(MIN_ZOOM, currentZoom - 0.25);
+                updateTransform();
+                updateMarkerScale();
             }
-        });
 
-        // 禁止右键菜单
-        mapWrapper.addEventListener('contextmenu', (e) => e.preventDefault());
-
-        // 初始化地图数据
-        function initMapData(mapName) {
-            if (!spawnData[mapName]) {
-                spawnData[mapName] = { ct: [], t: [] };
+            function resetZoom() {
+                currentZoom = 1;
+                panX = 0;
+                panY = 0;
+                updateTransform();
+                updateMarkerScale();
             }
-        }
 
-        // DOM 元素
-        const mapSelect = document.getElementById('mapSelect');
-        const mapImage = document.getElementById('mapImage');
-        const markersContainer = document.getElementById('markersContainer');
-        const ctSpawnList = document.getElementById('ctSpawnList');
-        const tSpawnList = document.getElementById('tSpawnList');
-        const codeOutput = document.getElementById('codeOutput');
-        const teamBtns = document.querySelectorAll('.team-btn');
+            function initMapData(mapName) {
+                const entry = Object.hasOwn(spawnData, mapName) ? spawnData[mapName] : null;
+                if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+                    spawnData[mapName] = { ct: [], t: [] };
+                    return;
+                }
+                if (!Array.isArray(entry.ct)) entry.ct = [];
+                if (!Array.isArray(entry.t)) entry.t = [];
+            }
 
-        // 切换地图
-        mapSelect.addEventListener('change', (e) => {
-            currentMap = e.target.value;
-            mapImage.src = `../assets/maps/${currentMap}.png`;
-            initMapData(currentMap);
-            renderAll();
-        });
-
-        // 切换阵营
-        teamBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                teamBtns.forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                currentTeam = btn.dataset.team;
-            });
-        });
-
-        // 点击地图添加出生点
-        mapImage.addEventListener('click', (e) => {
-            // 获取 mapWrapper 的边界（作为视口参考）
-            const wrapperRect = mapWrapper.getBoundingClientRect();
-
-            // 获取图片的原始尺寸（CSS 定义的 800x800）
-            const imageWidth = 800;
-            const imageHeight = 800;
-
-            // 计算图片中心在 wrapper 中的位置
-            // mapInner 的 transform-origin 是 center center，所以缩放以 (400, 400) 为中心
-            const imageCenterX = wrapperRect.left + wrapperRect.width / 2 + panX;
-            const imageCenterY = wrapperRect.top + wrapperRect.height / 2 + panY;
-
-            // 计算缩放后图片的左上角位置
-            const scaledWidth = imageWidth * currentZoom;
-            const scaledHeight = imageHeight * currentZoom;
-            const imageLeft = imageCenterX - scaledWidth / 2;
-            const imageTop = imageCenterY - scaledHeight / 2;
-
-            // 计算点击位置相对于图片左上角的偏移（在缩放后的坐标系中）
-            const clickOffsetX = e.clientX - imageLeft;
-            const clickOffsetY = e.clientY - imageTop;
-
-            // 转换为原始图片坐标的百分比
-            const x = clickOffsetX / scaledWidth;
-            const y = clickOffsetY / scaledHeight;
-
-            initMapData(currentMap);
-            const spawns = spawnData[currentMap][currentTeam];
-            const id = spawns.length + 1;
-
-            spawns.push({ id, x: parseFloat(x.toFixed(4)), y: parseFloat(y.toFixed(4)) });
-            renderAll();
-        });
-
-        // 删除出生点
-        function deleteSpawn(team, index) {
-            spawnData[currentMap][team].splice(index, 1);
-            // 重新编号
-            spawnData[currentMap][team].forEach((s, i) => s.id = i + 1);
-            renderAll();
-        }
-
-        // 渲染标记
-        function renderMarkers() {
-            markersContainer.innerHTML = '';
-            initMapData(currentMap);
-
-            ['ct', 't'].forEach(team => {
-                spawnData[currentMap][team].forEach((spawn, index) => {
-                    const marker = document.createElement('div');
-                    marker.className = `spawn-marker ${team}`;
-                    marker.style.left = `${spawn.x * 100}%`;
-                    marker.style.top = `${spawn.y * 100}%`;
-                    // 反向缩放保持视觉大小一致，并居中定位
-                    const scale = 1 / currentZoom;
-                    marker.style.transform = `translate(-50%, -50%) scale(${scale})`;
-                    marker.textContent = spawn.id;
-                    marker.title = `${team.toUpperCase()}-${spawn.id} (${spawn.x}, ${spawn.y}) - 点击删除`;
-                    marker.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        deleteSpawn(team, index);
-                    });
-                    markersContainer.appendChild(marker);
+            function deleteSpawn(team, index) {
+                spawnData[currentMap][team].splice(index, 1);
+                spawnData[currentMap][team].forEach((s, i) => {
+                    s.id = i + 1;
                 });
-            });
-        }
-
-        // 更新标记缩放（缩放时调用）
-        function updateMarkerScale() {
-            const scale = 1 / currentZoom;
-            document.querySelectorAll('.spawn-marker').forEach(marker => {
-                marker.style.transform = `translate(-50%, -50%) scale(${scale})`;
-            });
-        }
-
-        // 渲染列表
-        function renderLists() {
-            initMapData(currentMap);
-
-            ctSpawnList.innerHTML = spawnData[currentMap].ct.map((s, i) => `
-                <li class="spawn-item">
-                    <span>CT-${s.id}</span>
-                    <span class="coords">(${s.x}, ${s.y})</span>
-                    <button class="delete-btn" onclick="deleteSpawn('ct', ${i})">删除</button>
-                </li>
-            `).join('') || '<li style="color:#555;font-size:12px;">暂无</li>';
-
-            tSpawnList.innerHTML = spawnData[currentMap].t.map((s, i) => `
-                <li class="spawn-item">
-                    <span>T-${s.id}</span>
-                    <span class="coords">(${s.x}, ${s.y})</span>
-                    <button class="delete-btn" onclick="deleteSpawn('t', ${i})">删除</button>
-                </li>
-            `).join('') || '<li style="color:#555;font-size:12px;">暂无</li>';
-        }
-
-        // 生成 Dart 代码
-        function generateDartCode() {
-            initMapData(currentMap);
-            const data = spawnData[currentMap];
-
-            const ctCode = data.ct.map(s => `SpawnPoint(${s.id}, ${s.x}, ${s.y})`).join(', ');
-            const tCode = data.t.map(s => `SpawnPoint(${s.id}, ${s.x}, ${s.y})`).join(', ');
-
-            return `'${currentMap}': MapSpawnConfig(
-  ctSpawns: [${ctCode}],
-  tSpawns: [${tCode}],
-),`;
-        }
-
-        // 渲染代码输出
-        function renderCode() {
-            codeOutput.textContent = generateDartCode();
-        }
-
-        // 渲染全部并自动保存
-        function renderAll() {
-            renderMarkers();
-            renderLists();
-            renderCode();
-            saveToStorage(); // 自动保存到 localStorage
-        }
-
-        // 复制 Dart 代码
-        function copyDartCode() {
-            const code = generateDartCode();
-            navigator.clipboard.writeText(code).then(() => {
-                showToast('已复制到剪贴板');
-            });
-        }
-
-        // 清空当前地图
-        function clearCurrentMap() {
-            if (confirm(`确定要清空 ${currentMap} 的所有出生点吗？`)) {
-                spawnData[currentMap] = { ct: [], t: [] };
                 renderAll();
             }
-        }
 
-        // 显示提示
-        function showToast(msg) {
-            const toast = document.getElementById('toast');
-            toast.textContent = msg;
-            toast.classList.add('show');
-            setTimeout(() => toast.classList.remove('show'), 2000);
-        }
+            function renderMarkers() {
+                initMapData(currentMap);
+                updateMarkerScale();
 
-        // 初始化
-        initMapData(currentMap);
-        renderAll();
+                const markers = [];
+                for (const team of ['ct', 't']) {
+                    const teamLabel = team.toUpperCase();
+                    spawnData[currentMap][team].forEach((spawn, index) => {
+                        const marker = document.createElement('button');
+                        marker.type = 'button';
+                        marker.className = `spawn-marker ${team}`;
+                        marker.style.setProperty('--marker-x', `${spawn.x * 100}%`);
+                        marker.style.setProperty('--marker-y', `${spawn.y * 100}%`);
+                        marker.textContent = String(spawn.id);
+                        const labelText = `${teamLabel}-${spawn.id} (${spawn.x}, ${spawn.y}) - 点击删除`;
+                        marker.title = labelText;
+                        marker.setAttribute('aria-label', labelText);
+                        marker.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            deleteSpawn(team, index);
+                        });
+                        markers.push(marker);
+                    });
+                }
+
+                markersContainer.replaceChildren(...markers);
+            }
+
+            function renderTeamList(listEl, team, items) {
+                if (items.length === 0) {
+                    const emptyItem = document.createElement('li');
+                    emptyItem.className = 'spawn-empty';
+                    emptyItem.textContent = '暂无';
+                    listEl.replaceChildren(emptyItem);
+                    return;
+                }
+
+                const teamLabel = team.toUpperCase();
+                const nodes = items.map((s, index) => {
+                    const li = document.createElement('li');
+                    li.className = 'spawn-item';
+
+                    const nameSpan = document.createElement('span');
+                    nameSpan.textContent = `${teamLabel}-${s.id}`;
+
+                    const coordsSpan = document.createElement('span');
+                    coordsSpan.className = 'coords';
+                    coordsSpan.textContent = `(${s.x}, ${s.y})`;
+
+                    const delBtn = document.createElement('button');
+                    delBtn.type = 'button';
+                    delBtn.className = 'delete-btn';
+                    delBtn.textContent = '删除';
+                    delBtn.setAttribute('aria-label', `删除 ${teamLabel}-${s.id}`);
+                    delBtn.addEventListener('click', () => deleteSpawn(team, index));
+
+                    li.append(nameSpan, coordsSpan, delBtn);
+                    return li;
+                });
+
+                listEl.replaceChildren(...nodes);
+            }
+
+            function renderLists() {
+                initMapData(currentMap);
+                renderTeamList(ctSpawnList, 'ct', spawnData[currentMap].ct);
+                renderTeamList(tSpawnList, 't', spawnData[currentMap].t);
+            }
+
+            function generateDartCode() {
+                initMapData(currentMap);
+                const data = spawnData[currentMap];
+                const ctCode = data.ct.map((s) => `SpawnPoint(${s.id}, ${s.x}, ${s.y})`).join(', ');
+                const tCode = data.t.map((s) => `SpawnPoint(${s.id}, ${s.x}, ${s.y})`).join(', ');
+
+                return `'${currentMap}': MapSpawnConfig(\n  ctSpawns: [${ctCode}],\n  tSpawns: [${tCode}],\n),`;
+            }
+
+            function renderCode() {
+                codeOutput.textContent = generateDartCode();
+            }
+
+            function renderAll() {
+                renderMarkers();
+                renderLists();
+                renderCode();
+                saveToStorage();
+            }
+
+            // 本地 file:// 等非安全上下文下的剪贴板回退
+            function legacyCopy(text) {
+                const field = Object.assign(document.createElement('textarea'), { value: text });
+                field.setAttribute('readonly', '');
+                field.style.cssText = 'position:fixed;inset-block-start:0;opacity:0';
+                document.body.append(field);
+                field.select();
+                try {
+                    return document.execCommand('copy');
+                } finally {
+                    field.remove();
+                }
+            }
+
+            async function copyDartCode() {
+                const code = generateDartCode();
+                try {
+                    await navigator.clipboard.writeText(code);
+                    showToast('已复制到剪贴板');
+                } catch {
+                    if (legacyCopy(code)) {
+                        showToast('已复制到剪贴板');
+                    } else {
+                        showToast('复制失败，请手动复制', true);
+                    }
+                }
+            }
+
+            function clearCurrentMap() {
+                if (confirm(`确定要清空 ${currentMap} 的所有出生点吗？`)) {
+                    spawnData[currentMap] = { ct: [], t: [] };
+                    renderAll();
+                }
+            }
+
+            function showToast(msg, isError = false) {
+                clearTimeout(toastHideTimer);
+                clearTimeout(toastClearTimer);
+
+                const announcement = msg === lastToastMessage ? `${msg}\u00A0` : msg;
+                lastToastMessage = announcement;
+
+                toast.classList.toggle('error', isError);
+                toast.textContent = announcement;
+                toast.classList.add('show');
+
+                toastHideTimer = setTimeout(() => {
+                    toast.classList.remove('show');
+                    toastClearTimer = setTimeout(() => {
+                        toast.textContent = '';
+                    }, 300);
+                }, 2000);
+            }
+
+            zoomInBtn.addEventListener('click', zoomIn);
+            zoomOutBtn.addEventListener('click', zoomOut);
+            resetZoomBtn.addEventListener('click', resetZoom);
+            copyCodeBtn.addEventListener('click', copyDartCode);
+            clearMapBtn.addEventListener('click', clearCurrentMap);
+
+            mapWrapper.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                if (e.deltaY < 0) {
+                    zoomIn();
+                } else {
+                    zoomOut();
+                }
+            }, { passive: false });
+
+            mapWrapper.addEventListener('mousedown', (e) => {
+                if (e.button === 2) {
+                    e.preventDefault();
+                    isDragging = true;
+                    dragStartX = e.clientX;
+                    dragStartY = e.clientY;
+                    dragStartPanX = panX;
+                    dragStartPanY = panY;
+                    mapWrapper.classList.add('dragging');
+                }
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (isDragging) {
+                    panX = dragStartPanX + (e.clientX - dragStartX);
+                    panY = dragStartPanY + (e.clientY - dragStartY);
+                    updateTransform();
+                }
+            });
+
+            document.addEventListener('mouseup', (e) => {
+                if (e.button === 2 && isDragging) {
+                    isDragging = false;
+                    mapWrapper.classList.remove('dragging');
+                }
+            });
+
+            mapWrapper.addEventListener('contextmenu', (e) => e.preventDefault());
+
+            mapSelect.addEventListener('change', (e) => {
+                currentMap = e.target.value;
+                const mapTitle = e.target.selectedOptions[0]?.textContent || currentMap;
+                mapImage.src = `../assets/maps/${currentMap}.png`;
+                mapImage.alt = `${mapTitle} 地图`;
+                initMapData(currentMap);
+                renderAll();
+            });
+
+            teamBtns.forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    teamBtns.forEach((b) => {
+                        const active = b === btn;
+                        b.classList.toggle('active', active);
+                        b.setAttribute('aria-pressed', String(active));
+                    });
+                    currentTeam = btn.dataset.team;
+                });
+            });
+
+            mapImage.addEventListener('click', (e) => {
+                const wrapperRect = mapWrapper.getBoundingClientRect();
+                // mapInner 以中心点缩放，据此换算缩放后图片左上角视口坐标
+                const imageCenterX = wrapperRect.left + wrapperRect.width / 2 + panX;
+                const imageCenterY = wrapperRect.top + wrapperRect.height / 2 + panY;
+                const scaledWidth = IMAGE_SIZE * currentZoom;
+                const scaledHeight = IMAGE_SIZE * currentZoom;
+                const imageLeft = imageCenterX - scaledWidth / 2;
+                const imageTop = imageCenterY - scaledHeight / 2;
+
+                const x = (e.clientX - imageLeft) / scaledWidth;
+                const y = (e.clientY - imageTop) / scaledHeight;
+
+                initMapData(currentMap);
+                const spawns = spawnData[currentMap][currentTeam];
+                const id = spawns.length + 1;
+
+                spawns.push({ id, x: parseFloat(x.toFixed(4)), y: parseFloat(y.toFixed(4)) });
+                renderAll();
+            });
+
+            initMapData(currentMap);
+            renderAll();
+        })();
     </script>
 </body>
 
