@@ -8,6 +8,7 @@ import 'package:isar_community/isar.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:window_manager/window_manager.dart';
+import 'data/builtin_maps.dart';
 import 'models.dart';
 import 'models/tag.dart';
 import 'models/grenade_tag.dart';
@@ -31,83 +32,6 @@ HotkeyService? globalHotkeyService;
 WindowService? globalWindowService;
 OverlayStateService? globalOverlayState;
 Isar? globalIsar;
-
-class _BuiltinMapConfig {
-  final String name;
-  final String key;
-  final List<String> floors;
-  final List<String> floorNames;
-
-  const _BuiltinMapConfig({
-    required this.name,
-    required this.key,
-    required this.floors,
-    required this.floorNames,
-  });
-}
-
-const _builtinMapsConfig = [
-  _BuiltinMapConfig(
-    name: 'Mirage',
-    key: 'mirage',
-    floors: ['mirage.png'],
-    floorNames: ['Default'],
-  ),
-  _BuiltinMapConfig(
-    name: 'Inferno',
-    key: 'inferno',
-    floors: ['inferno.png'],
-    floorNames: ['Default'],
-  ),
-  _BuiltinMapConfig(
-    name: 'Dust 2',
-    key: 'dust2',
-    floors: ['dust2.png'],
-    floorNames: ['Default'],
-  ),
-  _BuiltinMapConfig(
-    name: 'Cache',
-    key: 'cache',
-    floors: ['cache.png'],
-    floorNames: ['Default'],
-  ),
-  _BuiltinMapConfig(
-    name: 'Overpass',
-    key: 'overpass',
-    floors: ['overpass.png'],
-    floorNames: ['Default'],
-  ),
-  _BuiltinMapConfig(
-    name: 'Ancient',
-    key: 'ancient',
-    floors: ['ancient.png'],
-    floorNames: ['Default'],
-  ),
-  _BuiltinMapConfig(
-    name: 'Anubis',
-    key: 'anubis',
-    floors: ['anubis.png'],
-    floorNames: ['Default'],
-  ),
-  _BuiltinMapConfig(
-    name: 'Train',
-    key: 'train',
-    floors: ['train.png'],
-    floorNames: ['Default'],
-  ),
-  _BuiltinMapConfig(
-    name: 'Nuke',
-    key: 'nuke',
-    floors: ['nuke_lower.png', 'nuke_upper.png'],
-    floorNames: ['B Site (Lower)', 'A Site (Upper)'],
-  ),
-  _BuiltinMapConfig(
-    name: 'Vertigo',
-    key: 'vertigo',
-    floors: ['vertigo_lower.png', 'vertigo_upper.png'],
-    floorNames: ['Level 50 (Lower)', 'Level 51 (Upper)'],
-  ),
-];
 
 // 悬浮窗控制器
 WindowController? overlayWindowController;
@@ -871,21 +795,20 @@ Future<int> _ensureBuiltinMaps(Isar isar) async {
   final existingMaps = await isar.gameMaps.where().findAll();
   final existingByKey = <String, List<GameMap>>{};
   for (final map in existingMaps) {
-    final key = _resolveBuiltinMapKey(map);
-    if (key != null) existingByKey.putIfAbsent(key, () => []).add(map);
+    final config = findBuiltinMapConfig(map);
+    if (config != null) existingByKey.putIfAbsent(config.key, () => []).add(map);
   }
 
   final mapsToMigrate = <GameMap>[];
-  final configsToAdd = <_BuiltinMapConfig>[];
-  for (final config in _builtinMapsConfig) {
-    final targetBgPath = 'assets/backgrounds/${config.key}_bg.webp';
-    final legacyBgPath = 'assets/backgrounds/${config.key}_bg.png';
+  final configsToAdd = <BuiltinMapConfig>[];
+  for (final config in builtinMapsConfig) {
     final matched = existingByKey[config.key];
     if (matched != null && matched.isNotEmpty) {
       for (final existing in matched) {
-        if (existing.backgroundPath.replaceAll('\\', '/').toLowerCase() ==
-            legacyBgPath) {
-          existing.backgroundPath = targetBgPath;
+        final migratedBg =
+            normalizeLegacyBuiltinAssetPath(existing.backgroundPath);
+        if (migratedBg != existing.backgroundPath) {
+          existing.backgroundPath = migratedBg;
           mapsToMigrate.add(existing);
         }
       }
@@ -894,7 +817,9 @@ Future<int> _ensureBuiltinMaps(Isar isar) async {
     configsToAdd.add(config);
   }
 
-  if (mapsToMigrate.isEmpty && configsToAdd.isEmpty) return 0;
+  if (mapsToMigrate.isEmpty && configsToAdd.isEmpty) {
+    return 0;
+  }
 
   var addedCount = 0;
   await isar.writeTxn(() async {
@@ -904,8 +829,8 @@ Future<int> _ensureBuiltinMaps(Isar isar) async {
     for (final config in configsToAdd) {
       final map = GameMap(
         name: config.name,
-        backgroundPath: 'assets/backgrounds/${config.key}_bg.webp',
-        iconPath: 'assets/icons/${config.key}_icon.svg',
+        backgroundPath: config.backgroundPath,
+        iconPath: config.iconPath,
       );
       await isar.gameMaps.put(map);
 
@@ -924,26 +849,6 @@ Future<int> _ensureBuiltinMaps(Isar isar) async {
   });
 
   return addedCount;
-}
-
-String? _resolveBuiltinMapKey(GameMap map) {
-  final normalizedIconPath = map.iconPath.replaceAll('\\', '/').toLowerCase();
-  final normalizedBackgroundPath =
-      map.backgroundPath.replaceAll('\\', '/').toLowerCase();
-
-  for (final config in _builtinMapsConfig) {
-    if (normalizedIconPath == 'assets/icons/${config.key}_icon.svg') {
-      return config.key;
-    }
-    if (normalizedBackgroundPath ==
-            'assets/backgrounds/${config.key}_bg.webp' ||
-        normalizedBackgroundPath ==
-            'assets/backgrounds/${config.key}_bg.png') {
-      return config.key;
-    }
-  }
-
-  return null;
 }
 
 /// 主窗口应用

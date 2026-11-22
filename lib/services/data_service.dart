@@ -10,6 +10,7 @@ import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:uuid/uuid.dart';
+import '../data/builtin_maps.dart';
 import '../models.dart';
 import '../models/tag.dart';
 import '../models/map_area.dart';
@@ -1975,27 +1976,12 @@ class DataService {
     return toFix.length;
   }
 
-  static final RegExp _legacyBuiltinBgPattern = RegExp(
-    r'^assets/backgrounds/(mirage|inferno|dust2|cache|overpass|ancient|anubis|train|nuke|vertigo)_bg\.png$',
-  );
-
   bool _isAssetPath(String path) {
     return path.trim().replaceAll('\\', '/').toLowerCase().startsWith('assets/');
   }
 
   bool _isBuiltinAssetMap(GameMap map) {
     return _isAssetPath(map.backgroundPath);
-  }
-
-  String _normalizeLegacyBuiltinBgPath(String rawPath) {
-    final trimmed = rawPath.trim();
-    if (trimmed.isEmpty) return trimmed;
-    final match = _legacyBuiltinBgPattern
-        .firstMatch(trimmed.replaceAll('\\', '/').toLowerCase());
-    if (match != null) {
-      return 'assets/backgrounds/${match.group(1)}_bg.webp';
-    }
-    return trimmed;
   }
 
   void _addMapFileToZipIfNeeded(String path, Set<String> filesToZip) {
@@ -5534,7 +5520,7 @@ class DataService {
     required String dataPath,
     required Map<String, String> importedMediaPathCache,
   }) async {
-    final normalized = _normalizeLegacyBuiltinBgPath(rawPath);
+    final normalized = normalizeLegacyBuiltinAssetPath(rawPath);
     if (normalized.isEmpty) return '';
     if (_isAssetPath(normalized)) return normalized;
     if (await _isLocalFileEquivalentToPackagePath(

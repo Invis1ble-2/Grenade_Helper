@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:isar_community/isar.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
+import '../data/builtin_maps.dart';
 import '../models.dart';
 import '../providers.dart';
 import '../services/map_management_service.dart';
@@ -80,6 +81,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   final Set<int> _pendingDeleteMapIds = <int>{};
+  bool _inReservePool = false;
 
   Future<bool> _deleteCustomMapQuick(Isar isar, GameMap map) async {
     if (!MapManagementService.isCustomMap(map)) {
@@ -427,7 +429,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       onTap: () => Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => MapScreen(gameMap: map)),
-      ),
+      ).then((_) {
+        if (mounted) setState(() {});
+      }),
     );
 
     if (isCustomMap) {
@@ -496,108 +500,211 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  int _compareHomeMaps(GameMap a, GameMap b) {
-    final aIsCustom = MapManagementService.isCustomMap(a);
-    final bIsCustom = MapManagementService.isCustomMap(b);
-    if (aIsCustom != bIsCustom) {
-      return aIsCustom ? 1 : -1;
-    }
-    return a.id.compareTo(b.id);
+  Widget _buildMapGrid({
+    required Key gridKey,
+    required int itemCount,
+    required IndexedWidgetBuilder itemBuilder,
+  }) {
+    return LayoutBuilder(
+      key: gridKey,
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 1280
+            ? 3
+            : (constraints.maxWidth >= 720 ? 2 : 1);
+        final gridPadding = EdgeInsets.fromLTRB(
+          AppBreakpoints.isMobile(context) ? 16 : 24,
+          8,
+          AppBreakpoints.isMobile(context) ? 16 : 24,
+          24,
+        );
+        return GridView.builder(
+          padding: AppBreakpoints.isMobile(context)
+              ? AppBreakpoints.withMobileBottomBarClearance(
+                  context,
+                  gridPadding,
+                )
+              : gridPadding,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: columns,
+            mainAxisExtent: 220,
+            crossAxisSpacing: 16,
+            mainAxisSpacing: 16,
+          ),
+          itemCount: itemCount,
+          itemBuilder: itemBuilder,
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final isar = ref.watch(isarProvider);
-    final maps = isar.gameMaps.where().findAllSync()..sort(_compareHomeMaps);
-    final visibleMaps = maps
+    final visibleMaps = isar.gameMaps
+        .where()
+        .findAllSync()
         .where((map) => !_pendingDeleteMapIds.contains(map.id))
         .toList(growable: false);
 
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: SafeArea(
-        bottom: !widget.embedded,
-        child: Column(
-          children: [
-            Padding(
-              padding: EdgeInsets.fromLTRB(
-                  AppBreakpoints.isMobile(context) ? 16 : 24,
-                  20,
-                  AppBreakpoints.isMobile(context) ? 16 : 24,
-                  14),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('地图库',
-                            style: Theme.of(context)
-                                .textTheme
-                                .headlineSmall
-                                ?.copyWith(fontWeight: FontWeight.w800)),
-                        const SizedBox(height: 4),
-                        Text('${visibleMaps.length} 张地图',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(color: context.appTheme.mutedText)),
-                      ],
+    final activeDutyMaps = <GameMap>[];
+    final reserveMaps = <GameMap>[];
+    final customMaps = <GameMap>[];
+    for (final map in visibleMaps) {
+      final config = findBuiltinMapConfig(map);
+      if (config != null) {
+        if (config.isActiveDuty) {
+          activeDutyMaps.add(map);
+        } else {
+          reserveMaps.add(map);
+        }
+      } else {
+        customMaps.add(map);
+      }
+    }
+    activeDutyMaps
+        .sort((a, b) => builtinMapSortOrder(a).compareTo(builtinMapSortOrder(b)));
+    reserveMaps
+        .sort((a, b) => builtinMapSortOrder(a).compareTo(builtinMapSortOrder(b)));
+    customMaps.sort((a, b) => a.id.compareTo(b.id));
+
+    final showingReserve = _inReservePool && reserveMaps.isNotEmpty;
+    final hasReserveFolder = reserveMaps.isNotEmpty;
+    final reserveGrenadeCount = reserveMaps.fold<int>(
+      0,
+      (sum, map) => sum + _mapGrenadeCount(map),
+    );
+    final homeItemCount = activeDutyMaps.length +
+        (hasReserveFolder ? 1 : 0) +
+        customMaps.length +
+        1;
+
+    return PopScope(
+      canPop: !showingReserve,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && showingReserve) {
+          setState(() => _inReservePool = false);
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: SafeArea(
+          bottom: !widget.embedded,
+          child: Column(
+            children: [
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                    AppBreakpoints.isMobile(context) ? 16 : 24,
+                    20,
+                    AppBreakpoints.isMobile(context) ? 16 : 24,
+                    14),
+                child: Row(
+                  children: [
+                    if (showingReserve) ...[
+                      IconButton(
+                        tooltip: '返回地图库',
+                        onPressed: () =>
+                            setState(() => _inReservePool = false),
+                        icon: const Icon(Icons.arrow_back_rounded),
+                      ),
+                      const SizedBox(width: 4),
+                    ],
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(showingReserve ? '非现役地图池' : '地图库',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .headlineSmall
+                                  ?.copyWith(fontWeight: FontWeight.w800)),
+                          const SizedBox(height: 4),
+                          Text(
+                              showingReserve
+                                  ? '${reserveMaps.length} 张地图 · 含人质图'
+                                  : '${visibleMaps.length} 张地图',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                      color: context.appTheme.mutedText)),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 16),
-                  ConstrainedBox(
-                    constraints: BoxConstraints(
-                        maxWidth: AppBreakpoints.isMobile(context) ? 220 : 360),
-                    child: TextField(
-                      readOnly: true,
-                      onTap: () => showSearch(
-                          context: context,
-                          delegate: GlobalSearchDelegate(ref)),
-                      decoration: const InputDecoration(
-                          fillColor: Colors.transparent,
-                          prefixIcon: Icon(Icons.search_rounded),
-                          hintText: '搜索全部道具'),
+                    const SizedBox(width: 16),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                          maxWidth:
+                              AppBreakpoints.isMobile(context) ? 220 : 360),
+                      child: TextField(
+                        readOnly: true,
+                        onTap: () => showSearch(
+                            context: context,
+                            delegate: GlobalSearchDelegate(ref)),
+                        decoration: const InputDecoration(
+                            fillColor: Colors.transparent,
+                            prefixIcon: Icon(Icons.search_rounded),
+                            hintText: '搜索全部道具'),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            Expanded(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final columns = constraints.maxWidth >= 1280
-                      ? 3
-                      : (constraints.maxWidth >= 720 ? 2 : 1);
-                  final gridPadding = EdgeInsets.fromLTRB(
-                    AppBreakpoints.isMobile(context) ? 16 : 24,
-                    8,
-                    AppBreakpoints.isMobile(context) ? 16 : 24,
-                    24,
-                  );
-                  return GridView.builder(
-                    padding: AppBreakpoints.isMobile(context)
-                        ? AppBreakpoints.withMobileBottomBarClearance(
+              Expanded(
+                child: AnimatedSwitcher(
+                  duration: AppMotion.panel,
+                  switchInCurve: AppMotion.enter,
+                  switchOutCurve: AppMotion.enter,
+                  child: showingReserve
+                      ? _buildMapGrid(
+                          gridKey: const ValueKey('reserve-map-grid'),
+                          itemCount: reserveMaps.length,
+                          itemBuilder: (ctx, index) => _buildMapCard(
                             context,
-                            gridPadding,
-                          )
-                        : gridPadding,
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: columns,
-                      mainAxisExtent: 220,
-                      crossAxisSpacing: 16,
-                      mainAxisSpacing: 16,
-                    ),
-                    itemCount: visibleMaps.length + 1,
-                    itemBuilder: (ctx, index) => index == visibleMaps.length
-                        ? _buildAddCustomMapCard(context, isar)
-                        : _buildMapCard(
-                            context, isar, visibleMaps[index], index),
-                  );
-                },
+                            isar,
+                            reserveMaps[index],
+                            index,
+                          ),
+                        )
+                      : _buildMapGrid(
+                          gridKey: const ValueKey('home-map-grid'),
+                          itemCount: homeItemCount,
+                          itemBuilder: (ctx, index) {
+                            if (index < activeDutyMaps.length) {
+                              return _buildMapCard(
+                                context,
+                                isar,
+                                activeDutyMaps[index],
+                                index,
+                              );
+                            }
+                            final reserveIndex = activeDutyMaps.length;
+                            if (hasReserveFolder && index == reserveIndex) {
+                              return _ReservePoolFolderCard(
+                                maps: reserveMaps,
+                                index: index,
+                                totalGrenadeCount: reserveGrenadeCount,
+                                onTap: () =>
+                                    setState(() => _inReservePool = true),
+                              );
+                            }
+                            final customStart =
+                                reserveIndex + (hasReserveFolder ? 1 : 0);
+                            final customIndex = index - customStart;
+                            if (customIndex < customMaps.length) {
+                              return _buildMapCard(
+                                context,
+                                isar,
+                                customMaps[customIndex],
+                                index,
+                              );
+                            }
+                            return _buildAddCustomMapCard(context, isar);
+                          },
+                        ),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -725,6 +832,194 @@ class _HomeMapCardState extends State<_HomeMapCard> {
                             child: const Text('自定义',
                                 style: TextStyle(
                                     color: Colors.white, fontSize: 11)))),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ReservePoolFolderCard extends StatefulWidget {
+  final List<GameMap> maps;
+  final int index;
+  final int totalGrenadeCount;
+  final VoidCallback onTap;
+
+  const _ReservePoolFolderCard({
+    required this.maps,
+    required this.index,
+    required this.totalGrenadeCount,
+    required this.onTap,
+  });
+
+  @override
+  State<_ReservePoolFolderCard> createState() => _ReservePoolFolderCardState();
+}
+
+class _ReservePoolFolderCardState extends State<_ReservePoolFolderCard> {
+  bool _hovered = false;
+  bool _visible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Future.delayed(Duration(milliseconds: 35 * widget.index.clamp(0, 8)), () {
+      if (mounted) setState(() => _visible = true);
+    });
+  }
+
+  Widget _buildPreviewTile(GameMap? map) {
+    final provider =
+        map == null ? null : imageProviderFromPath(map.backgroundPath);
+    if (provider == null) {
+      return Container(color: const Color(0xFF30343A));
+    }
+    return Image(
+      image: provider,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => Container(color: const Color(0xFF30343A)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final previewMaps = widget.maps.take(4).toList(growable: false);
+    GameMap? tileAt(int i) => i < previewMaps.length ? previewMaps[i] : null;
+
+    return AnimatedSlide(
+      offset: _visible ? Offset.zero : const Offset(0, 0.04),
+      duration: AppMotion.panel,
+      curve: AppMotion.enter,
+      child: AnimatedOpacity(
+        opacity: _visible ? 1 : 0,
+        duration: AppMotion.panel,
+        child: MouseRegion(
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit: (_) => setState(() => _hovered = false),
+          child: Card(
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: widget.onTap,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  AnimatedScale(
+                    scale: _hovered ? 1.035 : 1,
+                    duration: AppMotion.content,
+                    curve: AppMotion.enter,
+                    child: ColoredBox(
+                      color: const Color(0xFF1F2328),
+                      child: Column(
+                        children: [
+                          Expanded(
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Expanded(child: _buildPreviewTile(tileAt(0))),
+                                const SizedBox(width: 2),
+                                Expanded(child: _buildPreviewTile(tileAt(1))),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Expanded(
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Expanded(child: _buildPreviewTile(tileAt(2))),
+                                const SizedBox(width: 2),
+                                Expanded(child: _buildPreviewTile(tileAt(3))),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Positioned.fill(
+                    child: ColoredBox(
+                      color: Colors.black
+                          .withValues(alpha: _hovered ? 0.42 : 0.52),
+                    ),
+                  ),
+                  Positioned(
+                    left: 16,
+                    right: 16,
+                    bottom: 14,
+                    child: AnimatedSlide(
+                      offset: _hovered ? const Offset(0, -0.03) : Offset.zero,
+                      duration: AppMotion.quick,
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.16),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.24),
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.folder_rounded,
+                              color: Colors.white,
+                              size: 22,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  '非现役地图池',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 21,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  '${widget.maps.length} 张地图 · ${widget.totalGrenadeCount} 个道具',
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.78),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(
+                            Icons.arrow_forward_rounded,
+                            color: Colors.white,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    top: 12,
+                    right: 12,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.54),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text(
+                        '含人质图',
+                        style: TextStyle(color: Colors.white, fontSize: 11),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),

@@ -68,7 +68,7 @@ class _AboutScreenState extends State<AboutScreen> {
                   ClipRRect(
                     borderRadius: BorderRadius.circular(20),
                     child: Image.asset(
-                      'assets/icons/app_icon.png',
+                      'assets/icons/app_icon.webp',
                       width: 100,
                       height: 100,
                       fit: BoxFit.cover,
@@ -177,7 +177,7 @@ class _AboutScreenState extends State<AboutScreen> {
                           ],
                         ),
                         child: Image.asset(
-                          'assets/icons/qq_qrcode.jpg',
+                          'assets/icons/qq_qrcode.webp',
                           width: 200,
                           height: 200,
                           fit: BoxFit.contain,
@@ -337,7 +337,7 @@ class _AboutScreenState extends State<AboutScreen> {
                           ],
                         ),
                         child: Image.asset(
-                          'assets/icons/afdian.jpg',
+                          'assets/icons/afdian.webp',
                           width: 300,
                           height: 300,
                           fit: BoxFit.contain,
