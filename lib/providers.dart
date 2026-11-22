@@ -34,8 +34,12 @@ final typeFilterProvider = StateProvider.autoDispose<Set<int>>((ref) => <int>{
       GrenadeType.wallbang
     });
 
-// 出生点显示开关（默认关闭）
+// 出生点与人质点显示开关（默认关闭）
 final showSpawnPointsProvider = StateProvider.autoDispose<bool>((ref) => false);
+final showCasualSpawnPointsProvider =
+    StateProvider.autoDispose<bool>((ref) => false);
+final showHostagePointsProvider =
+    StateProvider.autoDispose<bool>((ref) => false);
 
 // 地图连线设置
 final mapLineColorProvider =

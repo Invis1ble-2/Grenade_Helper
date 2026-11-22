@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
@@ -307,6 +308,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   late final PhotoViewController _photoViewController;
   final GlobalKey _stackKey = GlobalKey(); // GlobalKey
   bool _isSpawnSidebarExpanded = true; // 侧边栏状态
+  String _selectedSpawnSidebarTab = 'T';
+  final ValueNotifier<String?> _hoveredSpawnKey = ValueNotifier<String?>(null);
   bool _isImpactMode = false; // 爆点模式
 
   // 摇杆状态
@@ -433,6 +436,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     _allMapListPanelHeightNotifier.dispose();
     _allMapListSearchController.dispose();
     _batchedDragVisualTick.dispose();
+    _hoveredSpawnKey.dispose();
     _photoViewController.dispose();
     for (final info in _grenadeTypePictures.values) {
       info.picture.dispose();
@@ -3224,81 +3228,38 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     );
   }
 
-  /// 构建出生点标记（方形 + 数字）- 带透明度，可点击创建道具
-  Widget _buildSpawnPointMarker(
-      SpawnPoint spawn,
-      bool isCT,
-      BoxConstraints constraints,
-      double markerScale,
-      ({
-        double width,
-        double height,
-        double offsetX,
-        double offsetY
-      }) imageBounds,
-      int layerId,
-      bool isEditMode) {
+  void _showSpawnPointBottomSheet(SpawnPoint spawn, bool isCT, int layerId,
+      {bool isCasual = false}) {
     final color = isCT ? Colors.blueAccent : Colors.amber;
-    // Base size is 16, use FIXED half-size for positioning
-    const double baseHalfSize = 8.0;
-
-    // 计算标记在 Stack 中的实际位置（考虑图片偏移）
-    final left =
-        imageBounds.offsetX + spawn.x * imageBounds.width - baseHalfSize;
-    final top =
-        imageBounds.offsetY + spawn.y * imageBounds.height - baseHalfSize;
-
-    return Positioned(
-      left: left,
-      top: top,
-      child: Transform.scale(
-        scale: markerScale,
-        alignment: Alignment.center,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () {
-            // 点击出生点显示底部菜单
-            _showSpawnPointBottomSheet(spawn, isCT, layerId);
-          },
-          child: MouseRegion(
-            cursor: SystemMouseCursors.click,
-            child: Container(
-              width: 16,
-              height: 16,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.5),
-                borderRadius: BorderRadius.circular(3),
-                border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.5), width: 1),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.2),
-                    blurRadius: 2,
-                    offset: const Offset(0, 1),
-                  )
-                ],
-              ),
-              child: Center(
-                child: Text(
-                  '${spawn.id}',
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.9),
-                    fontSize: 9,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
+    final teamName = isCT ? "CT" : "T";
+    final label = isCasual ? 'C${spawn.id}' : '${spawn.id}';
+    final title = isCasual ? "$teamName 休闲出生点 $label" : "$teamName 出生点 #$label";
+    _showPresetPointBottomSheet(
+      badgeText: label,
+      title: title,
+      point: spawn,
+      color: color,
+      layerId: layerId,
     );
   }
 
-  /// 显示出生点底部菜单
-  void _showSpawnPointBottomSheet(SpawnPoint spawn, bool isCT, int layerId) {
-    final color = isCT ? Colors.blueAccent : Colors.amber;
-    final teamName = isCT ? "CT" : "T";
+  void _showHostagePointBottomSheet(SpawnPoint hostage, int layerId) {
+    _showPresetPointBottomSheet(
+      badgeText: 'H${hostage.id}',
+      title: "人质点 #${hostage.id}",
+      point: hostage,
+      color: const Color(0xFF10B981),
+      layerId: layerId,
+    );
+  }
+
+  void _showPresetPointBottomSheet({
+    required String badgeText,
+    required String title,
+    required SpawnPoint point,
+    required Color color,
+    required int layerId,
+  }) {
     final isEditMode = ref.read(isEditModeProvider);
 
     showModalBottomSheet(
@@ -3315,18 +3276,19 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             Row(
               children: [
                 Container(
-                  width: 32,
+                  constraints: const BoxConstraints(minWidth: 32),
                   height: 32,
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Center(
                     child: Text(
-                      '${spawn.id}',
+                      badgeText,
                       style: TextStyle(
                         color: color,
-                        fontSize: 16,
+                        fontSize: badgeText.length >= 3 ? 12 : 15,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -3334,7 +3296,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 ),
                 const SizedBox(width: 12),
                 Text(
-                  "$teamName 出生点 #${spawn.id}",
+                  title,
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 18,
@@ -3345,7 +3307,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              "坐标: (${spawn.x.toStringAsFixed(3)}, ${spawn.y.toStringAsFixed(3)})",
+              "坐标: (${point.x.toStringAsFixed(3)}, ${point.y.toStringAsFixed(3)})",
               style: const TextStyle(color: Colors.grey, fontSize: 12),
             ),
             const SizedBox(height: 20),
@@ -3355,9 +3317,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 child: ElevatedButton.icon(
                   onPressed: () {
                     Navigator.pop(ctx);
-                    // 在出生点位置创建道具
                     setState(() {
-                      _tempTapPosition = Offset(spawn.x, spawn.y);
+                      _tempTapPosition = Offset(point.x, point.y);
                     });
                     _createGrenade(layerId);
                   },
@@ -3408,9 +3369,514 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     );
   }
 
-  /// 构建出生点侧边栏（可折叠）
+  Widget _buildDesktopSpawnChip({
+    required String label,
+    required String tooltip,
+    required bool enabled,
+    required Color activeColor,
+    required VoidCallback onTap,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            decoration: BoxDecoration(
+              color: enabled
+                  ? activeColor.withValues(alpha: 0.24)
+                  : Colors.white.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(5),
+              border: Border.all(
+                color: enabled
+                    ? activeColor.withValues(alpha: 0.8)
+                    : Colors.white.withValues(alpha: 0.14),
+                width: 1,
+              ),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                color: enabled ? activeColor : Colors.white54,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopSpawnGrid(List<Widget> cells) {
+    final rows = <Widget>[];
+    for (var i = 0; i < cells.length; i += 3) {
+      final rowChildren = <Widget>[];
+      for (var c = 0; c < 3; c++) {
+        if (c > 0) rowChildren.add(const SizedBox(width: 4));
+        rowChildren.add(
+          Expanded(
+            child: i + c < cells.length
+                ? cells[i + c]
+                : const SizedBox.shrink(),
+          ),
+        );
+      }
+      if (rows.isNotEmpty) rows.add(const SizedBox(height: 4));
+      rows.add(Row(children: rowChildren));
+    }
+    return Column(mainAxisSize: MainAxisSize.min, children: rows);
+  }
+
+  Widget _buildDesktopSpawnCell({
+    required String pointKey,
+    required String label,
+    required Color color,
+    required bool outlined,
+    required VoidCallback onTap,
+  }) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => _hoveredSpawnKey.value = pointKey,
+      onExit: (_) {
+        if (_hoveredSpawnKey.value == pointKey) {
+          _hoveredSpawnKey.value = null;
+        }
+      },
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          _hoveredSpawnKey.value = null;
+          onTap();
+        },
+        child: Container(
+          height: 24,
+          decoration: BoxDecoration(
+            color: outlined ? Colors.transparent : color.withValues(alpha: 0.22),
+            borderRadius: BorderRadius.circular(6),
+            border: outlined
+                ? Border.all(color: color.withValues(alpha: 0.72), width: 1)
+                : null,
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: label.length >= 3 ? 10 : 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopSpawnPointCard(
+    MapSpawnConfig config,
+    int layerId, {
+    required bool showCasual,
+    required bool showHostages,
+    required double maxHeight,
+  }) {
+    final showHostageTab = showHostages && config.hasHostageSpawns;
+    final activeTab =
+        (_selectedSpawnSidebarTab == 'H' && !showHostageTab)
+            ? 'T'
+            : _selectedSpawnSidebarTab;
+
+    final tabs = <({String id, String label, Color color})>[
+      (id: 'CT', label: 'CT', color: Colors.blueAccent),
+      (id: 'T', label: 'T', color: Colors.amber),
+      if (showHostageTab)
+        (id: 'H', label: '人质', color: const Color(0xFF34D399)),
+    ];
+
+    Widget buildTabBody() {
+      if (activeTab == 'CT') {
+        final mainCells = config.ctSpawns
+            .map((s) => _buildDesktopSpawnCell(
+                  pointKey: 'ct-${s.id}',
+                  label: '${s.id}',
+                  color: Colors.blueAccent,
+                  outlined: false,
+                  onTap: () => _showSpawnPointBottomSheet(s, true, layerId),
+                ))
+            .toList();
+        final casualCells = (showCasual && config.casualCtSpawns.isNotEmpty)
+            ? config.casualCtSpawns
+                .map((s) => _buildDesktopSpawnCell(
+                      pointKey: 'cct-${s.id}',
+                      label: 'C${s.id}',
+                      color: Colors.blueAccent,
+                      outlined: true,
+                      onTap: () => _showSpawnPointBottomSheet(s, true, layerId,
+                          isCasual: true),
+                    ))
+                .toList()
+            : const <Widget>[];
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildDesktopSpawnGrid(mainCells),
+            if (casualCells.isNotEmpty) ...[
+              Container(
+                height: 1,
+                margin: const EdgeInsets.symmetric(vertical: 6),
+                color: Colors.white.withValues(alpha: 0.1),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(bottom: 4),
+                child: Text(
+                  'CT 休闲',
+                  style: TextStyle(
+                    color: Colors.cyanAccent,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              _buildDesktopSpawnGrid(casualCells),
+            ],
+          ],
+        );
+      }
+
+      if (activeTab == 'T') {
+        final mainCells = config.tSpawns
+            .map((s) => _buildDesktopSpawnCell(
+                  pointKey: 't-${s.id}',
+                  label: '${s.id}',
+                  color: Colors.amber,
+                  outlined: false,
+                  onTap: () => _showSpawnPointBottomSheet(s, false, layerId),
+                ))
+            .toList();
+        final casualCells = (showCasual && config.casualTSpawns.isNotEmpty)
+            ? config.casualTSpawns
+                .map((s) => _buildDesktopSpawnCell(
+                      pointKey: 'ct_c-${s.id}',
+                      label: 'C${s.id}',
+                      color: Colors.amber,
+                      outlined: true,
+                      onTap: () => _showSpawnPointBottomSheet(s, false, layerId,
+                          isCasual: true),
+                    ))
+                .toList()
+            : const <Widget>[];
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildDesktopSpawnGrid(mainCells),
+            if (casualCells.isNotEmpty) ...[
+              Container(
+                height: 1,
+                margin: const EdgeInsets.symmetric(vertical: 6),
+                color: Colors.white.withValues(alpha: 0.1),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(bottom: 4),
+                child: Text(
+                  'T 休闲',
+                  style: TextStyle(
+                    color: Colors.orangeAccent,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              _buildDesktopSpawnGrid(casualCells),
+            ],
+          ],
+        );
+      }
+
+      final hostageCells = config.hostageSpawns
+          .map((h) => _buildDesktopSpawnCell(
+                pointKey: 'h-${h.id}',
+                label: 'H${h.id}',
+                color: const Color(0xFF34D399),
+                outlined: false,
+                onTap: () => _showHostagePointBottomSheet(h, layerId),
+              ))
+          .toList();
+      return _buildDesktopSpawnGrid(hostageCells);
+    }
+
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.6),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+            ),
+            child: !_isSpawnSidebarExpanded
+                ? GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () =>
+                        setState(() => _isSpawnSidebarExpanded = true),
+                    child: const MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: Padding(
+                        padding:
+                            EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.chevron_left_rounded,
+                                color: Colors.greenAccent, size: 16),
+                            SizedBox(height: 2),
+                            Text(
+                              '出\n生\n点',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.greenAccent,
+                                fontSize: 10,
+                                height: 1.25,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  )
+                : Stack(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(left: 21),
+                        child: SizedBox(
+                          width: 148,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Padding(
+                                padding:
+                                    const EdgeInsets.fromLTRB(8, 7, 8, 6),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.my_location_rounded,
+                                        color: Colors.greenAccent, size: 13),
+                                    const SizedBox(width: 4),
+                                    const Expanded(
+                                      child: Text(
+                                        '出生点',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                    if (config.hasCasualSpawns)
+                                      _buildDesktopSpawnChip(
+                                        label: '休',
+                                        tooltip: showCasual
+                                            ? '隐藏休闲出生点'
+                                            : '显示休闲出生点',
+                                        enabled: showCasual,
+                                        activeColor: Colors.cyanAccent,
+                                        onTap: () => ref
+                                            .read(
+                                                showCasualSpawnPointsProvider
+                                                    .notifier)
+                                            .state = !showCasual,
+                                      ),
+                                    if (config.hasCasualSpawns &&
+                                        config.hasHostageSpawns)
+                                      const SizedBox(width: 4),
+                                    if (config.hasHostageSpawns)
+                                      _buildDesktopSpawnChip(
+                                        label: '质',
+                                        tooltip: showHostages
+                                            ? '隐藏人质点'
+                                            : '显示人质点',
+                                        enabled: showHostages,
+                                        activeColor:
+                                            const Color(0xFF34D399),
+                                        onTap: () => ref
+                                            .read(showHostagePointsProvider
+                                                .notifier)
+                                            .state = !showHostages,
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              Padding(
+                                padding:
+                                    const EdgeInsets.fromLTRB(8, 0, 8, 6),
+                                child: Container(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.06),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Row(
+                                    children: tabs.map((t) {
+                                      final isActive = activeTab == t.id;
+                                      return Expanded(
+                                        child: GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
+                                          onTap: () => setState(() =>
+                                              _selectedSpawnSidebarTab = t.id),
+                                          child: MouseRegion(
+                                            cursor: SystemMouseCursors.click,
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      vertical: 4),
+                                              decoration: BoxDecoration(
+                                                color: isActive
+                                                    ? Colors.white
+                                                        .withValues(alpha: 0.16)
+                                                    : Colors.transparent,
+                                                borderRadius:
+                                                    BorderRadius.circular(6),
+                                              ),
+                                              alignment: Alignment.center,
+                                              child: Text(
+                                                t.label,
+                                                style: TextStyle(
+                                                  color: isActive
+                                                      ? t.color
+                                                      : Colors.white54,
+                                                  fontSize: 10.5,
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    }).toList(),
+                                  ),
+                                ),
+                              ),
+                              Container(
+                                height: 1,
+                                color: Colors.white.withValues(alpha: 0.08),
+                              ),
+                              Flexible(
+                                fit: FlexFit.loose,
+                                child: SingleChildScrollView(
+                                  padding: const EdgeInsets.all(8),
+                                  child: buildTabBody(),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        left: 0,
+                        top: 0,
+                        bottom: 0,
+                        width: 20,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () {
+                            _hoveredSpawnKey.value = null;
+                            setState(() => _isSpawnSidebarExpanded = false);
+                          },
+                          child: const MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            child: Center(
+                              child: Icon(
+                                Icons.chevron_right_rounded,
+                                color: Colors.greenAccent,
+                                size: 17,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        left: 20,
+                        top: 0,
+                        bottom: 0,
+                        width: 1,
+                        child: ColoredBox(
+                          color: Colors.white.withValues(alpha: 0.1),
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSpawnSidebarToggle({
+    required IconData icon,
+    required String label,
+    required bool enabled,
+    required Color activeColor,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Container(
+          height: 24,
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          decoration: BoxDecoration(
+            color: enabled
+                ? activeColor.withValues(alpha: 0.22)
+                : Colors.white.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(7),
+            border: Border.all(
+              color: enabled
+                  ? activeColor.withValues(alpha: 0.8)
+                  : Colors.white.withValues(alpha: 0.12),
+              width: 1,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 12,
+                color: enabled ? activeColor : Colors.white54,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  color: enabled ? activeColor : Colors.white60,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSpawnPointSidebar(
-      MapSpawnConfig config, int layerId, bool isEditMode) {
+    MapSpawnConfig config,
+    int layerId,
+    bool isEditMode, {
+    required bool showCasual,
+    required bool showHostages,
+  }) {
+    final hasExtraToggles = config.hasCasualSpawns || config.hasHostageSpawns;
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(14),
       child: BackdropFilter(
@@ -3447,7 +3913,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   color: Colors.white.withValues(alpha: 0.1),
                 ),
                 SizedBox(
-                  width: 72,
+                  width: 76,
                   child: Column(
                     children: [
                       Padding(
@@ -3470,6 +3936,43 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                           ],
                         ),
                       ),
+                      if (hasExtraToggles) ...[
+                        Container(
+                          height: 1,
+                          color: Colors.white.withValues(alpha: 0.08),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
+                          child: Column(
+                            children: [
+                              if (config.hasCasualSpawns)
+                                _buildSpawnSidebarToggle(
+                                  icon: Icons.groups_rounded,
+                                  label: '休闲',
+                                  enabled: showCasual,
+                                  activeColor: Colors.cyanAccent,
+                                  onTap: () => ref
+                                      .read(showCasualSpawnPointsProvider
+                                          .notifier)
+                                      .state = !showCasual,
+                                ),
+                              if (config.hasCasualSpawns &&
+                                  config.hasHostageSpawns)
+                                const SizedBox(height: 5),
+                              if (config.hasHostageSpawns)
+                                _buildSpawnSidebarToggle(
+                                  icon: Icons.person_pin_circle_rounded,
+                                  label: '人质',
+                                  enabled: showHostages,
+                                  activeColor: const Color(0xFF34D399),
+                                  onTap: () => ref
+                                      .read(showHostagePointsProvider.notifier)
+                                      .state = !showHostages,
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
                       Container(
                         height: 1,
                         color: Colors.white.withValues(alpha: 0.08),
@@ -3505,6 +4008,55 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                               ...config.tSpawns.map((spawn) =>
                                   _buildSpawnListItem(
                                       spawn, false, layerId, isEditMode)),
+                              if (showCasual && config.hasCasualSpawns) ...[
+                                const SizedBox(height: 8),
+                                if (config.casualCtSpawns.isNotEmpty) ...[
+                                  const Text(
+                                    "CT 休闲",
+                                    style: TextStyle(
+                                      color: Colors.cyanAccent,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  ...config.casualCtSpawns.map((spawn) =>
+                                      _buildSpawnListItem(
+                                          spawn, true, layerId, isEditMode,
+                                          isCasual: true)),
+                                ],
+                                if (config.casualTSpawns.isNotEmpty) ...[
+                                  if (config.casualCtSpawns.isNotEmpty)
+                                    const SizedBox(height: 8),
+                                  const Text(
+                                    "T 休闲",
+                                    style: TextStyle(
+                                      color: Colors.orangeAccent,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  ...config.casualTSpawns.map((spawn) =>
+                                      _buildSpawnListItem(
+                                          spawn, false, layerId, isEditMode,
+                                          isCasual: true)),
+                                ],
+                              ],
+                              if (showHostages && config.hasHostageSpawns) ...[
+                                const SizedBox(height: 8),
+                                const Text(
+                                  "人质",
+                                  style: TextStyle(
+                                    color: Color(0xFF34D399),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                ...config.hostageSpawns.map((hostage) =>
+                                    _buildHostageListItem(hostage, layerId)),
+                              ],
                             ],
                           ),
                         ),
@@ -3520,15 +4072,48 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     );
   }
 
-  /// 构建出生点列表项
   Widget _buildSpawnListItem(
-      SpawnPoint spawn, bool isCT, int layerId, bool isEditMode) {
+      SpawnPoint spawn, bool isCT, int layerId, bool isEditMode,
+      {bool isCasual = false}) {
     final color = isCT ? Colors.blueAccent : Colors.amber;
+    final label = isCasual ? 'C${spawn.id}' : '${spawn.id}';
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () => _showSpawnPointBottomSheet(spawn, isCT, layerId),
+      onTap: () => _showSpawnPointBottomSheet(spawn, isCT, layerId,
+          isCasual: isCasual),
       child: Container(
-        width: 34,
+        width: isCasual ? 40 : 34,
+        height: 24,
+        margin: const EdgeInsets.only(bottom: 4),
+        decoration: BoxDecoration(
+          color: isCasual
+              ? Colors.transparent
+              : color.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(7),
+          border: isCasual
+              ? Border.all(color: color.withValues(alpha: 0.75), width: 1)
+              : null,
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          label,
+          style: TextStyle(
+            color: color,
+            fontSize: label.length >= 3 ? 10 : 11,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHostageListItem(SpawnPoint hostage, int layerId) {
+    const color = Color(0xFF34D399);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _showHostagePointBottomSheet(hostage, layerId),
+      child: Container(
+        width: 36,
         height: 24,
         margin: const EdgeInsets.only(bottom: 4),
         decoration: BoxDecoration(
@@ -3537,8 +4122,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         ),
         alignment: Alignment.center,
         child: Text(
-          '${spawn.id}',
-          style: TextStyle(
+          'H${hostage.id}',
+          style: const TextStyle(
             color: color,
             fontSize: 11,
             fontWeight: FontWeight.w700,
@@ -4292,6 +4877,89 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     ]);
   }
 
+  ({
+    Set<String> occupiedKeys,
+    List<Grenade> regularGrenades,
+    List<({String key, GrenadeCluster cluster})> spawnEntries,
+  }) _partitionSpawnGrenades(
+    MapSpawnConfig config,
+    List<Grenade> grenades, {
+    required bool includeCasual,
+  }) {
+    if (grenades.isEmpty) {
+      return (
+        occupiedKeys: const {},
+        regularGrenades: grenades,
+        spawnEntries: const [],
+      );
+    }
+
+    final candidates = <({String key, SpawnPoint point})>[
+      for (final s in config.ctSpawns) (key: 'ct-${s.id}', point: s),
+      for (final s in config.tSpawns) (key: 't-${s.id}', point: s),
+      if (includeCasual) ...[
+        for (final s in config.casualCtSpawns) (key: 'cct-${s.id}', point: s),
+        for (final s in config.casualTSpawns) (key: 'ct_c-${s.id}', point: s),
+      ],
+    ];
+    final maxDist = math.min(
+      0.0045,
+      config.minSpacingRatio(includeCasual: includeCasual) * 0.35,
+    );
+    final maxDistSq = maxDist * maxDist;
+
+    final byKey = <String, List<Grenade>>{};
+    final regular = <Grenade>[];
+
+    for (final g in grenades) {
+      String? nearestKey;
+      var bestDistSq = maxDistSq;
+      for (final c in candidates) {
+        final dx = g.xRatio - c.point.x;
+        final dy = g.yRatio - c.point.y;
+        final distSq = dx * dx + dy * dy;
+        if (distSq <= bestDistSq) {
+          bestDistSq = distSq;
+          nearestKey = c.key;
+        }
+      }
+      if (nearestKey != null) {
+        (byKey[nearestKey] ??= <Grenade>[]).add(g);
+      } else {
+        regular.add(g);
+      }
+    }
+
+    if (byKey.isEmpty) {
+      return (
+        occupiedKeys: const {},
+        regularGrenades: grenades,
+        spawnEntries: const [],
+      );
+    }
+
+    final spawnEntries = <({String key, GrenadeCluster cluster})>[];
+    for (final c in candidates) {
+      final matched = byKey[c.key];
+      if (matched != null) {
+        spawnEntries.add((
+          key: c.key,
+          cluster: GrenadeCluster(
+            xRatio: c.point.x,
+            yRatio: c.point.y,
+            grenades: matched,
+          ),
+        ));
+      }
+    }
+
+    return (
+      occupiedKeys: byKey.keys.toSet(),
+      regularGrenades: regular,
+      spawnEntries: spawnEntries,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isEditMode = ref.watch(isEditModeProvider);
@@ -4300,10 +4968,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final onlyFav = ref.watch(onlyFavoritesProvider);
     final selectedTypes = ref.watch(typeFilterProvider);
     final showSpawnPoints = ref.watch(showSpawnPointsProvider);
+    final showCasualSpawnPoints = ref.watch(showCasualSpawnPointsProvider);
+    final showHostagePoints = ref.watch(showHostagePointsProvider);
 
-    // 获取当前地图的出生点数据
     final mapName = widget.gameMap.name.toLowerCase();
     final spawnConfig = spawnPointData[mapName];
+    final hasCasualSpawns = spawnConfig?.hasCasualSpawns ?? false;
+    final hasHostageSpawns = spawnConfig?.hasHostageSpawns ?? false;
 
     widget.gameMap.layers.loadSync();
     final layers = widget.gameMap.layers.toList();
@@ -4315,6 +4986,27 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     }
 
     final grenadesAsync = ref.watch(_filteredGrenadesProvider(currentLayer.id));
+    final filteredGrenades = grenadesAsync.value ?? const <Grenade>[];
+    final spawnPartition = (showSpawnPoints && spawnConfig != null)
+        ? _partitionSpawnGrenades(
+            spawnConfig,
+            filteredGrenades,
+            includeCasual: showCasualSpawnPoints && hasCasualSpawns,
+          )
+        : (
+            occupiedKeys: const <String>{},
+            regularGrenades: filteredGrenades,
+            spawnEntries: const <({String key, GrenadeCluster cluster})>[],
+          );
+    String? selectedSpawnKey;
+    if (_selectedClusterForImpact != null && !_isImpactMode) {
+      for (final entry in spawnPartition.spawnEntries) {
+        if (_isSameCluster(entry.cluster, _selectedClusterForImpact)) {
+          selectedSpawnKey = entry.key;
+          break;
+        }
+      }
+    }
     final selectedTagIds = ref.watch(selectedTagIdsProvider);
     final tagMatchedIds = selectedTagIds.isEmpty
         ? null
@@ -4621,6 +5313,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                   imageProviderFromPath(currentLayer.assetPath);
                               List<GrenadeCluster> batchedTapClusters =
                                   const [];
+                              List<GrenadeCluster> batchedPaintClusters =
+                                  const [];
                               var enableBatchedClusterHitTest = false;
                               var batchedClustersAreImpact = false;
 
@@ -4668,7 +5362,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                           _handleBatchedThrowClusterLongPressStart(
                                             hitCluster,
                                             d.globalPosition,
-                                            batchedTapClusters,
+                                            batchedPaintClusters,
                                           );
                                         }
                                         return;
@@ -4711,6 +5405,34 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                             height: constraints.maxHeight,
                                             fit: BoxFit.contain,
                                           ),
+                                    if (showSpawnPoints && spawnConfig != null)
+                                      Positioned.fill(
+                                        child: IgnorePointer(
+                                          child: RepaintBoundary(
+                                            child: CustomPaint(
+                                              painter:
+                                                  _SpawnPointOverlayPainter(
+                                                config: spawnConfig,
+                                                imageBounds: imageBounds,
+                                                photoScale: scale,
+                                                markerScale: markerScale,
+                                                showCasual:
+                                                    showCasualSpawnPoints &&
+                                                        hasCasualSpawns,
+                                                showHostages:
+                                                    showHostagePoints &&
+                                                        hasHostageSpawns,
+                                                occupiedKeys:
+                                                    spawnPartition.occupiedKeys,
+                                                selectedKey: selectedSpawnKey,
+                                                textDirection:
+                                                    Directionality.of(context),
+                                                hoveredKey: _hoveredSpawnKey,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
                                     // 道具点位标记和所有依赖选中状态的元素
                                     ...grenadesAsync.when(
                                         data: (list) {
@@ -4923,7 +5645,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                             // 标准模式：显示投掷点聚合
                                             final cachedClusters =
                                                 _getThrowClusters(
-                                              list,
+                                              spawnPartition.regularGrenades,
                                               threshold: clusterThreshold,
                                             );
 
@@ -4954,6 +5676,26 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                             final activeThrowCluster =
                                                 _draggingCluster ??
                                                     _joystickCluster;
+                                            final visibleSpawnClusters =
+                                                spawnPartition.spawnEntries
+                                                    .map((e) => e.cluster)
+                                                    .where((c) =>
+                                                        (activeThrowCluster ==
+                                                                null ||
+                                                            !_isSameCluster(
+                                                                c,
+                                                                activeThrowCluster)) &&
+                                                        _isRatioPointVisible(
+                                                          c.xRatio,
+                                                          c.yRatio,
+                                                          visibleRect:
+                                                              visibleRatioRect,
+                                                          marginX:
+                                                              pointCullMarginX,
+                                                          marginY:
+                                                              pointCullMarginY,
+                                                        ))
+                                                    .toList(growable: false);
                                             final denseMarkerStyle =
                                                 _shouldUseDenseMarkerStyle(
                                               grenadeCount: list.length,
@@ -4985,11 +5727,17 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                                               .toList(
                                                                   growable:
                                                                       false));
-                                              batchedTapClusters =
+                                              batchedPaintClusters =
                                                   throwClustersForBatch;
+                                              batchedTapClusters =
+                                                  visibleSpawnClusters.isEmpty
+                                                      ? throwClustersForBatch
+                                                      : [
+                                                          ...throwClustersForBatch,
+                                                          ...visibleSpawnClusters,
+                                                        ];
                                               enableBatchedClusterHitTest =
-                                                  throwClustersForBatch
-                                                      .isNotEmpty;
+                                                  batchedTapClusters.isNotEmpty;
                                               batchedClustersAreImpact = false;
                                               if (throwClustersForBatch
                                                   .isNotEmpty) {
@@ -5220,34 +5968,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                           constraints,
                                           markerScale,
                                           imageBounds),
-                                    // 出生点标记（后渲染，在上层，但不响应点击）
-                                    if (showSpawnPoints && spawnConfig != null)
-                                      IgnorePointer(
-                                        child: Stack(
-                                          children: [
-                                            ...spawnConfig.ctSpawns.map(
-                                                (spawn) =>
-                                                    _buildSpawnPointMarker(
-                                                        spawn,
-                                                        true,
-                                                        constraints,
-                                                        markerScale,
-                                                        imageBounds,
-                                                        currentLayer.id,
-                                                        isEditMode)),
-                                            ...spawnConfig.tSpawns.map(
-                                                (spawn) =>
-                                                    _buildSpawnPointMarker(
-                                                        spawn,
-                                                        false,
-                                                        constraints,
-                                                        markerScale,
-                                                        imageBounds,
-                                                        currentLayer.id,
-                                                        isEditMode)),
-                                          ],
-                                        ),
-                                      ),
                                     if (_draggingCluster != null)
                                       ValueListenableBuilder<int>(
                                         valueListenable: _batchedDragVisualTick,
@@ -5642,17 +6362,35 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                     ],
                   ),
                 ),
-                // 出生点侧边栏
                 if (showSpawnPoints &&
                     spawnConfig != null &&
                     _selectedClusterForImpact == null)
-                  Positioned(
-                    right: 12,
-                    top: 62,
-                    bottom: 68,
-                    child: _buildSpawnPointSidebar(
-                        spawnConfig, currentLayer.id, isEditMode),
-                  ),
+                  if (isMobile)
+                    Positioned(
+                      right: 12,
+                      top: 62,
+                      bottom: 68,
+                      child: _buildSpawnPointSidebar(
+                        spawnConfig,
+                        currentLayer.id,
+                        isEditMode,
+                        showCasual: showCasualSpawnPoints,
+                        showHostages: showHostagePoints,
+                      ),
+                    )
+                  else
+                    Positioned(
+                      right: 12,
+                      top: 62,
+                      child: _buildDesktopSpawnPointCard(
+                        spawnConfig,
+                        currentLayer.id,
+                        showCasual: showCasualSpawnPoints,
+                        showHostages: showHostagePoints,
+                        maxHeight: (constraints.maxHeight - 170)
+                            .clamp(160.0, 340.0),
+                      ),
+                    ),
                 // 左下角收藏夹胶囊
                 if (showFavoritesBar)
                   Positioned(
@@ -7625,5 +8363,348 @@ class _ImpactAreaPainter extends CustomPainter {
         oldDelegate.currentStroke != currentStroke ||
         oldDelegate.opacity != opacity ||
         oldDelegate.color != color;
+  }
+}
+
+class _SpawnPointOverlayPainter extends CustomPainter {
+  final MapSpawnConfig config;
+  final ({
+    double width,
+    double height,
+    double offsetX,
+    double offsetY
+  }) imageBounds;
+  final double photoScale;
+  final double markerScale;
+  final bool showCasual;
+  final bool showHostages;
+  final Set<String> occupiedKeys;
+  final String? selectedKey;
+  final TextDirection textDirection;
+  final ValueNotifier<String?> hoveredKey;
+
+  _SpawnPointOverlayPainter({
+    required this.config,
+    required this.imageBounds,
+    required this.photoScale,
+    required this.markerScale,
+    required this.showCasual,
+    required this.showHostages,
+    required this.occupiedKeys,
+    required this.selectedKey,
+    required this.textDirection,
+    required this.hoveredKey,
+  }) : super(repaint: hoveredKey);
+
+  Color _scaleAlpha(Color c, double factor) =>
+      c.withValues(alpha: (c.a * factor).clamp(0.0, 1.0));
+
+  double _labelFontSize(double side, String label) {
+    if (label.length >= 3) return side * 0.39;
+    if (label.length == 2) return side * 0.48;
+    return side * 0.56;
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final safeScale = photoScale <= 0 ? 1.0 : photoScale;
+    final mapSpan = math.min(imageBounds.width, imageBounds.height);
+    final minSpacingPx =
+        config.minSpacingRatio(includeCasual: showCasual) * mapSpan * safeScale;
+    final showNum = minSpacingPx >= 13.5;
+    final showCasualNum = minSpacingPx >= 16.5;
+    final activeHighlight = hoveredKey.value ?? selectedKey;
+
+    ({SpawnPoint point, String label, Color color, bool isHostage})?
+        hoveredItem;
+
+    void drawSquare(
+      double side,
+      double cornerRadius,
+      Color fill,
+      Color border,
+      double strokeWidth,
+    ) {
+      final rect = RRect.fromRectAndRadius(
+        Rect.fromCenter(center: Offset.zero, width: side, height: side),
+        Radius.circular(cornerRadius),
+      );
+      canvas.drawRRect(rect, Paint()..color = fill);
+      canvas.drawRRect(
+        rect,
+        Paint()
+          ..color = border
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = strokeWidth,
+      );
+    }
+
+    void paintPoint(
+      SpawnPoint p, {
+      required String key,
+      required String label,
+      required Color fillColor,
+      required Color borderColor,
+      required Color textColor,
+      required Color highlightColor,
+      required bool isCasual,
+      required bool isHostage,
+    }) {
+      if (activeHighlight == key) {
+        hoveredItem = (
+          point: p,
+          label: label,
+          color: highlightColor,
+          isHostage: isHostage,
+        );
+        return;
+      }
+
+      final hasGrenade = isHostage || occupiedKeys.contains(key);
+      final shapeAlpha = hasGrenade ? 1.0 : 0.36;
+      final labelAlpha = hasGrenade ? 1.0 : 0.50;
+
+      final cx = imageBounds.offsetX + p.x * imageBounds.width;
+      final cy = imageBounds.offsetY + p.y * imageBounds.height;
+
+      canvas.save();
+      canvas.translate(cx, cy);
+      canvas.scale(markerScale, markerScale);
+
+      if (isHostage) {
+        final r = showNum ? 8.5 : 5.5;
+        canvas.drawCircle(
+          Offset.zero,
+          r,
+          Paint()..color = fillColor,
+        );
+        canvas.drawCircle(
+          Offset.zero,
+          r,
+          Paint()
+            ..color = borderColor
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.1,
+        );
+        if (showNum) {
+          _paintLabel(canvas, label, 8.0, textColor);
+        }
+      } else if (isCasual) {
+        if (!showCasualNum) {
+          final s = (minSpacingPx * 0.48).clamp(5.0, 7.0);
+          drawSquare(
+            s,
+            s * 0.24,
+            _scaleAlpha(const Color(0x9905070A), shapeAlpha),
+            _scaleAlpha(borderColor, shapeAlpha),
+            1.0,
+          );
+        } else {
+          final s = (minSpacingPx * 0.68).clamp(12.0, 15.5);
+          drawSquare(
+            s,
+            2.8,
+            _scaleAlpha(const Color(0xC7080B10), shapeAlpha),
+            _scaleAlpha(borderColor, shapeAlpha),
+            1.0,
+          );
+          _paintLabel(
+            canvas,
+            label,
+            _labelFontSize(s, label),
+            _scaleAlpha(textColor, labelAlpha),
+          );
+        }
+      } else {
+        if (!showNum) {
+          final s = (minSpacingPx * 0.62).clamp(6.0, 8.5);
+          drawSquare(
+            s,
+            s * 0.24,
+            _scaleAlpha(fillColor, shapeAlpha),
+            _scaleAlpha(borderColor, shapeAlpha),
+            1.0,
+          );
+        } else {
+          final s = (minSpacingPx * 0.72).clamp(12.0, 16.0);
+          drawSquare(
+            s,
+            3.0,
+            _scaleAlpha(fillColor, shapeAlpha),
+            _scaleAlpha(borderColor, shapeAlpha),
+            1.0,
+          );
+          _paintLabel(
+            canvas,
+            label,
+            _labelFontSize(s, label),
+            _scaleAlpha(textColor, labelAlpha),
+          );
+        }
+      }
+
+      canvas.restore();
+    }
+
+    if (showCasual) {
+      for (final s in config.casualCtSpawns) {
+        paintPoint(
+          s,
+          key: 'cct-${s.id}',
+          label: 'C${s.id}',
+          fillColor: const Color(0xC7080B10),
+          borderColor: const Color(0xD960A5FA),
+          textColor: const Color(0xFF93C5FD),
+          highlightColor: Colors.blueAccent,
+          isCasual: true,
+          isHostage: false,
+        );
+      }
+      for (final s in config.casualTSpawns) {
+        paintPoint(
+          s,
+          key: 'ct_c-${s.id}',
+          label: 'C${s.id}',
+          fillColor: const Color(0xC7080B10),
+          borderColor: const Color(0xD9FBBF24),
+          textColor: const Color(0xFFFDE68A),
+          highlightColor: Colors.amber,
+          isCasual: true,
+          isHostage: false,
+        );
+      }
+    }
+
+    for (final s in config.ctSpawns) {
+      paintPoint(
+        s,
+        key: 'ct-${s.id}',
+        label: '${s.id}',
+        fillColor: showNum
+            ? const Color(0xD62563EB)
+            : const Color(0xEB448AFF),
+        borderColor: const Color(0xDEFFFFFF),
+        textColor: Colors.white,
+        highlightColor: Colors.blueAccent,
+        isCasual: false,
+        isHostage: false,
+      );
+    }
+
+    for (final s in config.tSpawns) {
+      paintPoint(
+        s,
+        key: 't-${s.id}',
+        label: '${s.id}',
+        fillColor: showNum
+            ? const Color(0xDBD97706)
+            : const Color(0xEBFFC107),
+        borderColor: const Color(0xDEFFFFFF),
+        textColor: Colors.white,
+        highlightColor: Colors.amber,
+        isCasual: false,
+        isHostage: false,
+      );
+    }
+
+    if (showHostages) {
+      for (final h in config.hostageSpawns) {
+        paintPoint(
+          h,
+          key: 'h-${h.id}',
+          label: 'H${h.id}',
+          fillColor: const Color(0xDB10B981),
+          borderColor: const Color(0xE6FFFFFF),
+          textColor: Colors.white,
+          highlightColor: const Color(0xFF10B981),
+          isCasual: false,
+          isHostage: true,
+        );
+      }
+    }
+
+    final hovered = hoveredItem;
+    if (hovered != null) {
+      final cx = imageBounds.offsetX + hovered.point.x * imageBounds.width;
+      final cy = imageBounds.offsetY + hovered.point.y * imageBounds.height;
+
+      canvas.save();
+      canvas.translate(cx, cy);
+      canvas.scale(markerScale, markerScale);
+      if (hovered.isHostage) {
+        canvas.drawCircle(
+          Offset.zero,
+          15.0,
+          Paint()..color = hovered.color.withValues(alpha: 0.28),
+        );
+        canvas.drawCircle(
+          Offset.zero,
+          15.0,
+          Paint()
+            ..color = hovered.color.withValues(alpha: 0.9)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.6,
+        );
+        canvas.drawCircle(
+          Offset.zero,
+          10.5,
+          Paint()..color = hovered.color,
+        );
+        canvas.drawCircle(
+          Offset.zero,
+          10.5,
+          Paint()
+            ..color = Colors.white
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.6,
+        );
+      } else {
+        drawSquare(
+          28.0,
+          6.5,
+          hovered.color.withValues(alpha: 0.28),
+          hovered.color.withValues(alpha: 0.9),
+          1.6,
+        );
+        drawSquare(20.0, 4.0, hovered.color, Colors.white, 1.6);
+      }
+      _paintLabel(
+        canvas,
+        hovered.label,
+        hovered.label.length >= 3 ? 8.0 : 9.5,
+        Colors.white,
+      );
+      canvas.restore();
+    }
+  }
+
+  void _paintLabel(Canvas canvas, String text, double fontSize, Color color) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          color: color,
+          fontSize: fontSize,
+          fontWeight: FontWeight.w700,
+          height: 1.0,
+        ),
+      ),
+      textDirection: textDirection,
+    )..layout();
+    tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
+  }
+
+  @override
+  bool shouldRepaint(covariant _SpawnPointOverlayPainter oldDelegate) {
+    return oldDelegate.config != config ||
+        oldDelegate.imageBounds != imageBounds ||
+        oldDelegate.photoScale != photoScale ||
+        oldDelegate.markerScale != markerScale ||
+        oldDelegate.showCasual != showCasual ||
+        oldDelegate.showHostages != showHostages ||
+        oldDelegate.occupiedKeys.length != occupiedKeys.length ||
+        !oldDelegate.occupiedKeys.containsAll(occupiedKeys) ||
+        oldDelegate.selectedKey != selectedKey ||
+        oldDelegate.textDirection != textDirection;
   }
 }
