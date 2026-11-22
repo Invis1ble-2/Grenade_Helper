@@ -661,7 +661,12 @@ class _HomeMapCardState extends State<_HomeMapCard> {
                     curve: AppMotion.enter,
                     child: imageProvider == null
                         ? Container(color: const Color(0xFF30343A))
-                        : Image(image: imageProvider, fit: BoxFit.cover),
+                        : Image(
+                            image: imageProvider,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) =>
+                                Container(color: const Color(0xFF30343A)),
+                          ),
                   ),
                   Positioned.fill(
                       child: ColoredBox(

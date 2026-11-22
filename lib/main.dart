@@ -869,17 +869,42 @@ Future<void> _initMapData(Isar isar) async {
 
 Future<int> _ensureBuiltinMaps(Isar isar) async {
   final existingMaps = await isar.gameMaps.where().findAll();
-  final existingBuiltinKeys =
-      existingMaps.map(_resolveBuiltinMapKey).whereType<String>().toSet();
+  final existingByKey = <String, List<GameMap>>{};
+  for (final map in existingMaps) {
+    final key = _resolveBuiltinMapKey(map);
+    if (key != null) existingByKey.putIfAbsent(key, () => []).add(map);
+  }
+
+  final mapsToMigrate = <GameMap>[];
+  final configsToAdd = <_BuiltinMapConfig>[];
+  for (final config in _builtinMapsConfig) {
+    final targetBgPath = 'assets/backgrounds/${config.key}_bg.webp';
+    final legacyBgPath = 'assets/backgrounds/${config.key}_bg.png';
+    final matched = existingByKey[config.key];
+    if (matched != null && matched.isNotEmpty) {
+      for (final existing in matched) {
+        if (existing.backgroundPath.replaceAll('\\', '/').toLowerCase() ==
+            legacyBgPath) {
+          existing.backgroundPath = targetBgPath;
+          mapsToMigrate.add(existing);
+        }
+      }
+      continue;
+    }
+    configsToAdd.add(config);
+  }
+
+  if (mapsToMigrate.isEmpty && configsToAdd.isEmpty) return 0;
+
   var addedCount = 0;
-
   await isar.writeTxn(() async {
-    for (final config in _builtinMapsConfig) {
-      if (existingBuiltinKeys.contains(config.key)) continue;
-
+    if (mapsToMigrate.isNotEmpty) {
+      await isar.gameMaps.putAll(mapsToMigrate);
+    }
+    for (final config in configsToAdd) {
       final map = GameMap(
         name: config.name,
-        backgroundPath: 'assets/backgrounds/${config.key}_bg.png',
+        backgroundPath: 'assets/backgrounds/${config.key}_bg.webp',
         iconPath: 'assets/icons/${config.key}_icon.svg',
       );
       await isar.gameMaps.put(map);
@@ -894,8 +919,6 @@ Future<int> _ensureBuiltinMaps(Isar isar) async {
         map.layers.add(layer);
       }
       await map.layers.save();
-
-      existingBuiltinKeys.add(config.key);
       addedCount++;
     }
   });
@@ -912,7 +935,10 @@ String? _resolveBuiltinMapKey(GameMap map) {
     if (normalizedIconPath == 'assets/icons/${config.key}_icon.svg') {
       return config.key;
     }
-    if (normalizedBackgroundPath == 'assets/backgrounds/${config.key}_bg.png') {
+    if (normalizedBackgroundPath ==
+            'assets/backgrounds/${config.key}_bg.webp' ||
+        normalizedBackgroundPath ==
+            'assets/backgrounds/${config.key}_bg.png') {
       return config.key;
     }
   }

@@ -1793,6 +1793,22 @@ class DataService {
         return null;
       }
 
+      // 过滤本地已有的内置地图，避免预览和同步触碰客户端内置资源
+      if (maps.isNotEmpty) {
+        final filteredMaps = <PackageMapData>[];
+        for (final mapData in maps) {
+          final local = await isar.gameMaps
+              .filter()
+              .nameEqualTo(mapData.mapName)
+              .findFirst();
+          if (local != null && _isBuiltinAssetMap(local)) continue;
+          filteredMaps.add(mapData);
+        }
+        maps
+          ..clear()
+          ..addAll(filteredMaps);
+      }
+
       // 按地图分组
       final Map<String, List<GrenadePreviewItem>> grenadesByMap = {};
 
@@ -1959,8 +1975,27 @@ class DataService {
     return toFix.length;
   }
 
+  static final RegExp _legacyBuiltinBgPattern = RegExp(
+    r'^assets/backgrounds/(mirage|inferno|dust2|cache|overpass|ancient|anubis|train|nuke|vertigo)_bg\.png$',
+  );
+
   bool _isAssetPath(String path) {
-    return path.trim().startsWith('assets/');
+    return path.trim().replaceAll('\\', '/').toLowerCase().startsWith('assets/');
+  }
+
+  bool _isBuiltinAssetMap(GameMap map) {
+    return _isAssetPath(map.backgroundPath);
+  }
+
+  String _normalizeLegacyBuiltinBgPath(String rawPath) {
+    final trimmed = rawPath.trim();
+    if (trimmed.isEmpty) return trimmed;
+    final match = _legacyBuiltinBgPattern
+        .firstMatch(trimmed.replaceAll('\\', '/').toLowerCase());
+    if (match != null) {
+      return 'assets/backgrounds/${match.group(1)}_bg.webp';
+    }
+    return trimmed;
   }
 
   void _addMapFileToZipIfNeeded(String path, Set<String> filesToZip) {
@@ -2183,6 +2218,7 @@ class DataService {
     final orderedMaps = mapById.values.toList(growable: false)
       ..sort((a, b) => a.name.compareTo(b.name));
     for (final map in orderedMaps) {
+      if (_isBuiltinAssetMap(map)) continue;
       final payload = await _buildPackageMapData(map, filesToZip: filesToZip);
       if (payload == null) continue;
       mapsData.add(payload.toJson());
@@ -2534,6 +2570,7 @@ class DataService {
     if (scopedMaps.isEmpty) return const {};
     final result = <String, LanSyncManifestItem>{};
     for (final map in scopedMaps.values) {
+      if (_isBuiltinAssetMap(map)) continue;
       final filesToZip = <String>{};
       final packageMap = await _buildPackageMapData(
         map,
@@ -3506,6 +3543,7 @@ class DataService {
     for (final shared in maps) {
       final local =
           await isar.gameMaps.filter().nameEqualTo(shared.mapName).findFirst();
+      if (local != null && _isBuiltinAssetMap(local)) continue;
       if (local == null ||
           !await _isSharedMapEquivalentToLocal(
             shared,
@@ -4254,6 +4292,9 @@ class DataService {
         (preview.grenadeTombstones.isNotEmpty ||
             preview.entityTombstones.isNotEmpty);
     if (!hasGrenadeSelection && !hasMetadataChanges && !hasTombstones) {
+      if (mode == ImportPackageMode.lanSync) {
+        return "同步成功：数据已是最新";
+      }
       return "未选择任何道具";
     }
 
@@ -5493,7 +5534,7 @@ class DataService {
     required String dataPath,
     required Map<String, String> importedMediaPathCache,
   }) async {
-    final normalized = rawPath.trim();
+    final normalized = _normalizeLegacyBuiltinBgPath(rawPath);
     if (normalized.isEmpty) return '';
     if (_isAssetPath(normalized)) return normalized;
     if (await _isLocalFileEquivalentToPackagePath(
@@ -5528,6 +5569,10 @@ class DataService {
       if (mapName.isEmpty) continue;
       final existing = localByName[mapName] ??
           await isar.gameMaps.filter().nameEqualTo(mapName).findFirst();
+      if (existing != null && _isBuiltinAssetMap(existing)) {
+        localByName[mapName] = existing;
+        continue;
+      }
 
       final nextBackgroundPath = await _resolveImportedMapPath(
         preview: preview,
