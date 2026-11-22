@@ -869,17 +869,28 @@ Future<void> _initMapData(Isar isar) async {
 
 Future<int> _ensureBuiltinMaps(Isar isar) async {
   final existingMaps = await isar.gameMaps.where().findAll();
-  final existingBuiltinKeys =
-      existingMaps.map(_resolveBuiltinMapKey).whereType<String>().toSet();
+  final existingByKey = <String, GameMap>{};
+  for (final map in existingMaps) {
+    final key = _resolveBuiltinMapKey(map);
+    if (key != null) existingByKey[key] = map;
+  }
   var addedCount = 0;
 
   await isar.writeTxn(() async {
     for (final config in _builtinMapsConfig) {
-      if (existingBuiltinKeys.contains(config.key)) continue;
+      final targetBgPath = 'assets/backgrounds/${config.key}_bg.webp';
+      final existing = existingByKey[config.key];
+      if (existing != null) {
+        if (existing.backgroundPath != targetBgPath) {
+          existing.backgroundPath = targetBgPath;
+          await isar.gameMaps.put(existing);
+        }
+        continue;
+      }
 
       final map = GameMap(
         name: config.name,
-        backgroundPath: 'assets/backgrounds/${config.key}_bg.png',
+        backgroundPath: targetBgPath,
         iconPath: 'assets/icons/${config.key}_icon.svg',
       );
       await isar.gameMaps.put(map);
@@ -895,7 +906,7 @@ Future<int> _ensureBuiltinMaps(Isar isar) async {
       }
       await map.layers.save();
 
-      existingBuiltinKeys.add(config.key);
+      existingByKey[config.key] = map;
       addedCount++;
     }
   });
@@ -912,7 +923,10 @@ String? _resolveBuiltinMapKey(GameMap map) {
     if (normalizedIconPath == 'assets/icons/${config.key}_icon.svg') {
       return config.key;
     }
-    if (normalizedBackgroundPath == 'assets/backgrounds/${config.key}_bg.png') {
+    if (normalizedBackgroundPath ==
+            'assets/backgrounds/${config.key}_bg.webp' ||
+        normalizedBackgroundPath ==
+            'assets/backgrounds/${config.key}_bg.png') {
       return config.key;
     }
   }
