@@ -2569,8 +2569,9 @@ class DataService {
     }
     return {
       'mapName': mapData.mapName,
-      'backgroundDigest':
-          await _buildMapMediaDigestToken(mapData.backgroundPath),
+      'backgroundDigest': _isAssetPath(mapData.backgroundPath)
+          ? ''
+          : await _buildMapMediaDigestToken(mapData.backgroundPath),
       'iconDigest': await _buildMapMediaDigestToken(mapData.iconPath),
       'layers': layerDigests,
     };
@@ -3157,11 +3158,14 @@ class DataService {
     GameMap local, {
     required Map<String, String> packageFileHashes,
   }) async {
-    if (!await _isLocalFileEquivalentToPackagePath(
-      localPath: local.backgroundPath,
-      sharedRawPath: shared.backgroundPath,
-      packageFileHashes: packageFileHashes,
-    )) {
+    final bothBuiltinBackground = _isAssetPath(local.backgroundPath) &&
+        _isAssetPath(shared.backgroundPath);
+    if (!bothBuiltinBackground &&
+        !await _isLocalFileEquivalentToPackagePath(
+          localPath: local.backgroundPath,
+          sharedRawPath: shared.backgroundPath,
+          packageFileHashes: packageFileHashes,
+        )) {
       return false;
     }
     if (!await _isLocalFileEquivalentToPackagePath(
@@ -5593,7 +5597,10 @@ class DataService {
 
       localByName[mapName] = existing;
       var mapChanged = false;
-      if (nextBackgroundPath != null &&
+      final keepBuiltinBackground = _isAssetPath(existing.backgroundPath) &&
+          _isAssetPath(shared.backgroundPath);
+      if (!keepBuiltinBackground &&
+          nextBackgroundPath != null &&
           existing.backgroundPath != nextBackgroundPath) {
         existing.backgroundPath = nextBackgroundPath;
         mapChanged = true;
