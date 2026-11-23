@@ -60,12 +60,16 @@ class GrenadeTypeIcon extends StatelessWidget {
       return Icon(legacyIconForType(type),
           size: size, color: resolvedColor, semanticLabel: _label);
     }
-    return SvgPicture.asset(
-      assetForType(type),
-      width: size,
-      height: size,
-      colorFilter: ColorFilter.mode(resolvedColor, BlendMode.srcIn),
-      semanticsLabel: _label,
+    return Center(
+      widthFactor: 1,
+      heightFactor: 1,
+      child: SvgPicture.asset(
+        assetForType(type),
+        width: size,
+        height: size,
+        colorFilter: ColorFilter.mode(resolvedColor, BlendMode.srcIn),
+        semanticsLabel: _label,
+      ),
     );
   }
 

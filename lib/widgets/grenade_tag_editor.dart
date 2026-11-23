@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:isar_community/isar.dart';
+import '../models.dart';
+import '../models/grenade_tag.dart';
 import '../models/tag.dart';
 import '../services/tag_service.dart';
 import '../widgets/color_picker_widget.dart';
@@ -20,12 +23,54 @@ int _tagDimensionRank(int dimension) {
   return index >= 0 ? index : _tagDimensionDisplayOrder.length + dimension;
 }
 
-List<Tag> _sortTagsForDisplay(List<Tag> tags) {
+int? roleTagToTeamType(Tag tag) {
+  if (tag.dimension != TagDimension.role) return null;
+  switch (tag.name.trim().toUpperCase()) {
+    case '通用':
+      return TeamType.all;
+    case 'CT方':
+    case 'CT':
+      return TeamType.ct;
+    case 'T方':
+    case 'T':
+      return TeamType.t;
+    default:
+      return null;
+  }
+}
+
+int _normalizeRoleTeam(int? team) {
+  return (team == TeamType.ct || team == TeamType.t) ? team! : TeamType.all;
+}
+
+int _roleTagDisplayPriority(Tag tag) {
+  return switch (roleTagToTeamType(tag)) {
+    TeamType.all => 0,
+    TeamType.ct => 1,
+    TeamType.t => 2,
+    _ => 3,
+  };
+}
+
+Tag? _findRoleTagByTeam(List<Tag> roleTags, int team) {
+  final normalizedTeam = _normalizeRoleTeam(team);
+  for (final tag in roleTags) {
+    if (roleTagToTeamType(tag) == normalizedTeam) return tag;
+  }
+  return null;
+}
+
+List<Tag> sortTagsForDisplay(List<Tag> tags) {
   final sorted = List<Tag>.from(tags);
   sorted.sort((a, b) {
     final rankCompare = _tagDimensionRank(a.dimension)
         .compareTo(_tagDimensionRank(b.dimension));
     if (rankCompare != 0) return rankCompare;
+    if (a.dimension == TagDimension.role) {
+      final roleCompare =
+          _roleTagDisplayPriority(a).compareTo(_roleTagDisplayPriority(b));
+      if (roleCompare != 0) return roleCompare;
+    }
 
     final orderCompare = a.sortOrder.compareTo(b.sortOrder);
     if (orderCompare != 0) return orderCompare;
@@ -71,22 +116,122 @@ class _GrenadeTagEditorState extends State<GrenadeTagEditor> {
     final allTags = await widget.tagService.getAllTags(widget.mapId);
     final selectedIds =
         await widget.tagService.getGrenadeTagIds(widget.grenadeId);
+    final grenade = await widget.tagService.isar.grenades.get(widget.grenadeId);
+    final resolvedSelection = _resolveDisplayedSelection(
+      allTags: allTags,
+      selectedIds: selectedIds,
+      grenadeTeam: grenade?.team,
+    );
+    if (!mounted) return;
     setState(() {
       _allTags = allTags;
-      _selectedTagIds = selectedIds;
+      _selectedTagIds = resolvedSelection;
       _isLoading = false;
     });
   }
 
-  Future<void> _toggleTag(int tagId) async {
-    final newSelection = Set<int>.from(_selectedTagIds);
-    if (newSelection.contains(tagId)) {
-      newSelection.remove(tagId);
-      await widget.tagService.removeTagFromGrenade(widget.grenadeId, tagId);
-    } else {
-      newSelection.add(tagId);
-      await widget.tagService.addTagToGrenade(widget.grenadeId, tagId);
+  Set<int> _resolveDisplayedSelection({
+    required List<Tag> allTags,
+    required Set<int> selectedIds,
+    required int? grenadeTeam,
+  }) {
+    final roleTags =
+        allTags.where((t) => t.dimension == TagDimension.role).toList();
+    if (roleTags.isEmpty) return Set<int>.from(selectedIds);
+    final roleById = {for (final tag in roleTags) tag.id: tag};
+    final selectedRoleIds = selectedIds.where(roleById.containsKey).toSet();
+    final expectedTeam = _normalizeRoleTeam(grenadeTeam);
+    final singleRole =
+        selectedRoleIds.length == 1 ? roleById[selectedRoleIds.first] : null;
+    if (singleRole != null && roleTagToTeamType(singleRole) == expectedTeam) {
+      return Set<int>.from(selectedIds);
     }
+    final adjusted = Set<int>.from(selectedIds)..removeAll(roleById.keys);
+    final targetRoleTag = _findRoleTagByTeam(roleTags, expectedTeam);
+    if (targetRoleTag != null) {
+      adjusted.add(targetRoleTag.id);
+    }
+    return adjusted;
+  }
+
+  Future<void> _toggleTag(Tag tag) async {
+    final clickedTeam = roleTagToTeamType(tag);
+    if (clickedTeam != null) {
+      await _toggleRoleTag(tag, clickedTeam);
+      return;
+    }
+    final newSelection = Set<int>.from(_selectedTagIds);
+    if (newSelection.contains(tag.id)) {
+      newSelection.remove(tag.id);
+      await widget.tagService.removeTagFromGrenade(widget.grenadeId, tag.id);
+    } else {
+      newSelection.add(tag.id);
+      await widget.tagService.addTagToGrenade(widget.grenadeId, tag.id);
+    }
+    if (!mounted) return;
+    setState(() => _selectedTagIds = newSelection);
+    widget.onTagsChanged?.call();
+  }
+
+  Future<void> _toggleRoleTag(Tag tag, int clickedTeam) async {
+    final roleTags =
+        _allTags.where((t) => t.dimension == TagDimension.role).toList();
+    final isCurrentlySelected = _selectedTagIds.contains(tag.id);
+    if (isCurrentlySelected && clickedTeam == TeamType.all) return;
+
+    final int targetTeam;
+    final Tag? targetTag;
+    if (!isCurrentlySelected) {
+      targetTeam = clickedTeam;
+      targetTag = tag;
+    } else {
+      targetTeam = TeamType.all;
+      targetTag = _findRoleTagByTeam(roleTags, TeamType.all);
+    }
+
+    final roleTagIds = roleTags.map((t) => t.id).toSet();
+    final isar = widget.tagService.isar;
+    final now = DateTime.now();
+
+    await isar.writeTxn(() async {
+      final existingLinks = await isar.grenadeTags
+          .filter()
+          .grenadeIdEqualTo(widget.grenadeId)
+          .findAll();
+      var hasTargetLink = false;
+      final deleteIds = <int>[];
+      for (final link in existingLinks) {
+        if (!roleTagIds.contains(link.tagId)) continue;
+        if (targetTag != null &&
+            link.tagId == targetTag.id &&
+            !hasTargetLink) {
+          hasTargetLink = true;
+        } else {
+          deleteIds.add(link.id);
+        }
+      }
+      if (deleteIds.isNotEmpty) {
+        await isar.grenadeTags.deleteAll(deleteIds);
+      }
+      if (targetTag != null && !hasTargetLink) {
+        await isar.grenadeTags.put(
+          GrenadeTag(grenadeId: widget.grenadeId, tagId: targetTag.id),
+        );
+      }
+      final grenade = await isar.grenades.get(widget.grenadeId);
+      if (grenade != null) {
+        grenade.team = targetTeam;
+        grenade.updatedAt = now;
+        grenade.hasLocalEdits = true;
+        await isar.grenades.put(grenade);
+      }
+    });
+
+    final newSelection = Set<int>.from(_selectedTagIds)..removeAll(roleTagIds);
+    if (targetTag != null) {
+      newSelection.add(targetTag.id);
+    }
+    if (!mounted) return;
     setState(() => _selectedTagIds = newSelection);
     widget.onTagsChanged?.call();
   }
@@ -112,7 +257,7 @@ class _GrenadeTagEditorState extends State<GrenadeTagEditor> {
           height: 60,
           child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
     }
-    final sortedTags = _sortTagsForDisplay(_allTags);
+    final sortedTags = sortTagsForDisplay(_allTags);
     final visibleTags = _showAllTags
         ? sortedTags
         : sortedTags.take(_collapsedTagCount).toList();
@@ -177,7 +322,7 @@ class _GrenadeTagEditorState extends State<GrenadeTagEditor> {
     final isSelected = _selectedTagIds.contains(tag.id);
     final color = Color(tag.colorValue);
     return GestureDetector(
-      onTap: () => _toggleTag(tag.id),
+      onTap: () => _toggleTag(tag),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -293,7 +438,7 @@ class _GrenadeTagDisplayState extends State<GrenadeTagDisplay> {
   @override
   Widget build(BuildContext context) {
     if (widget.tags.isEmpty) return const SizedBox.shrink();
-    final sortedTags = _sortTagsForDisplay(widget.tags);
+    final sortedTags = sortTagsForDisplay(widget.tags);
     final visibleTags = _showAllTags
         ? sortedTags
         : sortedTags.take(_collapsedTagCount).toList();

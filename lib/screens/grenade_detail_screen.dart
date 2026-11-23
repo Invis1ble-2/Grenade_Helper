@@ -654,9 +654,10 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     );
   }
 
-  /// 选择爆点
+  /// 选择爆点/穿线方位
   Future<void> _pickImpactPoint() async {
     if (grenade == null) return;
+    final isWallbang = grenade!.type == GrenadeType.wallbang;
 
     // 获取楼层
     await grenade!.layer.load();
@@ -679,6 +680,8 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
           throwX: grenade!.xRatio,
           throwY: grenade!.yRatio,
           layerId: layer.id,
+          grenadeType: grenade!.type,
+          wallbangLineMode: isWallbang,
         ),
       ),
     );
@@ -686,22 +689,24 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     if (result != null) {
       await _updateImpactPoint(result.dx, result.dy);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✓ 爆点已设置'),
+        SnackBar(
+          content: Text(isWallbang ? '✓ 穿线方位已设置' : '✓ 爆点已设置'),
           backgroundColor: Colors.green,
-          duration: Duration(seconds: 1),
+          duration: const Duration(seconds: 1),
         ),
       );
     }
   }
 
-  /// 清除爆点
+  /// 清除爆点/穿线
   Future<void> _clearImpactPoint() async {
+    if (grenade == null) return;
+    final isWallbang = grenade!.type == GrenadeType.wallbang;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('清除爆点'),
-        content: const Text('确定要清除已设置的爆点吗？'),
+        title: Text(isWallbang ? '清除穿线' : '清除爆点'),
+        content: Text(isWallbang ? '确定要清除已设置的穿线吗？' : '确定要清除已设置的爆点吗？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -716,12 +721,11 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     );
 
     if (confirm == true) {
-      // 清数据
       final isar = ref.read(isarProvider);
 
       grenade!.impactXRatio = null;
       grenade!.impactYRatio = null;
-      grenade!.impactAreaStrokes = null; // 清范围
+      grenade!.impactAreaStrokes = null;
       grenade!.updatedAt = DateTime.now();
 
       await isar.writeTxn(() async {
@@ -733,9 +737,9 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
       sendOverlayCommand('reload_data');
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('爆点已清除'),
-          duration: Duration(seconds: 1),
+        SnackBar(
+          content: Text(isWallbang ? '穿线已清除' : '爆点已清除'),
+          duration: const Duration(seconds: 1),
         ),
       );
     }
@@ -1983,16 +1987,6 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                     ],
                     onChanged: (value) => _updateGrenade(type: value),
                   ),
-                  DropdownButton<int>(
-                    value: grenade!.team,
-                    underline: const SizedBox.shrink(),
-                    items: const [
-                      DropdownMenuItem(value: TeamType.all, child: Text('通用')),
-                      DropdownMenuItem(value: TeamType.ct, child: Text('CT')),
-                      DropdownMenuItem(value: TeamType.t, child: Text('T')),
-                    ],
-                    onChanged: (value) => _updateGrenade(team: value),
-                  ),
                   Text('${_sortedSteps().length} 个步骤',
                       style: TextStyle(color: context.appTheme.mutedText)),
                 ],
@@ -2117,15 +2111,45 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     );
   }
 
-  /// 构建爆点设置区域
+  /// 构建爆点/穿线设置区域
   Widget _buildImpactPointSection(bool isEditing) {
+    final isWallbang = grenade!.type == GrenadeType.wallbang;
     final hasImpactPoint =
         grenade!.impactXRatio != null && grenade!.impactYRatio != null;
-    final throwMode = isEditing && widget.pickThrowPoint && hasImpactPoint;
+    final throwMode =
+        !isWallbang && isEditing && widget.pickThrowPoint && hasImpactPoint;
     // 投掷点与爆点重合视为未设置
     final hasThrowPoint = grenade!.xRatio != grenade!.impactXRatio ||
         grenade!.yRatio != grenade!.impactYRatio;
     final pointSet = throwMode ? hasThrowPoint : hasImpactPoint;
+    final accentColor =
+        isWallbang ? Colors.cyan : Theme.of(context).colorScheme.primary;
+    final cardIcon =
+        isWallbang ? Icons.north_east_rounded : Icons.gps_fixed_rounded;
+    final sectionTitle =
+        isWallbang ? '穿线方位' : (throwMode ? '投掷点位置' : '爆点位置');
+    final sectionSubtitle = isWallbang
+        ? (hasImpactPoint
+            ? '方位终点 (${grenade!.impactXRatio!.toStringAsFixed(3)}, ${grenade!.impactYRatio!.toStringAsFixed(3)})'
+            : '尚未设置穿线')
+        : (throwMode
+            ? (hasThrowPoint
+                ? '坐标 (${grenade!.xRatio.toStringAsFixed(3)}, ${grenade!.yRatio.toStringAsFixed(3)})'
+                : '尚未设置投掷点')
+            : (hasImpactPoint
+                ? '坐标 (${grenade!.impactXRatio!.toStringAsFixed(3)}, ${grenade!.impactYRatio!.toStringAsFixed(3)})'
+                : '尚未设置爆点'));
+    final editActionLabel = isWallbang
+        ? (hasImpactPoint ? '修改穿线' : '设置穿线')
+        : (throwMode
+            ? (hasThrowPoint ? '修改投掷点' : '设置投掷点')
+            : (hasImpactPoint ? '修改爆点' : '设置爆点'));
+    final editButtonColor = isWallbang ? Colors.cyan : Colors.purpleAccent;
+    final canClear = !throwMode &&
+        (hasImpactPoint ||
+            (!isWallbang &&
+                grenade!.impactAreaStrokes != null &&
+                grenade!.impactAreaStrokes!.isNotEmpty));
 
     Future<void> openImpactPoint() async {
       await grenade!.layer.load();
@@ -2150,8 +2174,9 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
             throwY: grenade!.yRatio,
             layerId: layer.id,
             readOnly: true,
-            existingStrokes: grenade!.impactAreaStrokes,
+            existingStrokes: isWallbang ? null : grenade!.impactAreaStrokes,
             grenadeType: grenade!.type,
+            wallbangLineMode: isWallbang,
           ),
         ),
       );
@@ -2161,7 +2186,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.06),
+        color: accentColor.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: context.appTheme.subtleBorder),
       ),
@@ -2174,31 +2199,21 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .primary
-                      .withValues(alpha: 0.12),
+                  color: accentColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(7),
                 ),
-                child: Icon(Icons.gps_fixed_rounded,
-                    size: 19, color: Theme.of(context).colorScheme.primary),
+                child: Icon(cardIcon, size: 19, color: accentColor),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(throwMode ? '投掷点位置' : '爆点位置',
+                    Text(sectionTitle,
                         style: const TextStyle(fontWeight: FontWeight.w700)),
                     const SizedBox(height: 2),
                     Text(
-                      throwMode
-                          ? (hasThrowPoint
-                              ? '坐标 (${grenade!.xRatio.toStringAsFixed(3)}, ${grenade!.yRatio.toStringAsFixed(3)})'
-                              : '尚未设置投掷点')
-                          : hasImpactPoint
-                              ? '坐标 (${grenade!.impactXRatio!.toStringAsFixed(3)}, ${grenade!.impactYRatio!.toStringAsFixed(3)})'
-                              : '尚未设置爆点',
+                      sectionSubtitle,
                       style: Theme.of(context)
                           .textTheme
                           .bodySmall
@@ -2240,14 +2255,14 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                   child: ElevatedButton.icon(
                     onPressed: throwMode ? _pickThrowPoint : _pickImpactPoint,
                     icon: Icon(
-                      pointSet ? Icons.edit_location : Icons.add_location,
+                      isWallbang
+                          ? Icons.north_east_rounded
+                          : (pointSet ? Icons.edit_location : Icons.add_location),
                       size: 18,
                     ),
-                    label: Text(throwMode
-                        ? (hasThrowPoint ? '修改投掷点' : '设置投掷点')
-                        : (hasImpactPoint ? '修改爆点' : '设置爆点')),
+                    label: Text(editActionLabel),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.purpleAccent,
+                      backgroundColor: editButtonColor,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 10),
                       shape: RoundedRectangleBorder(
@@ -2256,10 +2271,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                     ),
                   ),
                 ),
-                if (!throwMode &&
-                    (hasImpactPoint ||
-                        (grenade!.impactAreaStrokes != null &&
-                            grenade!.impactAreaStrokes!.isNotEmpty))) ...[
+                if (canClear) ...[
                   const SizedBox(width: 8),
                   OutlinedButton.icon(
                     onPressed: _clearImpactPoint,
@@ -2415,57 +2427,28 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
 
   Widget _buildStepList(bool isEditing) {
     final steps = _sortedSteps();
-
     final hasImpactPoint =
         grenade!.impactXRatio != null && grenade!.impactYRatio != null;
-    // 编辑模式：非穿点类型显示；非编辑模式：有爆点时显示
-    final showImpactCard =
-        (isEditing && grenade!.type != GrenadeType.wallbang) ||
-            (isEditing && widget.pickThrowPoint) ||
-            (!isEditing && hasImpactPoint);
+    final showImpactCard = isEditing || hasImpactPoint;
 
     if (steps.isEmpty && !showImpactCard) {
       return const Center(
           child: Text("暂无教学步骤", style: TextStyle(color: Colors.grey)));
     }
 
-    if (isEditing) {
-      // 编辑模式：使用 ListView（爬点卡片不参与重排序）
-      return ListView(
-        controller: _stepScrollController,
-        padding: const EdgeInsets.all(16),
-        children: [
-          // 爆点卡片（编辑模式且非穿点类型时显示）
-          if (showImpactCard) _buildImpactPointSection(isEditing),
-          // 标签编辑器
-          _buildTagSection(isEditing),
-          // 步骤卡片
-          ...steps.map((step) => KeyedSubtree(
-                key: _stepKeys.putIfAbsent(step.id, GlobalKey.new),
-                child: _buildStepCard(step, isEditing),
-              )),
-          _buildFooterInfo(),
-        ],
-      );
-    } else {
-      // 非编辑模式：使用 ListView（包含爆点卡片）
-      return ListView(
-        controller: _stepScrollController,
-        padding: const EdgeInsets.all(16),
-        children: [
-          // 爆点卡片（有爆点时显示）
-          if (showImpactCard) _buildImpactPointSection(isEditing),
-          // 标签（只读展示）
-          _buildTagSection(isEditing),
-          // 步骤卡片
-          ...steps.map((step) => KeyedSubtree(
-                key: _stepKeys.putIfAbsent(step.id, GlobalKey.new),
-                child: _buildStepCard(step, isEditing),
-              )),
-          _buildFooterInfo(),
-        ],
-      );
-    }
+    return ListView(
+      controller: _stepScrollController,
+      padding: const EdgeInsets.all(16),
+      children: [
+        if (showImpactCard) _buildImpactPointSection(isEditing),
+        _buildTagSection(isEditing),
+        ...steps.map((step) => KeyedSubtree(
+              key: _stepKeys.putIfAbsent(step.id, GlobalKey.new),
+              child: _buildStepCard(step, isEditing),
+            )),
+        _buildFooterInfo(),
+      ],
+    );
   }
 
   // 构建单个媒体项（图片或视频）

@@ -8,6 +8,9 @@
 # The following line activates a set of recommended lints for Flutter apps,
 # packages, and plugins designed to encourage good coding practices.
 analyzer:
+  errors:
+    # 第三方 UI 插件尚未迁至 material_ui，暂忽略过渡期弃用提示
+    deprecated_member_use: ignore
   exclude:
     - build/**
     - android/**

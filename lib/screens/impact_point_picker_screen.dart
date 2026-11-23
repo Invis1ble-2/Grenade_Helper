@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,6 +23,7 @@ class ImpactPointPickerScreen extends ConsumerStatefulWidget {
   final bool readOnly;
   // 投掷点模式：爆点固定(initialX/Y)，点击地图设置投掷点(throwX/Y为初始值)
   final bool pickThrowPoint;
+  final bool wallbangLineMode;
 
   const ImpactPointPickerScreen({
     super.key,
@@ -35,6 +37,7 @@ class ImpactPointPickerScreen extends ConsumerStatefulWidget {
     this.grenadeType = GrenadeType.smoke,
     this.readOnly = false,
     this.pickThrowPoint = false,
+    this.wallbangLineMode = false,
   });
 
   @override
@@ -53,8 +56,9 @@ class _ImpactPointPickerScreenState
   MapLayer? _layer;
   List<Map<String, dynamic>> _drawingStrokes = [];
 
-  bool get _throwMode => widget.pickThrowPoint;
-  String get _targetName => _throwMode ? '投掷点' : '爆点';
+  bool get _throwMode => !widget.wallbangLineMode && widget.pickThrowPoint;
+  String get _targetName =>
+      widget.wallbangLineMode ? '穿线方位' : (_throwMode ? '投掷点' : '爆点');
 
   @override
   void initState() {
@@ -159,7 +163,11 @@ class _ImpactPointPickerScreenState
       Navigator.pop(context, Offset(_selectedX!, _selectedY!));
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('请先点击地图选择$_targetName位置')),
+        SnackBar(
+          content: Text(widget.wallbangLineMode
+              ? '请先点击地图设置穿线方位'
+              : '请先点击地图选择$_targetName位置'),
+        ),
       );
     }
   }
@@ -223,7 +231,9 @@ class _ImpactPointPickerScreenState
           icon: const Icon(Icons.close),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text(widget.readOnly ? '查看爆点位置' : '选择$_targetName位置'),
+        title: Text(widget.wallbangLineMode
+            ? (widget.readOnly ? '查看穿线方位' : '设置穿线方位')
+            : (widget.readOnly ? '查看爆点位置' : '选择$_targetName位置')),
         centerTitle: true,
         actions: [
           if (!widget.readOnly)
@@ -323,9 +333,11 @@ class _ImpactPointPickerScreenState
         _buildThrowPointMarker(imageBounds, markerScale, throwPoint),
       if (throwPoint != null && impactPoint != null)
         _buildConnectionLine(imageBounds, throwPoint, impactPoint),
-      if (impactPoint != null)
+      if (!widget.wallbangLineMode && impactPoint != null)
         _buildImpactMarker(imageBounds, markerScale, impactPoint),
-      if (widget.readOnly && _drawingStrokes.isNotEmpty)
+      if (!widget.wallbangLineMode &&
+          widget.readOnly &&
+          _drawingStrokes.isNotEmpty)
         Positioned.fill(
           child: IgnorePointer(
             child: CustomPaint(
@@ -360,32 +372,51 @@ class _ImpactPointPickerScreenState
               Container(
                 width: 12,
                 height: 12,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: markerColor, width: 2),
-                ),
+                decoration: widget.wallbangLineMode
+                    ? BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: markerColor.withValues(alpha: 0.5),
+                          width: 1.5,
+                        ),
+                      )
+                    : BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: markerColor, width: 2),
+                      ),
               ),
               const SizedBox(width: 8),
               Text(
-                '投掷点',
+                widget.wallbangLineMode ? '穿点' : '投掷点',
                 style: TextStyle(color: textColor, fontSize: 12),
               ),
               const SizedBox(width: 24),
-              Container(
-                width: 12,
-                height: 12,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.purpleAccent, width: 2),
+              if (widget.wallbangLineMode) ...[
+                const Icon(Icons.north_east_rounded,
+                    size: 16, color: Colors.cyan),
+                const SizedBox(width: 6),
+                Text(
+                  '穿线方向',
+                  style: TextStyle(color: textColor, fontSize: 12),
                 ),
-                child: const Icon(Icons.close,
-                    size: 8, color: Colors.purpleAccent),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                '爆点',
-                style: TextStyle(color: textColor, fontSize: 12),
-              ),
+              ] else ...[
+                Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.purpleAccent, width: 2),
+                  ),
+                  child: const Icon(Icons.close,
+                      size: 8, color: Colors.purpleAccent),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '爆点',
+                  style: TextStyle(color: textColor, fontSize: 12),
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 8),
@@ -518,6 +549,7 @@ class _ImpactPointPickerScreenState
     final startY = imageBounds.offsetY + from.dy * imageBounds.height;
     final endX = imageBounds.offsetX + to.dx * imageBounds.width;
     final endY = imageBounds.offsetY + to.dy * imageBounds.height;
+    final isWallbang = widget.wallbangLineMode;
 
     return Positioned.fill(
       child: IgnorePointer(
@@ -525,10 +557,14 @@ class _ImpactPointPickerScreenState
           painter: _DashedLinePainter(
             start: Offset(startX, startY),
             end: Offset(endX, endY),
-            color: Colors.purpleAccent.withValues(alpha: 0.7),
+            color: isWallbang
+                ? Colors.cyanAccent.withValues(alpha: 0.9)
+                : Colors.purpleAccent.withValues(alpha: 0.7),
             strokeWidth: 2,
-            dashLength: 5,
-            gapLength: 5,
+            dashLength: isWallbang ? 7 : 5,
+            gapLength: isWallbang ? 4 : 5,
+            showArrow: isWallbang,
+            arrowLength: 9.0,
           ),
         ),
       ),
@@ -661,6 +697,8 @@ class _DashedLinePainter extends CustomPainter {
   final double strokeWidth;
   final double dashLength;
   final double gapLength;
+  final bool showArrow;
+  final double arrowLength;
 
   _DashedLinePainter({
     required this.start,
@@ -669,19 +707,21 @@ class _DashedLinePainter extends CustomPainter {
     this.strokeWidth = 1.5,
     this.dashLength = 4,
     this.gapLength = 4,
+    this.showArrow = false,
+    this.arrowLength = 8.0,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
+    final totalLength = (end - start).distance;
+    if (totalLength < 1e-3) return;
+
     final paint = Paint()
       ..color = color
       ..strokeWidth = strokeWidth
       ..style = PaintingStyle.stroke;
 
     final path = Path();
-    final totalLength = (end - start).distance;
-    if (totalLength == 0) return;
-
     final direction = (end - start) / totalLength;
 
     double currentLength = 0;
@@ -706,12 +746,42 @@ class _DashedLinePainter extends CustomPainter {
     }
 
     canvas.drawPath(path, paint);
+
+    if (showArrow && totalLength > 2.0) {
+      final wingLength = math.min(arrowLength, totalLength * 0.45);
+      const spreadAngle = 28 * math.pi / 180;
+      final backAngle = math.atan2(-direction.dy, -direction.dx);
+      final leftWing = Offset(
+        end.dx + wingLength * math.cos(backAngle - spreadAngle),
+        end.dy + wingLength * math.sin(backAngle - spreadAngle),
+      );
+      final rightWing = Offset(
+        end.dx + wingLength * math.cos(backAngle + spreadAngle),
+        end.dy + wingLength * math.sin(backAngle + spreadAngle),
+      );
+      final arrowPaint = Paint()
+        ..color = color
+        ..strokeWidth = strokeWidth
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..style = PaintingStyle.stroke;
+      final arrowPath = Path()
+        ..moveTo(leftWing.dx, leftWing.dy)
+        ..lineTo(end.dx, end.dy)
+        ..lineTo(rightWing.dx, rightWing.dy);
+      canvas.drawPath(arrowPath, arrowPaint);
+    }
   }
 
   @override
   bool shouldRepaint(covariant _DashedLinePainter oldDelegate) {
     return start != oldDelegate.start ||
         end != oldDelegate.end ||
-        color != oldDelegate.color;
+        color != oldDelegate.color ||
+        strokeWidth != oldDelegate.strokeWidth ||
+        dashLength != oldDelegate.dashLength ||
+        gapLength != oldDelegate.gapLength ||
+        showArrow != oldDelegate.showArrow ||
+        arrowLength != oldDelegate.arrowLength;
   }
 }
