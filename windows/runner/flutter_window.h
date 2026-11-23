@@ -9,6 +9,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 
 #include "win32_window.h"
@@ -47,7 +48,8 @@ class FlutterWindow : public Win32Window {
   void StopHotkeyTimer();
   void PollHotkeys();
   void EmitHotkeyEvent(const std::string& action, bool pressed);
-  bool IsBindingPressed(const HotkeyBinding& binding) const;
+  bool IsBindingPressed(const HotkeyBinding& binding, bool alt_down,
+                        bool ctrl_down, bool shift_down, bool meta_down) const;
 
   flutter::DartProject project_;
   bool is_overlay_ = false;
@@ -58,6 +60,7 @@ class FlutterWindow : public Win32Window {
       overlay_window_channel_;
   std::map<std::string, HotkeyBinding> hotkey_bindings_;
   std::map<std::string, bool> last_pressed_state_;
+  std::set<int> consumed_primary_keys_;
   bool overlay_hotkeys_enabled_ = false;
   bool hotkey_timer_active_ = false;
 };

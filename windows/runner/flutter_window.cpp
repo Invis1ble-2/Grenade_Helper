@@ -240,6 +240,7 @@ void FlutterWindow::ClearHotkeyBindings() {
   StopHotkeyTimer();
   hotkey_bindings_.clear();
   last_pressed_state_.clear();
+  consumed_primary_keys_.clear();
 }
 
 void FlutterWindow::UpdateHotkeyTimer() {
@@ -267,17 +268,39 @@ void FlutterWindow::StopHotkeyTimer() {
 void FlutterWindow::PollHotkeys() {
   if (!navigation_channel_ || hotkey_bindings_.empty()) return;
 
+  for (auto it = consumed_primary_keys_.begin();
+       it != consumed_primary_keys_.end();) {
+    if (!IsVirtualKeyPressed(*it)) {
+      it = consumed_primary_keys_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  const bool alt_down = IsVirtualKeyPressed(VK_MENU);
+  const bool ctrl_down = IsVirtualKeyPressed(VK_CONTROL);
+  const bool shift_down = IsVirtualKeyPressed(VK_SHIFT);
+  const bool meta_down =
+      IsVirtualKeyPressed(VK_LWIN) || IsVirtualKeyPressed(VK_RWIN);
+
   for (const auto& [action, binding] : hotkey_bindings_) {
     if (!binding.core && !overlay_hotkeys_enabled_) {
       continue;
     }
 
-    const bool is_pressed = IsBindingPressed(binding);
+    const bool is_pressed =
+        IsBindingPressed(binding, alt_down, ctrl_down, shift_down, meta_down);
     bool& was_pressed = last_pressed_state_[action];
 
-    if (is_pressed && (!was_pressed || binding.repeat)) {
-      EmitHotkeyEvent(action, true);
-    } else if (!is_pressed && was_pressed) {
+    if (is_pressed) {
+      if (binding.repeat) {
+        EmitHotkeyEvent(action, true);
+      } else if (!was_pressed &&
+                 consumed_primary_keys_.count(*binding.virtual_key) == 0) {
+        consumed_primary_keys_.insert(*binding.virtual_key);
+        EmitHotkeyEvent(action, true);
+      }
+    } else if (was_pressed) {
       EmitHotkeyEvent(action, false);
     }
     was_pressed = is_pressed;
@@ -293,7 +316,9 @@ void FlutterWindow::EmitHotkeyEvent(const std::string& action, bool pressed) {
       "onHotkeyEvent", std::make_unique<flutter::EncodableValue>(payload));
 }
 
-bool FlutterWindow::IsBindingPressed(const HotkeyBinding& binding) const {
+bool FlutterWindow::IsBindingPressed(const HotkeyBinding& binding,
+                                     bool alt_down, bool ctrl_down,
+                                     bool shift_down, bool meta_down) const {
   if (!binding.virtual_key.has_value()) {
     return false;
   }
@@ -302,19 +327,8 @@ bool FlutterWindow::IsBindingPressed(const HotkeyBinding& binding) const {
     return false;
   }
 
-  if (binding.requires_alt && !IsVirtualKeyPressed(VK_MENU)) {
-    return false;
-  }
-  if (binding.requires_ctrl && !IsVirtualKeyPressed(VK_CONTROL)) {
-    return false;
-  }
-  if (binding.requires_shift && !IsVirtualKeyPressed(VK_SHIFT)) {
-    return false;
-  }
-  if (binding.requires_meta && !IsVirtualKeyPressed(VK_LWIN) &&
-      !IsVirtualKeyPressed(VK_RWIN)) {
-    return false;
-  }
-
-  return true;
+  return alt_down == binding.requires_alt &&
+         ctrl_down == binding.requires_ctrl &&
+         shift_down == binding.requires_shift &&
+         meta_down == binding.requires_meta;
 }

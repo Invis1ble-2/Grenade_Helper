@@ -195,9 +195,13 @@ class OverlayStateService extends ChangeNotifier {
         _snapshot!.layerId == snapshot.layerId;
 
     if (sameLayer) {
+      final wasEmpty = _filteredGrenades.isEmpty;
       _snapshot = snapshot;
       _allGrenades = snapshot.grenades;
       _applyFilters(preserveStep: true);
+      if (wasEmpty && _filteredGrenades.isNotEmpty) {
+        _initCrosshairPosition();
+      }
       notifyListeners();
       return;
     }
@@ -335,16 +339,22 @@ class OverlayStateService extends ChangeNotifier {
   }
 
   void _initCrosshairPosition() {
+    _resetSnapState();
     final grenade = currentGrenade;
-    if (grenade != null) {
-      _crosshairX = grenade.xRatio;
-      _crosshairY = grenade.yRatio;
-      _isSnapped = true;
-    } else {
+    if (grenade == null) {
       _crosshairX = 0.5;
       _crosshairY = 0.5;
-      _isSnapped = false;
+      return;
     }
+
+    final cluster =
+        GrenadeClusterService.findClusterForGrenade(_clusters, grenade);
+    _crosshairX = cluster?.anchor.xRatio ?? grenade.xRatio;
+    _crosshairY = cluster?.anchor.yRatio ?? grenade.yRatio;
+    _lockedClusterAnchorId = cluster?.anchor.id ?? grenade.id;
+    _snapState = _SnapState.locked;
+    _isSnapped = true;
+    _isSnapConfirmed = true;
   }
 
   void _checkAndSnapToPointEx({bool ignoreCurrent = false}) {

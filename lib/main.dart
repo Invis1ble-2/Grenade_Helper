@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fvp/fvp.dart' as fvp;
 import 'package:isar_community/isar.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:window_manager/window_manager.dart';
@@ -50,6 +51,12 @@ void clearOverlayActiveMap() {
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  if (!kIsWeb && Platform.isWindows) {
+    fvp.registerWith(options: {
+      'platforms': ['windows'],
+    });
+  }
 
   if (args.contains('--overlay')) {
     await _runOverlayProcess(args);
@@ -221,6 +228,7 @@ Future<void> _runMainWindow() async {
   // 2.5 初始化设置服务（所有平台）
   globalSettingsService = SettingsService();
   await globalSettingsService!.init();
+  GrenadeTypeIcon.useLegacy = globalSettingsService!.getMapMarkerUseEmoji();
 
   // 3. 初始化桌面端服务
   if (SettingsService.isDesktop) {

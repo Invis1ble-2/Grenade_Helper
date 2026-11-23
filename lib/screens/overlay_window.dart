@@ -8,6 +8,7 @@ import '../models.dart';
 import '../models/overlay_snapshot.dart';
 import '../services/settings_service.dart';
 import '../services/overlay_state_service.dart';
+import '../theme/app_design_system.dart';
 import '../widgets/radar_mini_map.dart';
 import '../widgets/grenade_type_icon.dart';
 import 'grenade_detail_screen.dart'
@@ -241,14 +242,15 @@ class OverlayWindowState extends State<OverlayWindow> {
 
   Widget _buildFilterButtons() {
     final state = widget.overlayState;
+    const palette = AppThemeExtension.dark;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _buildFilterIcon(GrenadeType.smoke, Colors.grey, state),
-        _buildFilterIcon(GrenadeType.flash, Colors.yellow, state),
-        _buildFilterIcon(GrenadeType.molotov, Colors.red, state),
-        _buildFilterIcon(GrenadeType.he, Colors.green, state),
-        _buildFilterIcon(GrenadeType.wallbang, Colors.cyan, state),
+        _buildFilterIcon(GrenadeType.smoke, palette.smoke, state),
+        _buildFilterIcon(GrenadeType.flash, palette.flash, state),
+        _buildFilterIcon(GrenadeType.molotov, palette.molotov, state),
+        _buildFilterIcon(GrenadeType.he, palette.he, state),
+        _buildFilterIcon(GrenadeType.wallbang, palette.wallbang, state),
       ],
     );
   }

@@ -34,7 +34,7 @@ dependencies:
   archive: ^4.0.9
   share_plus: ^12.0.1
   video_player: ^2.10.1
-  video_player_win: ^3.3.1
+  fvp: ^0.40.0
   chewie: ^1.13.0
   flutter_svg: ^2.2.3
   http: ^1.6.0

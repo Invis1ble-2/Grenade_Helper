@@ -5,13 +5,13 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   desktop_drop
   file_selector_windows
+  fvp
   isar_community_flutter_libs
   pasteboard
   screen_retriever_windows
   tray_manager
   url_launcher_windows
   share_plus
-  video_player_win
   window_manager
 )
 
