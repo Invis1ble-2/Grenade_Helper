@@ -81,7 +81,7 @@ class MapManagementService {
     await _tagService.clearDeletedSystemTagRecordsForMap(map.id);
 
     if (filesToDelete.isNotEmpty) {
-      await DataService.deleteMediaFiles(filesToDelete.toList(growable: false));
+      await _dataService.deleteMediaFilesIfUnused(filesToDelete);
     }
   }
 

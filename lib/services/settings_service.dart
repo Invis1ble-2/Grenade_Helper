@@ -956,8 +956,9 @@ class SettingsService {
           final exePath = Platform.resolvedExecutable;
           final appRoot = Directory(exePath).parent.path;
           final oldPath = path.join(appRoot, 'data');
+          final legacyDbFile = File(path.join(oldPath, 'default.isar'));
 
-          if (Directory(oldPath).existsSync()) {
+          if (legacyDbFile.existsSync()) {
             debugPrint(
                 '[Settings] Detecting legacy data at: $oldPath, migrating...');
             await moveData(oldPath, targetDir);
@@ -1003,6 +1004,12 @@ class SettingsService {
     }
   }
 
+  static const Set<String> _ignoredMigrationEntries = {
+    'flutter_assets',
+    'icudtl.dat',
+    'default.isar-lck',
+  };
+
   /// 递归复制目录
   static Future<void> copyDirectory(
       Directory source, Directory destination) async {
@@ -1011,13 +1018,16 @@ class SettingsService {
     }
 
     await for (var entity in source.list(recursive: false)) {
+      final baseName = path.basename(entity.path);
+      if (_ignoredMigrationEntries.contains(baseName.toLowerCase())) {
+        continue;
+      }
       if (entity is Directory) {
-        final newDirectory = Directory(
-            path.join(destination.absolute.path, path.basename(entity.path)));
+        final newDirectory =
+            Directory(path.join(destination.absolute.path, baseName));
         await copyDirectory(entity, newDirectory);
       } else if (entity is File) {
-        await entity.copy(
-            path.join(destination.absolute.path, path.basename(entity.path)));
+        await entity.copy(path.join(destination.absolute.path, baseName));
       }
     }
   }

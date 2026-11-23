@@ -23,6 +23,7 @@ import 'services/window_service.dart';
 import 'services/overlay_ipc_client.dart';
 import 'services/overlay_ipc_server.dart';
 import 'services/overlay_state_service.dart';
+import 'services/media_handle_service.dart';
 import 'services/update_service.dart';
 import 'services/migration_service.dart';
 import 'services/tag_service.dart';
@@ -123,6 +124,11 @@ Future<void> _runMainWindow() async {
 
   // 2.2 数据迁移
   final migrationService = MigrationService(isar);
+  final mediaPathMigratedCount =
+      await migrationService.migrateMediaPathsToCurrentDirectory();
+  if (mediaPathMigratedCount > 0) {
+    debugPrint('已修正 $mediaPathMigratedCount 条迁移后的媒体路径');
+  }
   final migratedCount = await migrationService.migrateGrenadeUuids();
   if (migratedCount > 0) {
     debugPrint('已为 $migratedCount 个旧道具生成 UUID');
@@ -243,6 +249,9 @@ Future<void> _runMainWindow() async {
         }
       },
     );
+    MediaHandleService.externalReleaser = (paths) async {
+      await globalOverlayServer?.releaseMediaFiles(paths);
+    };
 
     // 连接热键服务和窗口服务
     globalWindowService!.setHotkeyService(globalHotkeyService!);
@@ -588,6 +597,15 @@ Future<void> _runOverlayProcess(List<String> args) async {
               ?.reloadHotkeys(hotkeys);
         }
         break;
+      case 'release_media':
+        final requestId = (cmdArgs?['requestId'] as num?)?.toInt();
+        final rawPaths = (cmdArgs?['paths'] as List?) ?? const [];
+        final paths = rawPaths.whereType<String>().toList(growable: false);
+        await MediaHandleService.releaseLocalPaths(paths);
+        if (requestId != null) {
+          client.sendEvent('media_released', {'requestId': requestId});
+        }
+        break;
     }
   };
 
@@ -877,6 +895,7 @@ class _MainAppState extends ConsumerState<MainApp> {
   }
 
   Future<void> _onExitApp() async {
+    MediaHandleService.externalReleaser = null;
     await globalOverlayServer?.dispose();
     globalOverlayServer = null;
     globalHotkeyService?.dispose();

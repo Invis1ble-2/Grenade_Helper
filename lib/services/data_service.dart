@@ -17,6 +17,7 @@ import '../models/map_area.dart';
 import '../models/grenade_tag.dart';
 import 'favorite_folder_service.dart';
 import 'lan_sync/lan_sync_local_store.dart';
+import 'media_handle_service.dart';
 
 const int _maxImportPackageSizeBytes = 1024 * 1024 * 1024;
 const int _maxImportPackageFileCount = 1000;
@@ -942,26 +943,41 @@ class OrphanMediaFileEntry {
 
 class OrphanMediaScanResult {
   final List<OrphanMediaFileEntry> orphanFiles;
+  final List<int> orphanStepIds;
+  final List<int> orphanMediaIds;
 
   const OrphanMediaScanResult({
     required this.orphanFiles,
+    this.orphanStepIds = const [],
+    this.orphanMediaIds = const [],
   });
 
   int get totalSizeBytes =>
       orphanFiles.fold(0, (sum, item) => sum + item.sizeBytes);
+
+  int get orphanRecordCount => orphanStepIds.length + orphanMediaIds.length;
+
+  bool get hasAnythingToClean =>
+      orphanFiles.isNotEmpty || orphanRecordCount > 0;
 }
 
 class OrphanMediaCleanupResult {
   final List<OrphanMediaFileEntry> deletedFiles;
   final List<OrphanMediaFileEntry> failedFiles;
+  final int deletedStepRecords;
+  final int deletedMediaRecords;
 
   const OrphanMediaCleanupResult({
     required this.deletedFiles,
     required this.failedFiles,
+    this.deletedStepRecords = 0,
+    this.deletedMediaRecords = 0,
   });
 
   int get deletedBytes =>
       deletedFiles.fold(0, (sum, item) => sum + item.sizeBytes);
+
+  int get deletedRecordCount => deletedStepRecords + deletedMediaRecords;
 }
 
 class _PackageFavoriteFolderRef {
@@ -1131,7 +1147,7 @@ class DataService {
   final Isar isar;
   DataService(this.isar);
 
-  static const Set<String> _trackedMediaExtensions = {
+  static const Set<String> trackedImageExtensions = {
     '.jpg',
     '.jpeg',
     '.png',
@@ -1141,12 +1157,25 @@ class DataService {
     '.svg',
     '.heic',
     '.heif',
+    '.avif',
+  };
+
+  static const Set<String> trackedVideoExtensions = {
     '.mp4',
     '.mov',
     '.m4v',
     '.avi',
     '.mkv',
     '.webm',
+    '.wmv',
+    '.flv',
+    '.ts',
+    '.3gp',
+  };
+
+  static const Set<String> _trackedMediaExtensions = {
+    ...trackedImageExtensions,
+    ...trackedVideoExtensions,
   };
 
   static int get maxExportPackageSizeBytes => _maxExportPackageSizeBytes;
@@ -1165,10 +1194,7 @@ class DataService {
   }
 
   static String normalizeMediaPath(String rawPath) {
-    final trimmed = rawPath.trim();
-    if (trimmed.isEmpty) return '';
-    final normalized = p.normalize(File(trimmed).absolute.path);
-    return Platform.isWindows ? normalized.toLowerCase() : normalized;
+    return MediaHandleService.normalizePath(rawPath);
   }
 
   Future<ExportPackageEstimate> estimateExportPackage(
@@ -1305,41 +1331,191 @@ class DataService {
     }
   }
 
-  /// 删除媒体文件（静态方法，可在其他地方调用）
-  static Future<void> deleteMediaFile(String localPath) async {
+  /// 删除媒体文件
+  static Future<bool> deleteMediaFile(String localPath) async {
     try {
       final file = File(localPath);
       if (await file.exists()) {
         await file.delete();
       }
+      return true;
     } catch (e) {
       debugPrint('删除媒体文件失败: $e');
+      return false;
     }
   }
 
   /// 批量删除媒体文件
   static Future<void> deleteMediaFiles(List<String> paths) async {
-    for (final path in paths) {
+    final targets =
+        paths.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
+    if (targets.isEmpty) return;
+    await MediaHandleService.releasePaths(targets);
+    for (final path in targets) {
       await deleteMediaFile(path);
     }
+  }
+
+  Future<_MediaReferenceSnapshot> _collectMediaReferenceSnapshot({
+    Set<int> excludingMediaIds = const {},
+  }) async {
+    final liveReferencedPaths = <String>{};
+    final liveStepIds = <int>{};
+    final liveMediaIds = <int>{};
+
+    void addLocalPath(String rawPath) {
+      final trimmed = rawPath.trim();
+      if (trimmed.isEmpty || _isAssetPath(trimmed)) return;
+      final normalized = normalizeMediaPath(trimmed);
+      if (normalized.isNotEmpty) {
+        liveReferencedPaths.add(normalized);
+      }
+    }
+
+    final maps = await isar.gameMaps.where().findAll();
+    for (final map in maps) {
+      addLocalPath(map.backgroundPath);
+      addLocalPath(map.iconPath);
+      await map.layers.load();
+      for (final layer in map.layers) {
+        addLocalPath(layer.assetPath);
+        await layer.grenades.load();
+        for (final grenade in layer.grenades) {
+          await grenade.steps.load();
+          for (final step in grenade.steps) {
+            liveStepIds.add(step.id);
+            await step.medias.load();
+            for (final media in step.medias) {
+              liveMediaIds.add(media.id);
+              if (!excludingMediaIds.contains(media.id)) {
+                addLocalPath(media.localPath);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    final allSteps = await isar.grenadeSteps.where().findAll();
+    final orphanStepIds = <int>[
+      for (final step in allSteps)
+        if (!liveStepIds.contains(step.id)) step.id,
+    ];
+
+    final allMedias = await isar.stepMedias.where().findAll();
+    final orphanMediaIds = <int>[
+      for (final media in allMedias)
+        if (!liveMediaIds.contains(media.id)) media.id,
+    ];
+
+    return _MediaReferenceSnapshot(
+      liveReferencedPaths: liveReferencedPaths,
+      liveStepIds: liveStepIds,
+      liveMediaIds: liveMediaIds,
+      orphanStepIds: orphanStepIds,
+      orphanMediaIds: orphanMediaIds,
+    );
+  }
+
+  Future<List<String>> deleteMediaFilesIfUnused(
+    Iterable<String> localPaths, {
+    Set<int> excludingMediaIds = const {},
+  }) async {
+    final uniqueByNormalized = <String, String>{};
+    for (final raw in localPaths) {
+      final trimmed = raw.trim();
+      if (trimmed.isEmpty || _isAssetPath(trimmed)) continue;
+      final normalized = normalizeMediaPath(trimmed);
+      if (normalized.isNotEmpty) {
+        uniqueByNormalized.putIfAbsent(normalized, () => trimmed);
+      }
+    }
+    if (uniqueByNormalized.isEmpty) return const [];
+
+    final snapshot = await _collectMediaReferenceSnapshot(
+      excludingMediaIds: excludingMediaIds,
+    );
+    final pathsToDelete = <String>[
+      for (final entry in uniqueByNormalized.entries)
+        if (!snapshot.liveReferencedPaths.contains(entry.key)) entry.value,
+    ];
+    if (pathsToDelete.isEmpty) return const [];
+
+    await MediaHandleService.releasePaths(pathsToDelete);
+    final failedPaths = <String>[];
+    for (final path in pathsToDelete) {
+      final ok = await deleteMediaFile(path);
+      if (!ok) {
+        failedPaths.add(path);
+      }
+    }
+    return failedPaths;
   }
 
   Future<bool> deleteMediaFileIfUnused(
     String localPath, {
     int? excludingMediaId,
   }) async {
-    final normalizedPath = localPath.trim();
-    if (normalizedPath.isEmpty) return false;
+    final trimmed = localPath.trim();
+    if (trimmed.isEmpty || _isAssetPath(trimmed)) return false;
 
-    final medias = await isar.stepMedias
-        .filter()
-        .localPathEqualTo(normalizedPath)
-        .findAll();
-    final stillReferenced = medias.any((media) => media.id != excludingMediaId);
-    if (stillReferenced) return false;
+    final normalized = normalizeMediaPath(trimmed);
+    if (normalized.isEmpty) return false;
 
-    await deleteMediaFile(normalizedPath);
-    return true;
+    final snapshot = await _collectMediaReferenceSnapshot(
+      excludingMediaIds:
+          excludingMediaId == null ? const {} : {excludingMediaId},
+    );
+    if (snapshot.liveReferencedPaths.contains(normalized)) return false;
+
+    await MediaHandleService.releasePaths([trimmed]);
+    return deleteMediaFile(trimmed);
+  }
+
+  Future<bool> deleteStepMedia(StepMedia media) async {
+    final oldPath = media.localPath.trim();
+    await media.step.load();
+    final step = media.step.value;
+    Grenade? grenade;
+    if (step != null) {
+      await step.grenade.load();
+      grenade = step.grenade.value;
+    }
+
+    await isar.writeTxn(() async {
+      await isar.stepMedias.delete(media.id);
+      if (grenade != null) {
+        grenade.updatedAt = DateTime.now();
+        await isar.grenades.put(grenade);
+      }
+    });
+
+    if (oldPath.isEmpty) return true;
+    return deleteMediaFileIfUnused(oldPath);
+  }
+
+  Future<List<String>> deleteStep(GrenadeStep step) async {
+    await step.medias.load();
+    await step.grenade.load();
+    final grenade = step.grenade.value;
+    final mediaIds = step.medias.map((m) => m.id).toList(growable: false);
+    final mediaPaths = <String>{
+      for (final media in step.medias)
+        if (media.localPath.trim().isNotEmpty) media.localPath.trim(),
+    };
+
+    await isar.writeTxn(() async {
+      if (mediaIds.isNotEmpty) {
+        await isar.stepMedias.deleteAll(mediaIds);
+      }
+      await isar.grenadeSteps.delete(step.id);
+      if (grenade != null) {
+        grenade.updatedAt = DateTime.now();
+        await isar.grenades.put(grenade);
+      }
+    });
+
+    return deleteMediaFilesIfUnused(mediaPaths);
   }
 
   Future<OrphanMediaScanResult> scanOrphanMediaFiles() async {
@@ -1353,14 +1529,9 @@ class DataService {
       return const OrphanMediaScanResult(orphanFiles: []);
     }
 
-    final referencedPaths = <String>{};
-    final medias = await isar.stepMedias.where().findAll();
-    for (final media in medias) {
-      final normalized = normalizeMediaPath(media.localPath);
-      if (normalized.isNotEmpty) {
-        referencedPaths.add(normalized);
-      }
-    }
+    final snapshot = await _collectMediaReferenceSnapshot();
+    final flutterAssetsDir =
+        normalizeMediaPath(p.join(dataDir.path, 'flutter_assets'));
 
     final orphanFiles = <OrphanMediaFileEntry>[];
     await for (final entity
@@ -1370,7 +1541,12 @@ class DataService {
       if (!_trackedMediaExtensions.contains(extension)) continue;
 
       final normalized = normalizeMediaPath(entity.path);
-      if (normalized.isEmpty || referencedPaths.contains(normalized)) continue;
+      if (normalized.isEmpty) continue;
+      if (normalized == flutterAssetsDir ||
+          p.isWithin(flutterAssetsDir, normalized)) {
+        continue;
+      }
+      if (snapshot.liveReferencedPaths.contains(normalized)) continue;
 
       int sizeBytes = 0;
       try {
@@ -1386,23 +1562,44 @@ class DataService {
     }
 
     orphanFiles.sort((a, b) => a.path.compareTo(b.path));
-    return OrphanMediaScanResult(orphanFiles: orphanFiles);
+    return OrphanMediaScanResult(
+      orphanFiles: orphanFiles,
+      orphanStepIds: snapshot.orphanStepIds,
+      orphanMediaIds: snapshot.orphanMediaIds,
+    );
   }
 
   Future<OrphanMediaCleanupResult> cleanupOrphanMediaFiles(
-    Iterable<OrphanMediaFileEntry> files,
-  ) async {
+    Iterable<OrphanMediaFileEntry> files, {
+    List<int> orphanStepIds = const [],
+    List<int> orphanMediaIds = const [],
+  }) async {
+    var deletedStepRecords = 0;
+    var deletedMediaRecords = 0;
+    if (orphanStepIds.isNotEmpty || orphanMediaIds.isNotEmpty) {
+      await isar.writeTxn(() async {
+        if (orphanMediaIds.isNotEmpty) {
+          deletedMediaRecords = await isar.stepMedias.deleteAll(orphanMediaIds);
+        }
+        if (orphanStepIds.isNotEmpty) {
+          deletedStepRecords = await isar.grenadeSteps.deleteAll(orphanStepIds);
+        }
+      });
+    }
+
+    final fileList = files.toList(growable: false);
+    if (fileList.isNotEmpty) {
+      await MediaHandleService.releasePaths(fileList.map((e) => e.path));
+    }
+
     final deletedFiles = <OrphanMediaFileEntry>[];
     final failedFiles = <OrphanMediaFileEntry>[];
 
-    for (final item in files) {
-      final file = File(item.path);
-      try {
-        if (await file.exists()) {
-          await file.delete();
-        }
+    for (final item in fileList) {
+      final ok = await deleteMediaFile(item.path);
+      if (ok) {
         deletedFiles.add(item);
-      } catch (_) {
+      } else {
         failedFiles.add(item);
       }
     }
@@ -1410,6 +1607,8 @@ class DataService {
     return OrphanMediaCleanupResult(
       deletedFiles: deletedFiles,
       failedFiles: failedFiles,
+      deletedStepRecords: deletedStepRecords,
+      deletedMediaRecords: deletedMediaRecords,
     );
   }
 
@@ -1422,6 +1621,10 @@ class DataService {
     final tombstones = <LanSyncGrenadeTombstoneEntry>[];
     final mediaPathsToCleanup = <String>{};
     for (final grenade in grenades) {
+      await grenade.steps.load();
+      for (final step in grenade.steps) {
+        await step.medias.load();
+      }
       await grenade.layer.load();
       final layer = grenade.layer.value;
       if (layer == null) continue;
@@ -1435,10 +1638,6 @@ class DataService {
           mapName: mapName,
           deletedAt: DateTime.now().millisecondsSinceEpoch,
         ));
-      }
-      await grenade.steps.load();
-      for (final step in grenade.steps) {
-        await step.medias.load();
       }
     }
 
@@ -1465,9 +1664,7 @@ class DataService {
       }
     });
 
-    for (final path in mediaPathsToCleanup) {
-      await deleteMediaFileIfUnused(path);
-    }
+    await deleteMediaFilesIfUnused(mediaPathsToCleanup);
 
     if (recordSyncTombstones && tombstones.isNotEmpty) {
       await LanSyncLocalStore().upsertGrenadeTombstones(tombstones);
@@ -5623,13 +5820,20 @@ class DataService {
       }
 
       localByName[mapName] = existing;
+      final replacedMapAssetPaths = <String>{};
       var mapChanged = false;
       if (nextBackgroundPath != null &&
           existing.backgroundPath != nextBackgroundPath) {
+        if (existing.backgroundPath.trim().isNotEmpty) {
+          replacedMapAssetPaths.add(existing.backgroundPath.trim());
+        }
         existing.backgroundPath = nextBackgroundPath;
         mapChanged = true;
       }
       if (nextIconPath != null && existing.iconPath != nextIconPath) {
+        if (existing.iconPath.trim().isNotEmpty) {
+          replacedMapAssetPaths.add(existing.iconPath.trim());
+        }
         existing.iconPath = nextIconPath;
         mapChanged = true;
       }
@@ -5670,6 +5874,9 @@ class DataService {
         }
         var layerChanged = false;
         if (nextAssetPath != null && localLayer.assetPath != nextAssetPath) {
+          if (localLayer.assetPath.trim().isNotEmpty) {
+            replacedMapAssetPaths.add(localLayer.assetPath.trim());
+          }
           localLayer.assetPath = nextAssetPath;
           layerChanged = true;
         }
@@ -5699,6 +5906,7 @@ class DataService {
           await isar.mapLayers.putAll(toUpdate);
         }
       });
+      await deleteMediaFilesIfUnused(replacedMapAssetPaths);
       changedCount++;
     }
 
@@ -5754,9 +5962,7 @@ class DataService {
     await isar.writeTxn(() async {
       await existing.steps.save();
     });
-    for (final path in oldMediaPaths) {
-      await deleteMediaFileIfUnused(path);
-    }
+    await deleteMediaFilesIfUnused(oldMediaPaths);
 
     // 创建新的 Steps 和 Medias
     final stepsList = item['steps'] as List;
@@ -5964,6 +6170,22 @@ class DataService {
       }
     }
   }
+}
+
+class _MediaReferenceSnapshot {
+  final Set<String> liveReferencedPaths;
+  final Set<int> liveStepIds;
+  final Set<int> liveMediaIds;
+  final List<int> orphanStepIds;
+  final List<int> orphanMediaIds;
+
+  const _MediaReferenceSnapshot({
+    required this.liveReferencedPaths,
+    required this.liveStepIds,
+    required this.liveMediaIds,
+    required this.orphanStepIds,
+    required this.orphanMediaIds,
+  });
 }
 
 class _LocalTagContext {

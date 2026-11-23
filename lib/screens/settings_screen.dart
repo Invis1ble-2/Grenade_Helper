@@ -780,7 +780,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           leading: const Icon(Icons.cleaning_services,
               color: Colors.lightBlueAccent),
           title: const Text('清理孤儿媒体文件'),
-          subtitle: const Text('仅扫描常见图片/视频格式，删除未被任何道具引用的文件'),
+          subtitle: const Text('扫描并清理未被道具和自定义地图引用的媒体与残留记录'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => _scanAndCleanupOrphanMediaFiles(),
         ),
@@ -890,7 +890,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (!mounted) return;
     Navigator.pop(context);
 
-    if (scanResult.orphanFiles.isEmpty) {
+    if (!scanResult.hasAnythingToClean) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('未发现可清理的孤儿媒体文件')),
       );
@@ -898,6 +898,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
 
     final previewItems = scanResult.orphanFiles.take(8).toList(growable: false);
+    final summaryLines = <String>[];
+    if (scanResult.orphanFiles.isNotEmpty) {
+      summaryLines.add(
+        '共发现 ${scanResult.orphanFiles.length} 个未被引用的媒体文件，预计可释放 ${_formatBytes(scanResult.totalSizeBytes)}。',
+      );
+    }
+    if (scanResult.orphanRecordCount > 0) {
+      summaryLines.add(
+        '同时发现 ${scanResult.orphanRecordCount} 条无效残留数据库记录（步骤 ${scanResult.orphanStepIds.length} 条、媒体 ${scanResult.orphanMediaIds.length} 条），将一并清理。',
+      );
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -909,29 +920,29 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  '共发现 ${scanResult.orphanFiles.length} 个未被引用的媒体文件，预计可释放 ${_formatBytes(scanResult.totalSizeBytes)}。',
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  '示例文件：',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                ...previewItems.map(
-                  (item) => Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: Text(
-                      '${File(item.path).uri.pathSegments.isEmpty ? item.path : File(item.path).uri.pathSegments.last} · ${_formatBytes(item.sizeBytes)}',
-                      style: const TextStyle(fontSize: 12),
+                Text(summaryLines.join('\n')),
+                if (previewItems.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  const Text(
+                    '示例文件：',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  ...previewItems.map(
+                    (item) => Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text(
+                        '${File(item.path).uri.pathSegments.isEmpty ? item.path : File(item.path).uri.pathSegments.last} · ${_formatBytes(item.sizeBytes)}',
+                        style: const TextStyle(fontSize: 12),
+                      ),
                     ),
                   ),
-                ),
-                if (scanResult.orphanFiles.length > previewItems.length)
-                  Text(
-                    '还有 ${scanResult.orphanFiles.length - previewItems.length} 个文件未展开显示。',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                  ),
+                  if (scanResult.orphanFiles.length > previewItems.length)
+                    Text(
+                      '还有 ${scanResult.orphanFiles.length - previewItems.length} 个文件未展开显示。',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    ),
+                ],
               ],
             ),
           ),
@@ -971,8 +982,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
     late final OrphanMediaCleanupResult cleanupResult;
     try {
-      cleanupResult =
-          await dataService.cleanupOrphanMediaFiles(scanResult.orphanFiles);
+      cleanupResult = await dataService.cleanupOrphanMediaFiles(
+        scanResult.orphanFiles,
+        orphanStepIds: scanResult.orphanStepIds,
+        orphanMediaIds: scanResult.orphanMediaIds,
+      );
     } catch (e) {
       if (!mounted) return;
       Navigator.pop(context);
@@ -986,13 +1000,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     Navigator.pop(context);
     final failedCount = cleanupResult.failedFiles.length;
     final successCount = cleanupResult.deletedFiles.length;
+    final recordCount = cleanupResult.deletedRecordCount;
+    final parts = <String>[];
+    if (successCount > 0 || failedCount == 0) {
+      parts.add(
+        '已清理 $successCount 个孤儿媒体文件，释放 ${_formatBytes(cleanupResult.deletedBytes)}',
+      );
+    }
+    if (recordCount > 0) {
+      parts.add('清除 $recordCount 条残留记录');
+    }
+    if (failedCount > 0) {
+      parts.add('失败 $failedCount 个（文件可能被其他程序占用）');
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          failedCount == 0
-              ? '已清理 $successCount 个孤儿媒体文件，释放 ${_formatBytes(cleanupResult.deletedBytes)}'
-              : '已清理 $successCount 个，失败 $failedCount 个，释放 ${_formatBytes(cleanupResult.deletedBytes)}',
-        ),
+        content: Text(parts.join('，')),
         backgroundColor: failedCount == 0 ? Colors.green : Colors.orange,
       ),
     );

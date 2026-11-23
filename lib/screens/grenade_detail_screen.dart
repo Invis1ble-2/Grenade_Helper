@@ -1,5 +1,6 @@
 // ignore_for_file: use_build_context_synchronously
 
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -8,6 +9,7 @@ import 'package:grenade_helper/models/tag.dart';
 import 'package:grenade_helper/services/settings_service.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:pro_image_editor/pro_image_editor.dart';
 import 'package:pro_image_editor/designs/frosted_glass/frosted_glass.dart';
 import 'package:video_player/video_player.dart';
@@ -24,6 +26,7 @@ import '../models.dart';
 import '../providers.dart';
 import '../services/data_service.dart';
 import '../services/favorite_folder_service.dart';
+import '../services/media_handle_service.dart';
 import '../services/tag_service.dart';
 import '../widgets/instant_hide_desktop_video_controls.dart';
 import '../widgets/grenade_tag_editor.dart';
@@ -45,28 +48,62 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   ChewieController? _chewieController;
   String? _errorMessage;
   int _initGeneration = 0;
+  Future<void>? _initFuture;
+  bool _released = false;
 
   @override
   void initState() {
     super.initState();
-    _initVideo();
+    MediaHandleService.register(this, widget.file.path, _releaseForDeletion);
+    _initFuture = _initVideo();
   }
 
   @override
   void didUpdateWidget(covariant VideoPlayerWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.file.path != widget.file.path) {
-      _disposeControllers();
+      _released = false;
       _errorMessage = null;
-      _initVideo();
+      _initGeneration++;
+      MediaHandleService.register(this, widget.file.path, _releaseForDeletion);
+      final previousInit = _initFuture;
+      _initFuture = _switchVideo(previousInit);
     }
   }
 
-  void _disposeControllers() {
-    _chewieController?.dispose();
+  Future<void> _switchVideo(Future<void>? previousInit) async {
+    if (previousInit != null) {
+      try {
+        await previousInit;
+      } catch (_) {}
+    }
+    await _disposeControllersAsync();
+    if (!mounted || _released) return;
+    await _initVideo();
+  }
+
+  Future<void> _disposeControllersAsync() async {
+    final chewie = _chewieController;
+    final video = _videoController;
     _chewieController = null;
-    _videoController?.dispose();
     _videoController = null;
+    chewie?.dispose();
+    if (video != null) {
+      await video.dispose();
+    }
+  }
+
+  Future<void> _releaseForDeletion() async {
+    _released = true;
+    _initGeneration++;
+    final pendingInit = _initFuture;
+    if (pendingInit != null) {
+      try {
+        await pendingInit;
+      } catch (_) {}
+    }
+    await _disposeControllersAsync();
+    if (mounted) setState(() {});
   }
 
   Future<void> _initVideo() async {
@@ -75,7 +112,7 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     try {
       controller = VideoPlayerController.file(widget.file);
       await controller.initialize();
-      if (!mounted || generation != _initGeneration) {
+      if (!mounted || _released || generation != _initGeneration) {
         await controller.dispose();
         return;
       }
@@ -98,7 +135,7 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       setState(() {});
     } catch (e) {
       await controller?.dispose();
-      if (!mounted || generation != _initGeneration) return;
+      if (!mounted || _released || generation != _initGeneration) return;
       _errorMessage = e.toString();
       setState(() {});
     }
@@ -127,13 +164,17 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget> {
 
   @override
   void dispose() {
+    MediaHandleService.unregister(this);
     _initGeneration++;
-    _disposeControllers();
+    unawaited(_disposeControllersAsync());
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_released) {
+      return Container(color: Colors.black, height: 200);
+    }
     if (_errorMessage != null) {
       return Container(
         color: Colors.black,
@@ -715,7 +756,8 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                     final isar = ref.read(isarProvider);
                     final dataService = DataService(isar);
                     await dataService.deleteGrenades([grenade!]);
-                    Navigator.pop(ctx);
+                    sendOverlayCommand('reload_data');
+                    if (ctx.mounted) Navigator.pop(ctx);
                     if (context.mounted) Navigator.pop(context);
                   },
                   child: const Text("删除", style: TextStyle(color: Colors.red)),
@@ -840,27 +882,34 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
       stepIndex: grenade!.steps.length,
     );
 
-    await isar.writeTxn(() async {
-      await isar.grenadeSteps.put(step);
-      step.grenade.value = grenade;
-      await step.grenade.save();
+    try {
+      await isar.writeTxn(() async {
+        await isar.grenadeSteps.put(step);
+        step.grenade.value = grenade;
+        await step.grenade.save();
 
-      if (mediaPath != null && mediaType != null) {
-        final media =
-            StepMedia(localPath: mediaPath, type: mediaType, sortOrder: 0);
-        await isar.stepMedias.put(media);
-        media.step.value = step;
-        await media.step.save();
-        step.medias.add(media);
-        await step.medias.save();
+        if (mediaPath != null && mediaType != null) {
+          final media =
+              StepMedia(localPath: mediaPath, type: mediaType, sortOrder: 0);
+          await isar.stepMedias.put(media);
+          media.step.value = step;
+          await media.step.save();
+          step.medias.add(media);
+          await step.medias.save();
+        }
+
+        grenade!.steps.add(step);
+        await grenade!.steps.save();
+        grenade!.updatedAt = DateTime.now();
+        await isar.grenades.put(grenade!);
+      });
+    } catch (_) {
+      if (mediaPath != null) {
+        await DataService.deleteMediaFile(mediaPath);
       }
-
-      grenade!.steps.add(step);
-      await grenade!.steps.save();
-      grenade!.updatedAt = DateTime.now();
-      await isar.grenades.put(grenade!);
-    });
-    await _markAsLocallyEdited(); // 标记为本地编辑
+      rethrow;
+    }
+    await _markAsLocallyEdited();
     _loadData(resetTitle: false);
     sendOverlayCommand('reload_data');
   }
@@ -868,28 +917,38 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
   Future<void> _pickMediaForNewStep(
       String title, String desc, bool isImage) async {
     final path = await _pickAndProcessMedia(isImage);
-    if (path != null) {
-      _saveStep(title, desc,
-          mediaPath: path,
-          mediaType: isImage ? MediaType.image : MediaType.video);
+    if (path == null) return;
+    if (!mounted) {
+      await DataService.deleteMediaFile(path);
+      return;
     }
+    await _saveStep(
+      title,
+      desc,
+      mediaPath: path,
+      mediaType: isImage ? MediaType.image : MediaType.video,
+    );
   }
 
   Future<void> _appendMediaToStep(GrenadeStep step, bool isImage) async {
     final path = await _pickAndProcessMedia(isImage);
-    if (path != null) {
-      final isar = ref.read(isarProvider);
-      // 计算排序
-      final maxSortOrder = step.medias.isEmpty
-          ? -1
-          : step.medias
-              .toList()
-              .map((m) => m.sortOrder)
-              .reduce((a, b) => a > b ? a : b);
-      final media = StepMedia(
-          localPath: path,
-          type: isImage ? MediaType.image : MediaType.video,
-          sortOrder: maxSortOrder + 1);
+    if (path == null) return;
+    if (!mounted) {
+      await DataService.deleteMediaFile(path);
+      return;
+    }
+    final isar = ref.read(isarProvider);
+    final maxSortOrder = step.medias.isEmpty
+        ? -1
+        : step.medias
+            .toList()
+            .map((m) => m.sortOrder)
+            .reduce((a, b) => a > b ? a : b);
+    final media = StepMedia(
+        localPath: path,
+        type: isImage ? MediaType.image : MediaType.video,
+        sortOrder: maxSortOrder + 1);
+    try {
       await isar.writeTxn(() async {
         await isar.stepMedias.put(media);
         media.step.value = step;
@@ -897,10 +956,13 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
         step.medias.add(media);
         await step.medias.save();
       });
-      await _markAsLocallyEdited(); // 添加媒体算实质性编辑
-      setState(() {});
-      sendOverlayCommand('reload_data');
+    } catch (_) {
+      await DataService.deleteMediaFile(path);
+      rethrow;
     }
+    await _markAsLocallyEdited();
+    if (mounted) setState(() {});
+    sendOverlayCommand('reload_data');
   }
 
   /// 来源选择
@@ -948,31 +1010,26 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
 
   /// 剪切板图片
   Future<String?> _processImageFromClipboard(String dataPath) async {
-    // 读剪切板数据
     final imageBytes = await Pasteboard.image;
 
     File? tempFile;
+    var createdTempFile = false;
     if (imageBytes != null && imageBytes.isNotEmpty) {
-      // 写临时文件
-      final tempPath = p.join(dataPath,
-          "_clipboard_temp_${DateTime.now().millisecondsSinceEpoch}.png");
+      final tempDir = await getTemporaryDirectory();
+      final tempPath = p.join(
+        tempDir.path,
+        "_clipboard_temp_${DateTime.now().millisecondsSinceEpoch}.png",
+      );
       tempFile = File(tempPath);
       await tempFile.writeAsBytes(imageBytes);
+      createdTempFile = true;
     } else {
-      // 查文件列表
       final files = await Pasteboard.files();
       if (files.isNotEmpty) {
-        const imageExtensions = [
-          '.jpg',
-          '.jpeg',
-          '.png',
-          '.gif',
-          '.bmp',
-          '.webp'
-        ];
         for (final filePath in files) {
           final ext = p.extension(filePath).toLowerCase();
-          if (imageExtensions.contains(ext)) {
+          if (DataService.trackedImageExtensions.contains(ext) &&
+              ext != '.svg') {
             tempFile = File(filePath);
             break;
           }
@@ -989,34 +1046,31 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
       return null;
     }
 
-    if (!mounted) return null;
-
-    // 打开编辑
     String? resultPath;
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ProImageEditor.file(
-          tempFile!,
-          callbacks: ProImageEditorCallbacks(
-            onImageEditingComplete: (Uint8List bytes) async {
-              final fileName = "${DateTime.now().millisecondsSinceEpoch}.jpg";
-              final savePath = p.join(dataPath, fileName);
-              await File(savePath).writeAsBytes(bytes);
-              resultPath = savePath;
-              if (mounted) Navigator.pop(context);
-            },
+    try {
+      if (!mounted) return null;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ProImageEditor.file(
+            tempFile!,
+            callbacks: ProImageEditorCallbacks(
+              onImageEditingComplete: (Uint8List bytes) async {
+                final fileName = "${DateTime.now().millisecondsSinceEpoch}.jpg";
+                final savePath = p.join(dataPath, fileName);
+                await File(savePath).writeAsBytes(bytes);
+                resultPath = savePath;
+                if (mounted) Navigator.pop(context);
+              },
+            ),
+            configs: _buildImageEditorConfigs(),
           ),
-          configs: _buildImageEditorConfigs(),
         ),
-      ),
-    );
-
-    // 清临时文件
-    if (imageBytes != null && tempFile.existsSync()) {
-      try {
-        await tempFile.delete();
-      } catch (_) {}
+      );
+    } finally {
+      if (createdTempFile) {
+        await DataService.deleteMediaFile(tempFile.path);
+      }
     }
 
     return resultPath;
@@ -1034,19 +1088,10 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
       return null;
     }
 
-    const videoExtensions = [
-      '.mp4',
-      '.mov',
-      '.avi',
-      '.mkv',
-      '.wmv',
-      '.flv',
-      '.webm'
-    ];
     String? videoPath;
     for (final filePath in files) {
       final ext = p.extension(filePath).toLowerCase();
-      if (videoExtensions.contains(ext)) {
+      if (DataService.trackedVideoExtensions.contains(ext)) {
         videoPath = filePath;
         break;
       }
@@ -1502,14 +1547,19 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
               final savePath = p.join(dataPath, fileName);
               await File(savePath).writeAsBytes(bytes);
 
-              // 更新媒体路径
               final isar = ref.read(isarProvider);
               media.localPath = savePath;
-              await isar.writeTxn(() async {
-                await isar.stepMedias.put(media);
-                grenade!.updatedAt = DateTime.now();
-                await isar.grenades.put(grenade!);
-              });
+              try {
+                await isar.writeTxn(() async {
+                  await isar.stepMedias.put(media);
+                  grenade!.updatedAt = DateTime.now();
+                  await isar.grenades.put(grenade!);
+                });
+              } catch (_) {
+                media.localPath = previousPath;
+                await DataService.deleteMediaFile(savePath);
+                rethrow;
+              }
               if (previousPath != savePath) {
                 await dataService.deleteMediaFileIfUnused(
                   previousPath,
@@ -1518,7 +1568,8 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
               }
 
               if (mounted) {
-                await _markAsLocallyEdited(); // 编辑图片算实质性编辑
+                await _markAsLocallyEdited();
+                sendOverlayCommand('reload_data');
                 Navigator.pop(context);
                 setState(() {});
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -2008,52 +2059,54 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
         return Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Container(
+            SizedBox(
               width: 236,
-              color: Theme.of(context).colorScheme.surface,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(18, 18, 18, 10),
-                    child: Text('教学步骤',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleSmall
-                            ?.copyWith(fontWeight: FontWeight.w800)),
-                  ),
-                  Expanded(
-                    child: ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      itemCount: steps.length,
-                      itemBuilder: (_, index) => ListTile(
-                        dense: true,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(6)),
-                        leading: CircleAvatar(
-                            radius: 13,
-                            backgroundColor: Theme.of(context)
-                                .colorScheme
-                                .primary
-                                .withValues(alpha: 0.14),
-                            child: Text('${index + 1}',
-                                style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w800,
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .primary))),
-                        title: Text(
-                            steps[index].title.isEmpty
-                                ? '步骤 ${index + 1}'
-                                : steps[index].title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis),
-                        onTap: () => _focusStep(steps[index]),
+              child: Material(
+                color: Theme.of(context).colorScheme.surface,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 18, 18, 10),
+                      child: Text('教学步骤',
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w800)),
+                    ),
+                    Expanded(
+                      child: ListView.builder(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        itemCount: steps.length,
+                        itemBuilder: (_, index) => ListTile(
+                          dense: true,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(6)),
+                          leading: CircleAvatar(
+                              radius: 13,
+                              backgroundColor: Theme.of(context)
+                                  .colorScheme
+                                  .primary
+                                  .withValues(alpha: 0.14),
+                              child: Text('${index + 1}',
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .primary))),
+                          title: Text(
+                              steps[index].title.isEmpty
+                                  ? '步骤 ${index + 1}'
+                                  : steps[index].title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis),
+                          onTap: () => _focusStep(steps[index]),
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
             VerticalDivider(width: 1, color: context.appTheme.subtleBorder),
@@ -2484,7 +2537,10 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                             width: double.infinity,
                           ),
                         )
-                      : VideoPlayerWidget(file: File(media.localPath)),
+                      : VideoPlayerWidget(
+                          key: ValueKey('video_${media.id}_${media.localPath}'),
+                          file: File(media.localPath),
+                        ),
                 ),
                 if (isEditing) ...[
                   // 编辑图片按钮
@@ -2551,11 +2607,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
               Navigator.pop(ctx);
               final isar = ref.read(isarProvider);
               final dataService = DataService(isar);
-              final oldPath = media.localPath;
-              await isar.writeTxn(() async {
-                await isar.stepMedias.delete(media.id);
-              });
-              await dataService.deleteMediaFileIfUnused(oldPath);
+              await dataService.deleteStepMedia(media);
               await _markAsLocallyEdited();
               _loadData(resetTitle: false);
               sendOverlayCommand('reload_data');
@@ -2681,9 +2733,8 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                     icon: const Icon(Icons.close, size: 20, color: Colors.red),
                     onPressed: () async {
                       final isar = ref.read(isarProvider);
-                      await isar.writeTxn(() async {
-                        await isar.grenadeSteps.delete(step.id);
-                      });
+                      final dataService = DataService(isar);
+                      await dataService.deleteStep(step);
                       await _markAsLocallyEdited();
                       _loadData(resetTitle: false);
                       sendOverlayCommand('reload_data');

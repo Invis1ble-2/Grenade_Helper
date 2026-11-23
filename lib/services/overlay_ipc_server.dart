@@ -22,6 +22,8 @@ class OverlayIpcServer {
   Completer<void>? _readyCompleter;
   Future<void>? _startingFuture;
   bool _disposed = false;
+  int _nextRequestId = 0;
+  final Map<int, Completer<void>> _pendingReleaseAcks = {};
 
   GameMap? _activeMap;
   MapLayer? _activeLayer;
@@ -103,8 +105,40 @@ class OverlayIpcServer {
     });
   }
 
+  Future<void> releaseMediaFiles(List<String> paths) async {
+    if (!isConnected || paths.isEmpty) return;
+    final requestId = ++_nextRequestId;
+    final completer = Completer<void>();
+    _pendingReleaseAcks[requestId] = completer;
+    _sendRaw({
+      'cmd': 'release_media',
+      'args': {
+        'requestId': requestId,
+        'paths': paths,
+      },
+    });
+    try {
+      await completer.future.timeout(
+        const Duration(seconds: 2),
+        onTimeout: () {},
+      );
+    } finally {
+      _pendingReleaseAcks.remove(requestId);
+    }
+  }
+
+  void _completePendingReleaseAcks() {
+    for (final completer in _pendingReleaseAcks.values) {
+      if (!completer.isCompleted) {
+        completer.complete();
+      }
+    }
+    _pendingReleaseAcks.clear();
+  }
+
   Future<void> dispose() async {
     _disposed = true;
+    _completePendingReleaseAcks();
     _grenadeWatcher?.cancel();
     _grenadeWatcher = null;
     _snapshotDebounce?.cancel();
@@ -248,12 +282,22 @@ class OverlayIpcServer {
           unawaited(settingsService.setOverlayNavSpeed(speed));
         }
         break;
+      case 'media_released':
+        final requestId = (args?['requestId'] as num?)?.toInt();
+        if (requestId != null) {
+          final completer = _pendingReleaseAcks.remove(requestId);
+          if (completer != null && !completer.isCompleted) {
+            completer.complete();
+          }
+        }
+        break;
     }
   }
 
   void _handleSocketClosed(WebSocket closedSocket) {
     if (_socket != closedSocket) return;
     _socket = null;
+    _completePendingReleaseAcks();
     _grenadeWatcher?.cancel();
     _grenadeWatcher = null;
     if (_readyCompleter != null && !_readyCompleter!.isCompleted) {

@@ -9,6 +9,7 @@ import 'package:uuid/uuid.dart';
 import '../data/builtin_maps.dart';
 import '../models.dart';
 import '../providers.dart';
+import '../services/data_service.dart';
 import '../services/map_management_service.dart';
 import '../services/tag_service.dart';
 import '../widgets/map_icon.dart';
@@ -341,20 +342,34 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       return;
                     }
 
+                    final copiedFiles = <String>[];
                     try {
                       int? newMapId;
                       final tagService = TagService(isar);
                       final copiedRadarPath =
                           await _copyCustomMapFileToDataDir(isar, radarPath!);
+                      if (copiedRadarPath.isNotEmpty &&
+                          !copiedRadarPath.startsWith('assets/')) {
+                        copiedFiles.add(copiedRadarPath);
+                      }
                       final copiedBackgroundPath =
                           (backgroundPath?.trim().isNotEmpty ?? false)
                               ? await _copyCustomMapFileToDataDir(
                                   isar, backgroundPath!)
                               : copiedRadarPath;
+                      if (copiedBackgroundPath != copiedRadarPath &&
+                          copiedBackgroundPath.isNotEmpty &&
+                          !copiedBackgroundPath.startsWith('assets/')) {
+                        copiedFiles.add(copiedBackgroundPath);
+                      }
                       final copiedIconPath = (iconPath?.trim().isNotEmpty ??
                               false)
                           ? await _copyCustomMapFileToDataDir(isar, iconPath!)
                           : '';
+                      if (copiedIconPath.isNotEmpty &&
+                          !copiedIconPath.startsWith('assets/')) {
+                        copiedFiles.add(copiedIconPath);
+                      }
 
                       await isar.writeTxn(() async {
                         final newMap = GameMap(
@@ -380,6 +395,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             newMapId!, mapName);
                       }
                     } catch (e) {
+                      for (final copiedPath in copiedFiles) {
+                        await DataService.deleteMediaFile(copiedPath);
+                      }
                       if (!mounted) return;
                       if (!parentContext.mounted) return;
                       ScaffoldMessenger.of(parentContext).showSnackBar(

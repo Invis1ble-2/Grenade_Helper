@@ -1,6 +1,9 @@
+import 'dart:io';
 import 'package:isar_community/isar.dart';
+import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 import '../models.dart';
+import 'media_handle_service.dart';
 import 'tag_service.dart';
 
 /// 迁移服务
@@ -165,5 +168,81 @@ class MigrationService {
     }
 
     return grenadesToFix.length;
+  }
+
+  Future<int> migrateMediaPathsToCurrentDirectory() async {
+    final dataDir = (isar.directory ?? '').trim();
+    if (dataDir.isEmpty) return 0;
+
+    final normalizedDataDir = MediaHandleService.normalizePath(dataDir);
+    if (normalizedDataDir.isEmpty) return 0;
+
+    String? relocateIfNeeded(String rawPath) {
+      final trimmed = rawPath.trim();
+      if (trimmed.isEmpty || trimmed.startsWith('assets/')) return null;
+      final normalized = MediaHandleService.normalizePath(trimmed);
+      if (normalized.isEmpty || p.isWithin(normalizedDataDir, normalized)) {
+        return null;
+      }
+      final fileName = p.posix.basename(trimmed.replaceAll('\\', '/')).trim();
+      if (fileName.isEmpty) return null;
+      final candidate = p.join(dataDir, fileName);
+      if (!File(candidate).existsSync()) return null;
+      return candidate;
+    }
+
+    final mediasToUpdate = <StepMedia>[];
+    final allMedias = await isar.stepMedias.where().findAll();
+    for (final media in allMedias) {
+      final relocated = relocateIfNeeded(media.localPath);
+      if (relocated != null) {
+        media.localPath = relocated;
+        mediasToUpdate.add(media);
+      }
+    }
+
+    final mapsToUpdate = <GameMap>[];
+    final allMaps = await isar.gameMaps.where().findAll();
+    for (final map in allMaps) {
+      var changed = false;
+      final nextBg = relocateIfNeeded(map.backgroundPath);
+      if (nextBg != null) {
+        map.backgroundPath = nextBg;
+        changed = true;
+      }
+      final nextIcon = relocateIfNeeded(map.iconPath);
+      if (nextIcon != null) {
+        map.iconPath = nextIcon;
+        changed = true;
+      }
+      if (changed) mapsToUpdate.add(map);
+    }
+
+    final layersToUpdate = <MapLayer>[];
+    final allLayers = await isar.mapLayers.where().findAll();
+    for (final layer in allLayers) {
+      final nextAsset = relocateIfNeeded(layer.assetPath);
+      if (nextAsset != null) {
+        layer.assetPath = nextAsset;
+        layersToUpdate.add(layer);
+      }
+    }
+
+    final total =
+        mediasToUpdate.length + mapsToUpdate.length + layersToUpdate.length;
+    if (total == 0) return 0;
+
+    await isar.writeTxn(() async {
+      if (mediasToUpdate.isNotEmpty) {
+        await isar.stepMedias.putAll(mediasToUpdate);
+      }
+      if (mapsToUpdate.isNotEmpty) {
+        await isar.gameMaps.putAll(mapsToUpdate);
+      }
+      if (layersToUpdate.isNotEmpty) {
+        await isar.mapLayers.putAll(layersToUpdate);
+      }
+    });
+    return total;
   }
 }
