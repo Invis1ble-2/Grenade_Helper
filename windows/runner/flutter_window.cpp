@@ -2,10 +2,13 @@
 
 #include <optional>
 
-#include "desktop_multi_window/desktop_multi_window_plugin.h"
 #include "flutter/generated_plugin_registrant.h"
 
 namespace {
+
+constexpr UINT_PTR kHotkeyTimerId = 1001;
+constexpr UINT kIdleHotkeyPollIntervalMs = 50;
+constexpr UINT kActiveHotkeyPollIntervalMs = 16;
 
 std::optional<int> GetEncodableInt(const flutter::EncodableMap& map,
                                    const char* key) {
@@ -40,8 +43,9 @@ bool IsVirtualKeyPressed(int virtual_key) {
 
 }  // namespace
 
-FlutterWindow::FlutterWindow(const flutter::DartProject &project)
-    : project_(project) {}
+FlutterWindow::FlutterWindow(const flutter::DartProject& project,
+                             bool is_overlay)
+    : project_(project), is_overlay_(is_overlay) {}
 
 FlutterWindow::~FlutterWindow() {}
 
@@ -52,51 +56,53 @@ bool FlutterWindow::OnCreate() {
 
   RECT frame = GetClientArea();
 
-  // The size here must match the window dimensions to avoid unnecessary surface
-  // creation / destruction in the startup path.
   flutter_controller_ = std::make_unique<flutter::FlutterViewController>(
       frame.right - frame.left, frame.bottom - frame.top, project_);
-  // Ensure that basic setup of the controller was successful.
   if (!flutter_controller_->engine() || !flutter_controller_->view()) {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
 
-  navigation_channel_ =
-      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
-          flutter_controller_->engine()->messenger(),
-          "grenade_helper/windows_navigation",
-          &flutter::StandardMethodCodec::GetInstance());
-  navigation_channel_->SetMethodCallHandler(
-      [this](const auto& call, auto result) {
-        HandleHotkeyMethodCall(call, std::move(result));
-      });
-
-  // Register the callback for sub-windows created by desktop_multi_window
-  DesktopMultiWindowSetWindowCreatedCallback([](void *controller) {
-    auto *flutter_view_controller =
-        reinterpret_cast<flutter::FlutterViewController *>(controller);
-    auto *registry = flutter_view_controller->engine();
-    RegisterPlugins(registry);
-  });
+  if (is_overlay_) {
+    overlay_window_channel_ =
+        std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+            flutter_controller_->engine()->messenger(),
+            "grenade_helper/overlay_window",
+            &flutter::StandardMethodCodec::GetInstance());
+    overlay_window_channel_->SetMethodCallHandler(
+        [this](const auto& call, auto result) {
+          HandleOverlayWindowMethodCall(call, std::move(result));
+        });
+  } else {
+    navigation_channel_ =
+        std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+            flutter_controller_->engine()->messenger(),
+            "grenade_helper/windows_navigation",
+            &flutter::StandardMethodCodec::GetInstance());
+    navigation_channel_->SetMethodCallHandler(
+        [this](const auto& call, auto result) {
+          HandleHotkeyMethodCall(call, std::move(result));
+        });
+  }
 
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
-  flutter_controller_->engine()->SetNextFrameCallback([&]() { this->Show(); });
-
-  // Flutter can complete the first frame before the "show window" callback is
-  // registered. The following call ensures a frame is pending to ensure the
-  // window is shown. It is a no-op if the first frame hasn't completed yet.
+  if (!is_overlay_) {
+    flutter_controller_->engine()->SetNextFrameCallback(
+        [&]() { this->Show(); });
+  }
   flutter_controller_->ForceRedraw();
 
   return true;
 }
 
 void FlutterWindow::OnDestroy() {
+  StopHotkeyTimer();
+  overlay_window_channel_.reset();
+  navigation_channel_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
-  navigation_channel_.reset();
   ClearHotkeyBindings();
 
   Win32Window::OnDestroy();
@@ -106,7 +112,6 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
-  // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =
         flutter_controller_->HandleTopLevelWindowProc(hwnd, message, wparam,
@@ -117,12 +122,45 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   switch (message) {
-  case WM_FONTCHANGE:
-    flutter_controller_->engine()->ReloadSystemFonts();
-    break;
+    case WM_FONTCHANGE:
+      flutter_controller_->engine()->ReloadSystemFonts();
+      break;
+    case WM_TIMER:
+      if (wparam == kHotkeyTimerId) {
+        PollHotkeys();
+        return 0;
+      }
+      break;
   }
 
   return Win32Window::MessageHandler(hwnd, message, wparam, lparam);
+}
+
+void FlutterWindow::HandleOverlayWindowMethodCall(
+    const flutter::MethodCall<flutter::EncodableValue>& method_call,
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  const auto& method_name = method_call.method_name();
+  HWND hwnd = GetHandle();
+
+  if (method_name == "showNoActivate") {
+    if (hwnd != nullptr) {
+      ::ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+      ::SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
+    result->Success();
+    return;
+  }
+
+  if (method_name == "hide") {
+    if (hwnd != nullptr) {
+      ::ShowWindow(hwnd, SW_HIDE);
+    }
+    result->Success();
+    return;
+  }
+
+  result->NotImplemented();
 }
 
 void FlutterWindow::HandleHotkeyMethodCall(
@@ -153,15 +191,39 @@ void FlutterWindow::HandleHotkeyMethodCall(
       binding.requires_ctrl = GetEncodableBool(*payload, "requiresCtrl");
       binding.requires_shift = GetEncodableBool(*payload, "requiresShift");
       binding.requires_meta = GetEncodableBool(*payload, "requiresMeta");
+      binding.core = GetEncodableBool(*payload, "core");
+      binding.repeat = GetEncodableBool(*payload, "repeat");
       hotkey_bindings_[*action] = binding;
+      last_pressed_state_[*action] = false;
     }
 
+    UpdateHotkeyTimer();
     result->Success();
     return;
   }
 
-  if (method_name == "readHotkeyState") {
-    result->Success(flutter::EncodableValue(ReadHotkeyState()));
+  if (method_name == "setOverlayHotkeysEnabled") {
+    const auto* enabled = std::get_if<bool>(method_call.arguments());
+    if (enabled == nullptr) {
+      result->Error("invalid_args", "Expected a bool.");
+      return;
+    }
+
+    if (overlay_hotkeys_enabled_ != *enabled) {
+      overlay_hotkeys_enabled_ = *enabled;
+      if (!overlay_hotkeys_enabled_) {
+        for (auto& [action, was_pressed] : last_pressed_state_) {
+          auto it = hotkey_bindings_.find(action);
+          if (it != hotkey_bindings_.end() && !it->second.core && was_pressed) {
+            was_pressed = false;
+            EmitHotkeyEvent(action, false);
+          }
+        }
+      }
+      UpdateHotkeyTimer();
+    }
+
+    result->Success();
     return;
   }
 
@@ -175,16 +237,60 @@ void FlutterWindow::HandleHotkeyMethodCall(
 }
 
 void FlutterWindow::ClearHotkeyBindings() {
+  StopHotkeyTimer();
   hotkey_bindings_.clear();
+  last_pressed_state_.clear();
 }
 
-flutter::EncodableMap FlutterWindow::ReadHotkeyState() const {
-  flutter::EncodableMap state;
-  for (const auto& entry : hotkey_bindings_) {
-    state[flutter::EncodableValue(entry.first)] =
-        flutter::EncodableValue(IsBindingPressed(entry.second));
+void FlutterWindow::UpdateHotkeyTimer() {
+  HWND hwnd = GetHandle();
+  if (hwnd == nullptr || hotkey_bindings_.empty()) {
+    StopHotkeyTimer();
+    return;
   }
-  return state;
+  const UINT interval_ms = overlay_hotkeys_enabled_
+                               ? kActiveHotkeyPollIntervalMs
+                               : kIdleHotkeyPollIntervalMs;
+  ::SetTimer(hwnd, kHotkeyTimerId, interval_ms, nullptr);
+  hotkey_timer_active_ = true;
+}
+
+void FlutterWindow::StopHotkeyTimer() {
+  if (!hotkey_timer_active_) return;
+  HWND hwnd = GetHandle();
+  if (hwnd != nullptr) {
+    ::KillTimer(hwnd, kHotkeyTimerId);
+  }
+  hotkey_timer_active_ = false;
+}
+
+void FlutterWindow::PollHotkeys() {
+  if (!navigation_channel_ || hotkey_bindings_.empty()) return;
+
+  for (const auto& [action, binding] : hotkey_bindings_) {
+    if (!binding.core && !overlay_hotkeys_enabled_) {
+      continue;
+    }
+
+    const bool is_pressed = IsBindingPressed(binding);
+    bool& was_pressed = last_pressed_state_[action];
+
+    if (is_pressed && (!was_pressed || binding.repeat)) {
+      EmitHotkeyEvent(action, true);
+    } else if (!is_pressed && was_pressed) {
+      EmitHotkeyEvent(action, false);
+    }
+    was_pressed = is_pressed;
+  }
+}
+
+void FlutterWindow::EmitHotkeyEvent(const std::string& action, bool pressed) {
+  if (!navigation_channel_) return;
+  flutter::EncodableMap payload;
+  payload[flutter::EncodableValue("action")] = flutter::EncodableValue(action);
+  payload[flutter::EncodableValue("pressed")] = flutter::EncodableValue(pressed);
+  navigation_channel_->InvokeMethod(
+      "onHotkeyEvent", std::make_unique<flutter::EncodableValue>(payload));
 }
 
 bool FlutterWindow::IsBindingPressed(const HotkeyBinding& binding) const {
@@ -205,8 +311,7 @@ bool FlutterWindow::IsBindingPressed(const HotkeyBinding& binding) const {
   if (binding.requires_shift && !IsVirtualKeyPressed(VK_SHIFT)) {
     return false;
   }
-  if (binding.requires_meta &&
-      !IsVirtualKeyPressed(VK_LWIN) &&
+  if (binding.requires_meta && !IsVirtualKeyPressed(VK_LWIN) &&
       !IsVirtualKeyPressed(VK_RWIN)) {
     return false;
   }

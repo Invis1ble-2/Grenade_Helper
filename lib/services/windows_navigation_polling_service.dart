@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -18,7 +17,6 @@ class WindowsHotkeyPollingService {
 
   static const MethodChannel _channel =
       MethodChannel('grenade_helper/windows_navigation');
-  static const Duration _pollInterval = Duration(milliseconds: 16);
   static const Set<HotkeyAction> _coreActions = {
     HotkeyAction.toggleOverlay,
   };
@@ -48,6 +46,9 @@ class WindowsHotkeyPollingService {
     ..._coreActions,
     ..._overlayActions,
   };
+  static final Map<String, HotkeyAction> _actionByName = {
+    for (final action in _trackedActions) action.name: action,
+  };
   static const Set<HotkeyAction> _repeatWhilePressedActions = {
     HotkeyAction.navigateUp,
     HotkeyAction.navigateDown,
@@ -59,21 +60,16 @@ class WindowsHotkeyPollingService {
   final HotkeyActionCallback _onKeyDown;
   final HotkeyActionCallback? _onKeyUp;
 
-  Timer? _pollTimer;
   bool _overlayHotkeysEnabled = false;
   bool _isDisposed = false;
-  bool _isPolling = false;
-  final Map<HotkeyAction, bool> _lastPressedState = {
-    for (final action in _trackedActions) action: false,
-  };
 
   static bool get isSupportedPlatform => Platform.isWindows;
 
   Future<void> init() async {
     if (!isSupportedPlatform || _isDisposed) return;
+    _channel.setMethodCallHandler(_handleNativeCall);
     await _syncBindings();
-    _startPolling();
-    await _pollHotkeyState();
+    await _syncOverlayEnabled();
   }
 
   Future<void> setOverlayHotkeysEnabled(bool enabled) async {
@@ -81,24 +77,18 @@ class WindowsHotkeyPollingService {
     if (_overlayHotkeysEnabled == enabled) return;
 
     _overlayHotkeysEnabled = enabled;
-    if (!enabled) {
-      _releaseDisabledActions();
-    }
-    await _pollHotkeyState();
+    await _syncOverlayEnabled();
   }
 
   Future<void> reloadBindings() async {
     if (!isSupportedPlatform || _isDisposed) return;
     await _syncBindings();
-    await _pollHotkeyState();
   }
 
   Future<void> dispose() async {
     if (_isDisposed) return;
     _isDisposed = true;
-    _pollTimer?.cancel();
-    _pollTimer = null;
-    _releaseAllPressedActions();
+    _channel.setMethodCallHandler(null);
     try {
       await _channel.invokeMethod<void>('clearHotkeyBindings');
     } catch (e) {
@@ -108,11 +98,36 @@ class WindowsHotkeyPollingService {
     }
   }
 
-  void _startPolling() {
-    if (_pollTimer != null) return;
-    _pollTimer = Timer.periodic(_pollInterval, (_) {
-      unawaited(_pollHotkeyState());
-    });
+  Future<dynamic> _handleNativeCall(MethodCall call) async {
+    if (_isDisposed || call.method != 'onHotkeyEvent') return null;
+    final args = call.arguments;
+    if (args is! Map) return null;
+    final actionName = args['action'] as String?;
+    final pressed = args['pressed'] as bool?;
+    if (actionName == null || pressed == null) return null;
+
+    final action = _actionByName[actionName];
+    if (action == null) return null;
+
+    if (pressed) {
+      _onKeyDown(action);
+    } else {
+      _onKeyUp?.call(action);
+    }
+    return null;
+  }
+
+  Future<void> _syncOverlayEnabled() async {
+    try {
+      await _channel.invokeMethod<void>(
+        'setOverlayHotkeysEnabled',
+        _overlayHotkeysEnabled,
+      );
+    } catch (e) {
+      debugPrint(
+        '[WindowsHotkeyPollingService] Failed to update overlay hotkey state: $e',
+      );
+    }
   }
 
   Future<void> _syncBindings() async {
@@ -123,13 +138,12 @@ class WindowsHotkeyPollingService {
       final config = hotkeys[action];
       if (config == null) continue;
 
-      final binding = _toBindingPayload(config);
-      if (binding == null) {
-        debugPrint(
-          '[WindowsHotkeyPollingService] Unsupported hotkey config for $action: ${config.toDisplayString()}',
-        );
-        continue;
-      }
+      final binding = _toBindingPayload(
+        config,
+        isCore: _coreActions.contains(action),
+        repeat: _repeatWhilePressedActions.contains(action),
+      );
+      if (binding == null) continue;
       bindings[action.name] = binding;
     }
 
@@ -142,61 +156,11 @@ class WindowsHotkeyPollingService {
     }
   }
 
-  Future<void> _pollHotkeyState() async {
-    if (_isDisposed || _isPolling) return;
-
-    _isPolling = true;
-    try {
-      final rawState =
-          await _channel.invokeMethod<Map<dynamic, dynamic>>('readHotkeyState');
-
-      for (final action in _trackedActions) {
-        final isPressed =
-            _isActionEnabled(action) && rawState?[action.name] == true;
-        final wasPressed = _lastPressedState[action] ?? false;
-
-        if (isPressed &&
-            (!wasPressed || _repeatWhilePressedActions.contains(action))) {
-          _onKeyDown(action);
-        } else if (!isPressed && wasPressed) {
-          _onKeyUp?.call(action);
-        }
-
-        _lastPressedState[action] = isPressed;
-      }
-    } catch (e) {
-      debugPrint(
-        '[WindowsHotkeyPollingService] Failed to poll hotkey state: $e',
-      );
-    } finally {
-      _isPolling = false;
-    }
-  }
-
-  bool _isActionEnabled(HotkeyAction action) {
-    return _coreActions.contains(action) ||
-        (_overlayHotkeysEnabled && _overlayActions.contains(action));
-  }
-
-  void _releaseDisabledActions() {
-    for (final action in _trackedActions) {
-      if (_isActionEnabled(action) || _lastPressedState[action] != true) {
-        continue;
-      }
-      _onKeyUp?.call(action);
-      _lastPressedState[action] = false;
-    }
-  }
-
-  void _releaseAllPressedActions() {
-    for (final action in _trackedActions) {
-      if (_lastPressedState[action] != true) continue;
-      _onKeyUp?.call(action);
-      _lastPressedState[action] = false;
-    }
-  }
-
-  static Map<String, dynamic>? _toBindingPayload(HotkeyConfig config) {
+  static Map<String, dynamic>? _toBindingPayload(
+    HotkeyConfig config, {
+    required bool isCore,
+    required bool repeat,
+  }) {
     final virtualKey = _toVirtualKey(config.key);
     if (virtualKey == null) return null;
 
@@ -219,6 +183,8 @@ class WindowsHotkeyPollingService {
           key == LogicalKeyboardKey.meta ||
           key == LogicalKeyboardKey.metaLeft ||
           key == LogicalKeyboardKey.metaRight),
+      'core': isCore,
+      'repeat': repeat,
     };
   }
 

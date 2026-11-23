@@ -13,15 +13,13 @@
 
 #include "win32_window.h"
 
-// A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
  public:
-  // Creates a new FlutterWindow hosting a Flutter view running |project|.
-  explicit FlutterWindow(const flutter::DartProject& project);
+  explicit FlutterWindow(const flutter::DartProject& project,
+                         bool is_overlay = false);
   virtual ~FlutterWindow();
 
  protected:
-  // Win32Window:
   bool OnCreate() override;
   void OnDestroy() override;
   LRESULT MessageHandler(HWND window, UINT const message, WPARAM const wparam,
@@ -34,23 +32,34 @@ class FlutterWindow : public Win32Window {
     bool requires_ctrl = false;
     bool requires_shift = false;
     bool requires_meta = false;
+    bool core = false;
+    bool repeat = false;
   };
 
   void HandleHotkeyMethodCall(
       const flutter::MethodCall<flutter::EncodableValue>& method_call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+  void HandleOverlayWindowMethodCall(
+      const flutter::MethodCall<flutter::EncodableValue>& method_call,
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
   void ClearHotkeyBindings();
-  flutter::EncodableMap ReadHotkeyState() const;
+  void UpdateHotkeyTimer();
+  void StopHotkeyTimer();
+  void PollHotkeys();
+  void EmitHotkeyEvent(const std::string& action, bool pressed);
   bool IsBindingPressed(const HotkeyBinding& binding) const;
 
-  // The project to run.
   flutter::DartProject project_;
-
-  // The Flutter instance hosted by this window.
+  bool is_overlay_ = false;
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       navigation_channel_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      overlay_window_channel_;
   std::map<std::string, HotkeyBinding> hotkey_bindings_;
+  std::map<std::string, bool> last_pressed_state_;
+  bool overlay_hotkeys_enabled_ = false;
+  bool hotkey_timer_active_ = false;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

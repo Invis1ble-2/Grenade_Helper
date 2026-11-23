@@ -4,14 +4,13 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   desktop_drop
-  desktop_multi_window
   file_selector_windows
   isar_community_flutter_libs
   pasteboard
   screen_retriever_windows
-  share_plus
   tray_manager
   url_launcher_windows
+  share_plus
   video_player_win
   window_manager
 )

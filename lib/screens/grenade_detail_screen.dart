@@ -44,6 +44,7 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   VideoPlayerController? _videoController;
   ChewieController? _chewieController;
   String? _errorMessage;
+  int _initGeneration = 0;
 
   @override
   void initState() {
@@ -51,16 +52,40 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     _initVideo();
   }
 
+  @override
+  void didUpdateWidget(covariant VideoPlayerWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.file.path != widget.file.path) {
+      _disposeControllers();
+      _errorMessage = null;
+      _initVideo();
+    }
+  }
+
+  void _disposeControllers() {
+    _chewieController?.dispose();
+    _chewieController = null;
+    _videoController?.dispose();
+    _videoController = null;
+  }
+
   Future<void> _initVideo() async {
+    final generation = ++_initGeneration;
+    VideoPlayerController? controller;
     try {
-      _videoController = VideoPlayerController.file(widget.file);
-      await _videoController!.initialize();
+      controller = VideoPlayerController.file(widget.file);
+      await controller.initialize();
+      if (!mounted || generation != _initGeneration) {
+        await controller.dispose();
+        return;
+      }
+      _videoController = controller;
       _chewieController = ChewieController(
-        videoPlayerController: _videoController!,
+        videoPlayerController: controller,
         autoPlay: false,
         looping: true,
         allowMuting: true,
-        aspectRatio: _videoController!.value.aspectRatio,
+        aspectRatio: controller.value.aspectRatio,
         customControls: SettingsService.isDesktop
             ? const InstantHideDesktopVideoControls()
             : null,
@@ -70,10 +95,12 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget> {
                   style: const TextStyle(color: Colors.white)));
         },
       );
-      if (mounted) setState(() {});
+      setState(() {});
     } catch (e) {
+      await controller?.dispose();
+      if (!mounted || generation != _initGeneration) return;
       _errorMessage = e.toString();
-      if (mounted) setState(() {});
+      setState(() {});
     }
   }
 
@@ -100,8 +127,8 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget> {
 
   @override
   void dispose() {
-    _videoController?.dispose();
-    _chewieController?.dispose();
+    _initGeneration++;
+    _disposeControllers();
     super.dispose();
   }
 

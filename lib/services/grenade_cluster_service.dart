@@ -1,11 +1,11 @@
-import '../models.dart';
+import '../models/overlay_snapshot.dart';
 
 class GrenadeCluster {
   const GrenadeCluster(this.members);
 
-  final List<Grenade> members;
+  final List<OverlayGrenadeItem> members;
 
-  Grenade get anchor => members.first;
+  OverlayGrenadeItem get anchor => members.first;
 
   bool containsGrenade(int grenadeId) {
     return members.any((grenade) => grenade.id == grenadeId);
@@ -15,7 +15,7 @@ class GrenadeCluster {
 class GrenadeClusterService {
   static const double defaultThreshold = 0.03;
 
-  static int compareGrenades(Grenade a, Grenade b) {
+  static int compareGrenades(OverlayGrenadeItem a, OverlayGrenadeItem b) {
     final byY = a.yRatio.compareTo(b.yRatio);
     if (byY != 0) return byY;
 
@@ -25,14 +25,15 @@ class GrenadeClusterService {
     return a.id.compareTo(b.id);
   }
 
-  static List<Grenade> sortGrenades(Iterable<Grenade> grenades) {
+  static List<OverlayGrenadeItem> sortGrenades(
+      Iterable<OverlayGrenadeItem> grenades) {
     final sorted = grenades.toList();
     sorted.sort(compareGrenades);
     return sorted;
   }
 
   static List<GrenadeCluster> buildClusters(
-    Iterable<Grenade> grenades, {
+    Iterable<OverlayGrenadeItem> grenades, {
     double threshold = defaultThreshold,
   }) {
     final sorted = sortGrenades(grenades);
@@ -46,7 +47,7 @@ class GrenadeClusterService {
       if (used[i]) continue;
 
       final anchor = sorted[i];
-      final members = <Grenade>[anchor];
+      final members = <OverlayGrenadeItem>[anchor];
       used[i] = true;
 
       for (var j = i + 1; j < sorted.length; j++) {
@@ -70,7 +71,7 @@ class GrenadeClusterService {
 
   static GrenadeCluster? findClusterForGrenade(
     Iterable<GrenadeCluster> clusters,
-    Grenade? grenade,
+    OverlayGrenadeItem? grenade,
   ) {
     if (grenade == null) return null;
     for (final cluster in clusters) {

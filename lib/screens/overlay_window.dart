@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 import '../models.dart';
+import '../models/overlay_snapshot.dart';
 import '../services/settings_service.dart';
 import '../services/overlay_state_service.dart';
 import '../widgets/radar_mini_map.dart';
@@ -14,16 +15,18 @@ import 'grenade_detail_screen.dart'
 
 /// 悬浮窗组件
 class OverlayWindow extends StatefulWidget {
-  final SettingsService settingsService;
+  final Map<HotkeyAction, HotkeyConfig> initialHotkeys;
   final OverlayStateService overlayState;
+  final bool isVisible;
   final AsyncCallback onClose;
   final AsyncCallback onMinimize;
   final VoidCallback onStartDrag;
 
   const OverlayWindow({
     super.key,
-    required this.settingsService,
+    required this.initialHotkeys,
     required this.overlayState,
+    this.isVisible = true,
     required this.onClose,
     required this.onMinimize,
     required this.onStartDrag,
@@ -45,9 +48,8 @@ class OverlayWindowState extends State<OverlayWindow> {
   @override
   void initState() {
     super.initState();
-    _hotkeys = widget.settingsService.getHotkeys();
+    _hotkeys = Map<HotkeyAction, HotkeyConfig>.from(widget.initialHotkeys);
     widget.overlayState.addListener(_onStateChanged);
-    // 注册视频回调
     widget.overlayState.setVideoTogglePlayPauseCallback(_handleVideoToggle);
   }
 
@@ -62,20 +64,13 @@ class OverlayWindowState extends State<OverlayWindow> {
   }
 
   void _onStateChanged() {
-    if (mounted) setState(() {});
+    if (mounted && widget.isVisible) setState(() {});
   }
 
-  /// 重载热键
-  void reloadHotkeys([Map<HotkeyAction, HotkeyConfig>? newHotkeys]) {
-    // print(
-    //     '[OverlayWindow] reloadHotkeys called, before reload: ${_hotkeys[HotkeyAction.navigateUp]?.toDisplayString()}');
+  void reloadHotkeys(Map<HotkeyAction, HotkeyConfig> newHotkeys) {
     setState(() {
-      // 加载热键
-      _hotkeys = newHotkeys ?? widget.settingsService.getHotkeys();
+      _hotkeys = Map<HotkeyAction, HotkeyConfig>.from(newHotkeys);
     });
-    // print(
-    //     '[OverlayWindow] Hotkeys reloaded, after reload: ${_hotkeys[HotkeyAction.navigateUp]?.toDisplayString()}');
-    // print('[OverlayWindow] Total hotkeys loaded: ${_hotkeys.length}');
   }
 
   @override
@@ -106,8 +101,17 @@ class OverlayWindowState extends State<OverlayWindow> {
     await _videoPlayerKey.currentState?.pauseIfPlaying();
   }
 
+  Future<void> exitFullscreenPreviewIfNeeded() async {
+    if (_isMediaFullscreenPreview) {
+      await toggleMediaFullscreenPreview();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (!widget.isVisible) {
+      return const TickerMode(enabled: false, child: SizedBox.shrink());
+    }
     final overlayOpacity = widget.overlayState.overlayOpacity;
     return KeyboardListener(
       focusNode: _focusNode,
@@ -149,7 +153,7 @@ class OverlayWindowState extends State<OverlayWindow> {
   /// 标题栏
   Widget _buildTitleBar() {
     final state = widget.overlayState;
-    final mapName = state.currentMap?.name ?? '未选择地图';
+    final mapName = state.mapName ?? '未选择地图';
     final grenade = state.currentGrenade;
     final title = grenade?.title ?? '';
 
@@ -426,9 +430,9 @@ class OverlayWindowState extends State<OverlayWindow> {
 
   Widget _buildRadarMap() {
     final state = widget.overlayState;
-    final layer = state.currentLayer;
+    final assetPath = state.layerAssetPath;
 
-    if (layer == null) return const SizedBox.shrink();
+    if (assetPath == null) return const SizedBox.shrink();
 
     // 动态宽度
     return LayoutBuilder(
@@ -439,7 +443,7 @@ class OverlayWindowState extends State<OverlayWindow> {
         final radarHeight = 140.0;
 
         return RadarMiniMap(
-          mapAssetPath: layer.assetPath,
+          mapAssetPath: assetPath,
           currentGrenade: state.currentGrenade,
           allGrenades: state.filteredGrenades,
           crosshairX: state.crosshairX,
@@ -481,15 +485,22 @@ class OverlayWindowState extends State<OverlayWindow> {
       );
     }
 
+    var primaryVideoAssigned = false;
     return Column(
       children: medias.asMap().entries.map((entry) {
         final index = entry.key;
         final media = entry.value;
+        final isPrimaryVideo =
+            media.type == MediaType.video && !primaryVideoAssigned;
+        if (isPrimaryVideo) {
+          primaryVideoAssigned = true;
+        }
         return Padding(
           padding: EdgeInsets.only(bottom: index < medias.length - 1 ? 8 : 0),
           child: _buildSingleMediaItem(
             media,
             isFullscreenPreview: _isMediaFullscreenPreview,
+            usePrimaryVideoKey: isPrimaryVideo,
           ),
         );
       }).toList(),
@@ -498,9 +509,10 @@ class OverlayWindowState extends State<OverlayWindow> {
 
   /// 单个媒体
   Widget _buildSingleMediaItem(
-    StepMedia media, {
+    OverlayMediaItem media, {
     required bool isFullscreenPreview,
     double? preferredHeight,
+    bool usePrimaryVideoKey = true,
   }) {
     final loadingHeight =
         preferredHeight ?? (isFullscreenPreview ? 560.0 : 400.0);
@@ -574,7 +586,7 @@ class OverlayWindowState extends State<OverlayWindow> {
         color: Colors.black.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: _buildMediaView(media),
+      child: _buildMediaView(media, usePrimaryVideoKey: usePrimaryVideoKey),
     );
   }
 
@@ -593,7 +605,11 @@ class OverlayWindowState extends State<OverlayWindow> {
   }
 
   /// 媒体视图
-  Widget _buildMediaView(StepMedia media, {int imageType = 0}) {
+  Widget _buildMediaView(
+    OverlayMediaItem media, {
+    int imageType = 0,
+    bool usePrimaryVideoKey = true,
+  }) {
     final file = File(media.localPath);
     if (!file.existsSync()) {
       return const Center(
@@ -634,7 +650,10 @@ class OverlayWindowState extends State<OverlayWindow> {
     // 视频
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
-      child: VideoPlayerWidget(key: _videoPlayerKey, file: file),
+      child: VideoPlayerWidget(
+        key: usePrimaryVideoKey ? _videoPlayerKey : ValueKey(media.localPath),
+        file: file,
+      ),
     );
   }
 
@@ -643,8 +662,7 @@ class OverlayWindowState extends State<OverlayWindow> {
     final grenade = state.currentGrenade;
     if (grenade == null) return const SizedBox.shrink();
 
-    final steps = grenade.steps.toList();
-    steps.sort((a, b) => a.stepIndex.compareTo(b.stepIndex));
+    final steps = grenade.steps;
 
     if (steps.isEmpty) return const SizedBox.shrink();
 
@@ -770,8 +788,8 @@ class OverlayWindowState extends State<OverlayWindow> {
     );
   }
 
-  Widget _buildFullscreenPreviewContent(List<StepMedia>? medias) {
-    final safeMedias = medias ?? const <StepMedia>[];
+  Widget _buildFullscreenPreviewContent(List<OverlayMediaItem>? medias) {
+    final safeMedias = medias ?? const <OverlayMediaItem>[];
 
     if (safeMedias.length == 1) {
       return Column(
@@ -810,8 +828,7 @@ class OverlayWindowState extends State<OverlayWindow> {
     final grenade = state.currentGrenade;
     final grenadeTotal = state.currentClusterGrenades.length;
     final grenadeIndex = grenade == null ? 0 : state.currentClusterIndex + 1;
-    final steps = grenade?.steps.toList() ?? const <GrenadeStep>[];
-    steps.sort((a, b) => a.stepIndex.compareTo(b.stepIndex));
+    final steps = grenade?.steps ?? const <OverlayStepItem>[];
     final stepTotal = steps.isEmpty ? 0 : steps.length;
     final stepIndex = steps.isEmpty ? 0 : state.currentStepIndex + 1;
     final currentStep =
@@ -976,8 +993,7 @@ class OverlayWindowState extends State<OverlayWindow> {
     }
 
     final grenade = state.currentGrenade!;
-    final steps = grenade.steps.toList();
-    steps.sort((a, b) => a.stepIndex.compareTo(b.stepIndex));
+    final steps = grenade.steps;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -1088,7 +1104,7 @@ class OverlayWindowState extends State<OverlayWindow> {
 
   /// 步骤导航
   Widget _buildStepNavRow({
-    required List<GrenadeStep> steps,
+    required List<OverlayStepItem> steps,
     required int currentIndex,
     required VoidCallback onPrev,
     required VoidCallback onNext,
@@ -1351,22 +1367,19 @@ class OverlayWindowState extends State<OverlayWindow> {
     );
   }
 
-  List<StepMedia>? _getCurrentStepMedias() {
+  List<OverlayMediaItem>? _getCurrentStepMedias() {
     final state = widget.overlayState;
     final grenade = state.currentGrenade;
     if (grenade == null) return null;
 
-    final steps = grenade.steps.toList()
-      ..sort((a, b) => a.stepIndex.compareTo(b.stepIndex));
+    final steps = grenade.steps;
     if (steps.isEmpty) return null;
 
     final currentStep = state.currentStepIndex < steps.length
         ? steps[state.currentStepIndex]
         : steps.first;
 
-    final medias = currentStep.medias.toList()
-      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
-    return medias;
+    return currentStep.medias;
   }
 
   Future<void> toggleMediaFullscreenPreview() async {

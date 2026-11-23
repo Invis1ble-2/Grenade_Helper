@@ -1,15 +1,15 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:isar_community/isar.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:window_manager/window_manager.dart';
 import 'data/builtin_maps.dart';
 import 'models.dart';
+import 'models/overlay_snapshot.dart';
 import 'models/tag.dart';
 import 'models/grenade_tag.dart';
 import 'models/map_area.dart';
@@ -19,76 +19,43 @@ import 'screens/overlay_window.dart';
 import 'services/settings_service.dart';
 import 'services/hotkey_service.dart';
 import 'services/window_service.dart';
+import 'services/overlay_ipc_client.dart';
+import 'services/overlay_ipc_server.dart';
 import 'services/overlay_state_service.dart';
 import 'services/update_service.dart';
 import 'services/migration_service.dart';
 import 'services/tag_service.dart';
 import 'theme/app_design_system.dart';
+import 'widgets/grenade_type_icon.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // 全局服务实例
 SettingsService? globalSettingsService;
 HotkeyService? globalHotkeyService;
 WindowService? globalWindowService;
-OverlayStateService? globalOverlayState;
+OverlayIpcServer? globalOverlayServer;
 Isar? globalIsar;
 
-// 悬浮窗控制器
-WindowController? overlayWindowController;
-// 主窗口控制器（用于接收子窗口消息）
-WindowController? mainWindowController;
-
-/// 窗口类型常量
-class WindowType {
-  static const String main = 'main';
-  static const String overlay = 'overlay';
+void sendOverlayCommand(String command, [Map<String, dynamic>? args]) {
+  globalOverlayServer?.sendCommand(command, args);
 }
 
-/// IPC发送命令
-void sendOverlayCommand(String command, [Map<String, dynamic>? args]) {
-  // debugPrint('[Main] sendOverlayCommand: $command, args: $args');
-  if (overlayWindowController != null) {
-    // debugPrint('[Main] overlayWindowController is not null, invoking $command');
-    overlayWindowController!.invokeMethod(command, args).catchError((e) {
-      // 忽略通信错误（例如窗口已关闭）
-      debugPrint('[Main] IPC error for $command: $e');
-    });
-  } else {
-    debugPrint('[Main] overlayWindowController is null, cannot send $command');
-  }
+void setOverlayActiveMap(GameMap map, MapLayer layer) {
+  globalOverlayServer?.setActiveMap(map, layer);
+}
+
+void clearOverlayActiveMap() {
+  globalOverlayServer?.clearActiveMap();
 }
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 桌面端检查
-  if (SettingsService.isDesktop) {
-    // 获取当前窗口控制器
-    final windowController = await WindowController.fromCurrentEngine();
-
-    // 解析窗口参数
-    final arguments = windowController.arguments;
-    Map<String, dynamic>? parsedArgs;
-
-    try {
-      if (arguments.isNotEmpty) {
-        parsedArgs = jsonDecode(arguments);
-      }
-    } catch (_) {
-      parsedArgs = null;
-    }
-
-    final windowType = parsedArgs?['type'] ?? WindowType.main;
-
-    // 根据窗口类型启动不同的应用
-    if (windowType == WindowType.overlay) {
-      // 这是悬浮窗
-      await _runOverlayWindow(windowController, parsedArgs);
-      return;
-    }
+  if (args.contains('--overlay')) {
+    await _runOverlayProcess(args);
+    return;
   }
 
-  // 主窗口逻辑
   await _runMainWindow();
 }
 
@@ -259,7 +226,15 @@ Future<void> _runMainWindow() async {
   if (SettingsService.isDesktop) {
     globalHotkeyService = HotkeyService(globalSettingsService!);
     globalWindowService = WindowService(globalSettingsService!);
-    globalOverlayState = OverlayStateService(isar);
+    globalOverlayServer = OverlayIpcServer(
+      isar: isar,
+      settingsService: globalSettingsService!,
+      onOverlayHidden: () {
+        if (globalWindowService?.isOverlayVisible == true) {
+          unawaited(globalWindowService!.hideOverlay());
+        }
+      },
+    );
 
     // 连接热键服务和窗口服务
     globalWindowService!.setHotkeyService(globalHotkeyService!);
@@ -363,23 +338,30 @@ Future<void> _runMainWindow() async {
   );
 }
 
-/// 运行悬浮窗（作为独立窗口）
-Future<void> _runOverlayWindow(
-    WindowController controller, Map<String, dynamic>? args) async {
-  // 1. 确保窗口管理器已初始化
+/// 运行悬浮窗独立子进程
+Future<void> _runOverlayProcess(List<String> args) async {
+  final ipcArgs = OverlayIpcClient.parseArgs(args);
+  if (ipcArgs == null) {
+    exit(0);
+  }
+
+  final client = OverlayIpcClient(port: ipcArgs.port, token: ipcArgs.token);
+  client.onDisconnected = () => exit(0);
+
+  late final OverlayInitConfig initConfig;
+  try {
+    initConfig = await client.connectAndAwaitInit();
+  } catch (_) {
+    exit(0);
+  }
+
+  GrenadeTypeIcon.useLegacy = initConfig.useLegacyIcons;
+
   await windowManager.ensureInitialized();
+  final size = SettingsService.calculateSizePixels(initConfig.sizeIndex);
 
-  // 2. 初始化设置服务 (需要先初始化以获取窗口尺寸)
-  final settingsService = SettingsService();
-  await settingsService.init();
-
-  // 2. 获取保存的尺寸
-  final size = settingsService.getOverlaySizePixels();
-
-  // 3. 配置无边框窗口
-  final windowOptions = WindowOptions(
-    size: Size(size.$1, size.$2),
-    minimumSize: const Size(300, 400),
+  const windowOptions = WindowOptions(
+    minimumSize: Size(300, 400),
     center: false,
     backgroundColor: Colors.transparent,
     skipTaskbar: true,
@@ -388,99 +370,45 @@ Future<void> _runOverlayWindow(
   );
 
   await windowManager.waitUntilReadyToShow(windowOptions, () async {
-    // 恢复保存的位置
-    final savedX = args?['x'] as double?;
-    final savedY = args?['y'] as double?;
-    if (savedX != null && savedY != null) {
-      await windowManager.setPosition(Offset(savedX, savedY));
-    }
+    await windowManager.setSize(Size(size.$1, size.$2));
+    await windowManager.setPosition(Offset(initConfig.x, initConfig.y));
   });
 
-  // 初始化数据库（使用与主窗口相同的数据库和目录）
-  final dataPath = await SettingsService.getDataPathBeforeInit();
-
-  // 确保数据目录存在
-  final dataDir = Directory(dataPath);
-  if (!await dataDir.exists()) {
-    await dataDir.create(recursive: true);
+  final overlayState = OverlayStateService();
+  overlayState.setOpacity(initConfig.opacity);
+  overlayState.setNavSpeedLevel(initConfig.navSpeedLevel);
+  if (initConfig.mapSnapshot != null) {
+    overlayState.applyMapSnapshot(initConfig.mapSnapshot!);
   }
 
-  final isar = await Isar.open(
-    [
-      GameMapSchema,
-      MapLayerSchema,
-      GrenadeSchema,
-      GrenadeStepSchema,
-      StepMediaSchema,
-      ImportHistorySchema,
-      ImpactGroupSchema,
-      FavoriteFolderSchema,
-      TagSchema,
-      GrenadeTagSchema,
-    ],
-    directory: dataPath,
-  );
+  final overlayAppKey = GlobalKey<OverlayWindowAppState>();
+  final isOverlayVisibleNotifier = ValueNotifier<bool>(false);
+  const overlayWindowChannel = MethodChannel('grenade_helper/overlay_window');
 
-  // 初始化状态服务
-  final overlayState = OverlayStateService(isar);
-  // 设置初始透明度
-  overlayState.setOpacity(settingsService.getOverlayOpacity());
-  // 设置初始导航速度
-  overlayState.setNavSpeedLevel(settingsService.getOverlayNavSpeed());
-
-  // 从参数中加载初始地图信息（如果有的话）
-  final initialMapId = args?['map_id'] as int?;
-  final initialLayerId = args?['layer_id'] as int?;
-  if (initialMapId != null && initialLayerId != null) {
-    final map = await isar.gameMaps.get(initialMapId);
-    final layer = await isar.mapLayers.get(initialLayerId);
-    if (map != null && layer != null) {
-      overlayState.setCurrentMap(map, layer);
+  Future<void> showNativeOverlay() async {
+    if (Platform.isWindows) {
+      await overlayWindowChannel.invokeMethod<void>('showNoActivate');
+    } else {
+      await windowManager.show(inactive: true);
     }
   }
 
-  // 创建 OverlayWindowApp 的 key，以便在 IPC 中访问其状态
-  final overlayAppKey = GlobalKey<OverlayWindowAppState>();
-  const overlayMinimumSize = Size(300, 400);
-  const softHiddenVisiblePixels = 1.0;
-  final launchSoftHidden = args?['launch_soft_hidden'] == true;
-  Rect? lastVisibleWindowBounds = () {
-    final savedX = args?['x'] as double?;
-    final savedY = args?['y'] as double?;
-    final savedSize = settingsService.getOverlaySizePixels();
-    final parkedX = softHiddenVisiblePixels - savedSize.$1;
-    final parkedY = softHiddenVisiblePixels - savedSize.$2;
-    final savedPositionLooksLikeSoftHidden = savedX != null &&
-        savedY != null &&
-        (savedX - parkedX).abs() < 0.5 &&
-        (savedY - parkedY).abs() < 0.5;
-    return Rect.fromLTWH(
-      savedPositionLooksLikeSoftHidden ? 100.0 : (savedX ?? 100.0),
-      savedPositionLooksLikeSoftHidden ? 100.0 : (savedY ?? 100.0),
-      savedSize.$1,
-      savedSize.$2,
-    );
-  }();
-  bool isOverlayLogicallyVisible = false;
+  Future<void> hideNativeOverlay() async {
+    if (Platform.isWindows) {
+      await overlayWindowChannel.invokeMethod<void>('hide');
+    } else {
+      await windowManager.hide();
+    }
+  }
 
   Future<void> persistOverlayBounds() async {
-    if (!isOverlayLogicallyVisible && lastVisibleWindowBounds != null) {
-      final position = lastVisibleWindowBounds!.topLeft;
-      await settingsService.setOverlayPosition(position.dx, position.dy);
-      return;
-    }
-
     final preferredPosition = overlayAppKey
         .currentState?.overlayWindowKey.currentState?.persistedWindowPosition;
-    final bounds = await windowManager.getBounds();
-    final position = preferredPosition ?? bounds.topLeft;
-    lastVisibleWindowBounds = Rect.fromLTWH(
-      position.dx,
-      position.dy,
-      bounds.width,
-      bounds.height,
-    );
-    await settingsService.setOverlayPosition(position.dx, position.dy);
+    final position = preferredPosition ?? (await windowManager.getBounds()).topLeft;
+    client.sendEvent('bounds_changed', {
+      'x': position.dx,
+      'y': position.dy,
+    });
   }
 
   Future<void> pauseOverlayVideoPlayback() async {
@@ -494,261 +422,170 @@ Future<void> _runOverlayWindow(
         true;
   }
 
-  Future<void> softHideOverlay({
-    bool persistPosition = true,
-    bool ensureWindowVisible = true,
-  }) async {
-    if (ensureWindowVisible && !await windowManager.isVisible()) {
-      await windowManager.show(inactive: true);
-    }
+  Future<void> hideOverlay({bool notifyMain = false}) async {
+    if (!isOverlayVisibleNotifier.value) return;
     await pauseOverlayVideoPlayback();
-    if (persistPosition) {
-      await persistOverlayBounds();
-    }
+    await overlayAppKey.currentState?.overlayWindowKey.currentState
+        ?.exitFullscreenPreviewIfNeeded();
+    await persistOverlayBounds();
     overlayState.stopAllNavigation();
-    isOverlayLogicallyVisible = false;
-
-    final parkedBounds = Rect.fromLTWH(
-      softHiddenVisiblePixels - (lastVisibleWindowBounds?.width ?? 1),
-      softHiddenVisiblePixels - (lastVisibleWindowBounds?.height ?? 1),
-      lastVisibleWindowBounds?.width ?? overlayMinimumSize.width,
-      lastVisibleWindowBounds?.height ?? overlayMinimumSize.height,
-    );
-
-    await windowManager.setMinimumSize(overlayMinimumSize);
-    await windowManager.setIgnoreMouseEvents(true);
-    await windowManager.setOpacity(1.0);
-    await windowManager.setBounds(parkedBounds);
-  }
-
-  Future<void> showOverlayWindow() async {
-    final targetBounds = lastVisibleWindowBounds ??
-        Rect.fromLTWH(
-          100.0,
-          100.0,
-          settingsService.getOverlaySizePixels().$1,
-          settingsService.getOverlaySizePixels().$2,
-        );
-    if (!await windowManager.isVisible()) {
-      await windowManager.show(inactive: true);
+    isOverlayVisibleNotifier.value = false;
+    await hideNativeOverlay();
+    if (notifyMain) {
+      client.sendEvent('hidden');
     }
-    await windowManager.setMinimumSize(overlayMinimumSize);
-    await windowManager.setBounds(targetBounds);
-    await windowManager.setOpacity(1.0);
-    await windowManager.setIgnoreMouseEvents(false);
-    isOverlayLogicallyVisible = true;
   }
 
-  // 设置窗口方法处理器（接收主窗口的命令）
-  await controller.setWindowMethodHandler((call) async {
-    switch (call.method) {
-      case 'set_map':
-        // 从主窗口接收当前地图信息
-        final args = call.arguments as Map?;
-        final mapId = args?['map_id'] as int?;
-        final layerId = args?['layer_id'] as int?;
-        if (mapId != null && layerId != null) {
-          final map = await isar.gameMaps.get(mapId);
-          final layer = await isar.mapLayers.get(layerId);
-          if (map != null && layer != null) {
-            overlayState.setCurrentMap(map, layer);
-          }
+  Future<void> showOverlay() async {
+    isOverlayVisibleNotifier.value = true;
+    await showNativeOverlay();
+  }
+
+  client.onCommand = (command, cmdArgs) async {
+    switch (command) {
+      case 'set_map_snapshot':
+        if (cmdArgs != null) {
+          overlayState.applyMapSnapshot(OverlayMapSnapshot.fromJson(cmdArgs));
         }
-        return 'ok';
+        break;
       case 'clear_map':
         overlayState.clearMap();
-        return 'ok';
-      case 'close':
-        // 保存位置
-        await pauseOverlayVideoPlayback();
-        await persistOverlayBounds();
-        await windowManager.close();
-        return 'ok';
-      case 'hide_overlay':
-        await softHideOverlay();
-        return 'ok';
+        break;
       case 'show_overlay':
-        await showOverlayWindow();
-        return 'ok';
-      // === 悬浮窗操作命令（由全局热键触发）===
+        await showOverlay();
+        break;
+      case 'hide_overlay':
+        await hideOverlay();
+        break;
+      case 'close':
+        await pauseOverlayVideoPlayback();
+        await overlayAppKey.currentState?.overlayWindowKey.currentState
+            ?.exitFullscreenPreviewIfNeeded();
+        if (isOverlayVisibleNotifier.value) {
+          await persistOverlayBounds();
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        await client.close();
+        exit(0);
       case 'prev_grenade':
         overlayState.prevGrenade();
-        return 'ok';
+        break;
       case 'next_grenade':
         overlayState.nextGrenade();
-        return 'ok';
+        break;
       case 'prev_step':
         overlayState.prevStep();
-        return 'ok';
+        break;
       case 'next_step':
         overlayState.nextStep();
-        return 'ok';
+        break;
       case 'toggle_smoke':
         overlayState.toggleFilter(GrenadeType.smoke);
-        return 'ok';
+        break;
       case 'toggle_flash':
         overlayState.toggleFilter(GrenadeType.flash);
-        return 'ok';
+        break;
       case 'toggle_molotov':
         overlayState.toggleFilter(GrenadeType.molotov);
-        return 'ok';
+        break;
       case 'toggle_he':
         overlayState.toggleFilter(GrenadeType.he);
-        return 'ok';
+        break;
       case 'toggle_wallbang':
         overlayState.toggleFilter(GrenadeType.wallbang);
-        return 'ok';
-      // 方向键导航 - 兼容旧版步进移动指令
+        break;
       case 'navigate_up':
-        if (blocksDirectionalNavigation()) return 'ignored';
-        overlayState.navigateDirection(NavigationDirection.up);
-        return 'ok';
+        if (!blocksDirectionalNavigation()) {
+          overlayState.navigateDirection(NavigationDirection.up);
+        }
+        break;
       case 'navigate_down':
-        if (blocksDirectionalNavigation()) return 'ignored';
-        overlayState.navigateDirection(NavigationDirection.down);
-        return 'ok';
+        if (!blocksDirectionalNavigation()) {
+          overlayState.navigateDirection(NavigationDirection.down);
+        }
+        break;
       case 'navigate_left':
-        if (blocksDirectionalNavigation()) return 'ignored';
-        overlayState.navigateDirection(NavigationDirection.left);
-        return 'ok';
+        if (!blocksDirectionalNavigation()) {
+          overlayState.navigateDirection(NavigationDirection.left);
+        }
+        break;
       case 'navigate_right':
-        if (blocksDirectionalNavigation()) return 'ignored';
-        overlayState.navigateDirection(NavigationDirection.right);
-        return 'ok';
-      // 方向键导航 - 新版平滑移动指令 (start/stop)
+        if (!blocksDirectionalNavigation()) {
+          overlayState.navigateDirection(NavigationDirection.right);
+        }
+        break;
       case 'start_navigation':
-        final args = call.arguments as Map?;
-        final dirStr = args?['direction'] as String?;
-        final dir = _parseDirection(dirStr);
-        debugPrint('[Overlay] start_navigation: $dirStr -> $dir');
+        final dir = _parseDirection(cmdArgs?['direction'] as String?);
         if (blocksDirectionalNavigation()) {
           overlayState.stopAllNavigation();
-          return 'ignored';
+        } else if (dir != null) {
+          overlayState.startNavigation(dir);
         }
-        if (dir != null) overlayState.startNavigation(dir);
-        return 'ok';
+        break;
       case 'stop_navigation':
-        final args = call.arguments as Map?;
-        final dirStr = args?['direction'] as String?;
-        final dir = _parseDirection(dirStr);
-        debugPrint('[Overlay] stop_navigation: $dirStr -> $dir');
+        final dir = _parseDirection(cmdArgs?['direction'] as String?);
         if (dir != null) overlayState.stopNavigation(dir);
-        return 'ok';
+        break;
       case 'stop_all_navigation':
-        debugPrint('[Overlay] stop_all_navigation');
         overlayState.stopAllNavigation();
-        return 'ok';
-      // 视频播放控制
+        break;
       case 'toggle_play_pause':
         overlayState.triggerVideoTogglePlayPause();
-        return 'ok';
+        break;
       case 'toggle_media_fullscreen_preview':
-        overlayAppKey.currentState?.overlayWindowKey.currentState
+        await overlayAppKey.currentState?.overlayWindowKey.currentState
             ?.toggleMediaFullscreenPreview();
-        return 'ok';
-      // 更新透明度（设置界面调整时，直接通过 IPC 传递值）
+        break;
       case 'update_opacity':
-        final opacity = call.arguments?['opacity'] as double? ?? 0.9;
+        final opacity = (cmdArgs?['opacity'] as num?)?.toDouble() ?? 0.9;
         overlayState.setOpacity(opacity);
-        return 'ok';
-      // 更新导航速度（设置界面调整时，直接通过 IPC 传递值）
+        break;
       case 'update_nav_speed':
-        // JSON 序列化可能将 int 变成 num，使用 round() 避免精度问题
-        final speedValue = call.arguments?['speed'];
-        final speed = (speedValue is num) ? speedValue.round() : 3;
+        final speed = (cmdArgs?['speed'] as num?)?.round() ?? 3;
         overlayState.setNavSpeedLevel(speed);
-        return 'ok';
-      // 更新窗口尺寸
+        break;
       case 'update_size':
-        final sizeIndex = call.arguments?['sizeIndex'] as int? ?? 1;
-        debugPrint(
-            '[Overlay] Received update_size command with index: $sizeIndex');
-        overlayState.setOverlaySize(sizeIndex);
-        return 'ok';
-      // 增加导航速度
+        final sizeIndex = (cmdArgs?['sizeIndex'] as num?)?.toInt() ?? 1;
+        await overlayState.setOverlaySize(sizeIndex);
+        break;
       case 'increase_nav_speed':
         overlayState.increaseNavSpeed();
-        // 保存到设置
-        await settingsService.setOverlayNavSpeed(overlayState.navSpeedLevel);
-        return 'ok';
-      // 减少导航速度
+        client.sendEvent('nav_speed_changed', {
+          'speed': overlayState.navSpeedLevel,
+        });
+        break;
       case 'decrease_nav_speed':
         overlayState.decreaseNavSpeed();
-        // 保存到设置
-        await settingsService.setOverlayNavSpeed(overlayState.navSpeedLevel);
-        return 'ok';
-      // 滚动控制
+        client.sendEvent('nav_speed_changed', {
+          'speed': overlayState.navSpeedLevel,
+        });
+        break;
       case 'scroll_up':
         overlayAppKey.currentState?.overlayWindowKey.currentState
             ?.scrollContent(-300);
-        return 'ok';
+        break;
       case 'scroll_down':
         overlayAppKey.currentState?.overlayWindowKey.currentState
             ?.scrollContent(300);
-        return 'ok';
-      // 重新加载数据（主窗口修改数据后通知悬浮窗刷新）
-      case 'reload_data':
-        overlayState.reloadData();
-        return 'ok';
-      // 重新加载热键配置
+        break;
+      case 'set_legacy_icons':
+        GrenadeTypeIcon.useLegacy = cmdArgs?['value'] == true;
+        overlayState.refresh();
+        break;
       case 'reload_hotkeys':
-        try {
-          // 从 IPC 接收热键配置，需要处理类型转换
-          final rawHotkeys = call.arguments?['hotkeys'];
-          debugPrint(
-              '[Overlay] reload_hotkeys - rawHotkeys type: ${rawHotkeys.runtimeType}');
-
-          if (rawHotkeys != null) {
-            // 将 Map<Object?, Object?> 转换为 Map<String, dynamic>
-            final hotkeysJson = Map<String, dynamic>.from(rawHotkeys as Map);
-
-            // 解析热键配置
-            final hotkeys = <HotkeyAction, HotkeyConfig>{};
-            for (final action in HotkeyAction.values) {
-              final actionKey = action.name;
-              if (hotkeysJson.containsKey(actionKey)) {
-                // 同样需要转换内部的Map
-                final configMap =
-                    Map<String, dynamic>.from(hotkeysJson[actionKey] as Map);
-                hotkeys[action] = HotkeyConfig.fromJson(configMap);
-              }
-            }
-            // 通知 OverlayWindow 更新热键配置和UI
-            overlayAppKey.currentState?.overlayWindowKey.currentState
-                ?.reloadHotkeys(hotkeys);
-            debugPrint(
-                '[Overlay] Hotkeys reloaded and UI updated with ${hotkeys.length} keys');
-          } else {
-            debugPrint('[Overlay] reload_hotkeys called without hotkeys data');
-          }
-        } catch (e, stack) {
-          debugPrint('[Overlay] Error reloading hotkeys: $e');
-          debugPrint('[Overlay] Stack trace: $stack');
+        final rawHotkeys = cmdArgs?['hotkeys'];
+        if (rawHotkeys is Map) {
+          final hotkeys = OverlayInitConfig.decodeHotkeys(rawHotkeys);
+          overlayAppKey.currentState?.overlayWindowKey.currentState
+              ?.reloadHotkeys(hotkeys);
         }
-        return 'ok';
-      // 获取悬浮窗可见状态（供主窗口轮询）
-      case 'get_visibility':
-        return isOverlayLogicallyVisible ? 'visible' : 'hidden';
-      default:
-        return null;
+        break;
     }
-  });
-
-  if (launchSoftHidden) {
-    // 预加载时窗口本来就是 hiddenAtLaunch，避免为了“软隐藏”再闪现一次。
-    await softHideOverlay(
-      persistPosition: false,
-      ensureWindowVisible: false,
-    );
-  } else {
-    await showOverlayWindow();
-  }
+  };
 
   runApp(
-    ProviderScope(
-      overrides: [
-        isarProvider.overrideWithValue(isar),
-      ],
+    ExcludeSemantics(
+      excluding: !kIsWeb && Platform.isWindows,
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
@@ -759,20 +596,17 @@ Future<void> _runOverlayWindow(
         ),
         home: OverlayWindowApp(
           key: overlayAppKey,
-          settingsService: settingsService,
+          initialHotkeys: initConfig.hotkeys,
           overlayState: overlayState,
-          onClose: () async {
-            debugPrint('[Overlay] Hiding overlay window');
-            await softHideOverlay();
-          },
-          onMinimize: () async {
-            debugPrint('[Overlay] Minimizing overlay window');
-            await softHideOverlay();
-          },
+          isVisibleListenable: isOverlayVisibleNotifier,
+          onClose: () => hideOverlay(notifyMain: true),
+          onMinimize: () => hideOverlay(notifyMain: true),
         ),
       ),
     ),
   );
+
+  client.sendEvent('ready');
 }
 
 /// 数据预填充逻辑：支持多楼层
@@ -860,9 +694,6 @@ class MainApp extends ConsumerStatefulWidget {
 }
 
 class _MainAppState extends ConsumerState<MainApp> {
-  // 用于轮询悬浮窗可见性的定时器
-  Timer? _visibilityPollTimer;
-  // 用于获取 MaterialApp 内部 context 的 navigatorKey
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
   @override
@@ -1013,79 +844,6 @@ class _MainAppState extends ConsumerState<MainApp> {
       HotkeyAction.toggleOverlay,
       _toggleOverlay,
     );
-
-    // 获取主窗口控制器并监听来自其他窗口的消息
-    mainWindowController = await WindowController.fromCurrentEngine();
-    await mainWindowController?.setWindowMethodHandler((call) async {
-      debugPrint('[Main] Received IPC method: ${call.method}');
-      if (call.method == 'overlay_closed' || call.method == 'overlay_hidden') {
-        // 悬浮窗已隐藏/关闭，更新状态并注销热键
-        debugPrint('[Main] Processing overlay_hidden - calling hideOverlay');
-        await globalWindowService?.hideOverlay();
-        debugPrint('[Main] hideOverlay completed');
-      }
-      return null;
-    });
-
-    // 1秒后预加载悬浮窗
-    Future.delayed(const Duration(seconds: 1), () {
-      _preloadOverlay();
-    });
-
-    // 启动定时器轮询悬浮窗可见性（每500ms检查一次）
-    _visibilityPollTimer =
-        Timer.periodic(const Duration(milliseconds: 500), (_) {
-      _checkOverlayVisibility();
-    });
-  }
-
-  /// 检查悬浮窗可见性，如果隐藏则通知主窗口注销热键
-  Future<void> _checkOverlayVisibility() async {
-    // 仅当主窗口认为悬浮窗可见时才检查
-    if (overlayWindowController == null ||
-        globalWindowService == null ||
-        !globalWindowService!.isOverlayVisible) {
-      return;
-    }
-
-    try {
-      final result =
-          await overlayWindowController!.invokeMethod('get_visibility');
-      if (result == 'hidden') {
-        debugPrint(
-            '[Main] Detected overlay hidden via polling, unregistering hotkeys');
-        await globalWindowService!.hideOverlay();
-      }
-    } catch (e) {
-      // 忽略通信错误（悬浮窗可能还没准备好）
-    }
-  }
-
-  /// 预加载悬浮窗（不显示）
-  Future<void> _preloadOverlay() async {
-    if (overlayWindowController != null) return;
-
-    final savedX = globalSettingsService?.getOverlayX() ?? 100.0;
-    final savedY = globalSettingsService?.getOverlayY() ?? 100.0;
-    final currentMap = globalOverlayState?.currentMap;
-    final currentLayer = globalOverlayState?.currentLayer;
-
-    overlayWindowController = await WindowController.create(
-      WindowConfiguration(
-        hiddenAtLaunch: true, // 启动时隐藏
-        arguments: jsonEncode({
-          'type': WindowType.overlay,
-          'launch_soft_hidden': true,
-          'x': savedX,
-          'y': savedY,
-          'map_id': currentMap?.id,
-          'layer_id': currentLayer?.id,
-        }),
-      ),
-    );
-
-    await _waitForOverlayReady();
-    _syncMapToOverlay();
   }
 
   Future<void> _toggleOverlay() async {
@@ -1093,76 +851,31 @@ class _MainAppState extends ConsumerState<MainApp> {
   }
 
   Future<void> _showOverlay() async {
-    var overlayJustCreated = false;
-    if (overlayWindowController == null) {
-      // 如果还没加载（比如刚启动就按快捷键），则现在加载并显示
-      await _preloadOverlay();
-      overlayJustCreated = true;
+    try {
+      await globalOverlayServer?.showOverlay();
+    } catch (e) {
+      debugPrint('[Main] Failed to show overlay: $e');
+      await globalWindowService?.hideOverlay();
+      return;
     }
-    if (overlayJustCreated) {
-      await Future.delayed(const Duration(milliseconds: 100));
-    }
-    await overlayWindowController!.invokeMethod('show_overlay');
-    // 设置状态（用于轮询检测）
     if (globalWindowService != null) {
       globalWindowService!.isOverlayVisible = true;
     }
-    // 注册热键
     await globalHotkeyService?.registerOverlayHotkeys();
   }
 
-  Future<void> _hideOverlay() async {
-    if (overlayWindowController == null) return;
-    // 让悬浮窗自己先暂停媒体，再保存位置并隐藏
-    await overlayWindowController!.invokeMethod('hide_overlay');
+  void _hideOverlay() {
+    globalOverlayServer?.hideOverlay();
   }
 
-  Future<void> _waitForOverlayReady() async {
-    if (overlayWindowController == null) return;
-
-    for (var i = 0; i < 30; i++) {
-      try {
-        await overlayWindowController!.invokeMethod('get_visibility');
-        return;
-      } catch (_) {
-        await Future.delayed(const Duration(milliseconds: 100));
-      }
-    }
-  }
-
-  /// 同步地图信息到悬浮窗
-  void _syncMapToOverlay() async {
-    if (overlayWindowController == null || globalOverlayState == null) return;
-
-    final map = globalOverlayState!.currentMap;
-    final layer = globalOverlayState!.currentLayer;
-
-    if (map != null && layer != null) {
-      try {
-        await overlayWindowController!.invokeMethod('set_map', {
-          'map_id': map.id,
-          'layer_id': layer.id,
-        });
-      } catch (_) {
-        // 窗口可能已关闭，忽略错误
-      }
-    }
-  }
-
-  void _onExitApp() async {
-    // 真正退出时，清理悬浮窗
-    if (overlayWindowController != null) {
-      try {
-        await overlayWindowController!.invokeMethod('close');
-      } catch (_) {}
-      overlayWindowController = null;
-    }
+  Future<void> _onExitApp() async {
+    await globalOverlayServer?.dispose();
+    globalOverlayServer = null;
     globalHotkeyService?.dispose();
   }
 
   @override
   void dispose() {
-    _visibilityPollTimer?.cancel();
     _hideOverlay();
     globalHotkeyService?.dispose();
     globalWindowService?.dispose();
@@ -1296,21 +1009,24 @@ class _MainAppState extends ConsumerState<MainApp> {
   Widget build(BuildContext context) {
     final themeMode = ref.watch(themeModeProvider);
 
-    return MaterialApp(
-      navigatorKey: _navigatorKey,
-      title: 'Grenade Helper',
-      debugShowCheckedModeBanner: false,
-      themeMode: intToThemeMode(themeMode),
-      darkTheme: AppTheme.dark(),
-      theme: AppTheme.light(),
-      home: AppShell(
-        settingsService: globalSettingsService,
-        onHotkeyChanged: (action, config) async {
-          await globalHotkeyService?.updateHotkey(action, config);
-        },
-        onHotkeysReset: () async {
-          await globalHotkeyService?.reloadFromSettings();
-        },
+    return ExcludeSemantics(
+      excluding: !kIsWeb && Platform.isWindows,
+      child: MaterialApp(
+        navigatorKey: _navigatorKey,
+        title: 'Grenade Helper',
+        debugShowCheckedModeBanner: false,
+        themeMode: intToThemeMode(themeMode),
+        darkTheme: AppTheme.dark(),
+        theme: AppTheme.light(),
+        home: AppShell(
+          settingsService: globalSettingsService,
+          onHotkeyChanged: (action, config) async {
+            await globalHotkeyService?.updateHotkey(action, config);
+          },
+          onHotkeysReset: () async {
+            await globalHotkeyService?.reloadFromSettings();
+          },
+        ),
       ),
     );
   }
@@ -1318,15 +1034,17 @@ class _MainAppState extends ConsumerState<MainApp> {
 
 /// 悬浮窗应用（独立窗口入口）
 class OverlayWindowApp extends StatefulWidget {
-  final SettingsService settingsService;
+  final Map<HotkeyAction, HotkeyConfig> initialHotkeys;
   final OverlayStateService overlayState;
+  final ValueListenable<bool> isVisibleListenable;
   final AsyncCallback onClose;
   final AsyncCallback onMinimize;
 
   const OverlayWindowApp({
     super.key,
-    required this.settingsService,
+    required this.initialHotkeys,
     required this.overlayState,
+    required this.isVisibleListenable,
     required this.onClose,
     required this.onMinimize,
   });
@@ -1342,14 +1060,20 @@ class OverlayWindowAppState extends State<OverlayWindowApp> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: OverlayWindow(
-        key: overlayWindowKey,
-        settingsService: widget.settingsService,
-        overlayState: widget.overlayState,
-        onClose: widget.onClose,
-        onMinimize: widget.onMinimize,
-        onStartDrag: () async {
-          await windowManager.startDragging();
+      body: ValueListenableBuilder<bool>(
+        valueListenable: widget.isVisibleListenable,
+        builder: (context, isVisible, _) {
+          return OverlayWindow(
+            key: overlayWindowKey,
+            initialHotkeys: widget.initialHotkeys,
+            overlayState: widget.overlayState,
+            isVisible: isVisible,
+            onClose: widget.onClose,
+            onMinimize: widget.onMinimize,
+            onStartDrag: () async {
+              await windowManager.startDragging();
+            },
+          );
         },
       ),
     );

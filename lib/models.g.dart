@@ -7,7 +7,7 @@ part of 'models.dart';
 // **************************************************************************
 
 // coverage:ignore-file
-// ignore_for_file: duplicate_ignore, non_constant_identifier_names, constant_identifier_names, invalid_use_of_protected_member, unnecessary_cast, prefer_const_constructors, lines_longer_than_80_chars, require_trailing_commas, inference_failure_on_function_invocation, unnecessary_parenthesis, unnecessary_raw_strings, unnecessary_null_checks, join_return_with_assignment, prefer_final_locals, avoid_js_rounded_ints, avoid_positional_boolean_parameters, always_specify_types
+// ignore_for_file: duplicate_ignore, non_constant_identifier_names, constant_identifier_names, invalid_use_of_protected_member, unnecessary_cast, prefer_const_constructors, lines_longer_than_80_chars, require_trailing_commas, inference_failure_on_function_invocation, unnecessary_parenthesis, unnecessary_raw_strings, unnecessary_null_checks, join_return_with_assignment, prefer_final_locals, avoid_js_rounded_ints, avoid_positional_boolean_parameters, always_specify_types, experimental_member_use
 
 extension GetGameMapCollection on Isar {
   IsarCollection<GameMap> get gameMaps => this.collection();
@@ -51,7 +51,7 @@ const GameMapSchema = CollectionSchema(
   getId: _gameMapGetId,
   getLinks: _gameMapGetLinks,
   attach: _gameMapAttach,
-  version: '3.3.2',
+  version: '3.4.1',
 );
 
 int _gameMapEstimateSize(
@@ -851,7 +851,7 @@ extension GameMapQueryProperty
 }
 
 // coverage:ignore-file
-// ignore_for_file: duplicate_ignore, non_constant_identifier_names, constant_identifier_names, invalid_use_of_protected_member, unnecessary_cast, prefer_const_constructors, lines_longer_than_80_chars, require_trailing_commas, inference_failure_on_function_invocation, unnecessary_parenthesis, unnecessary_raw_strings, unnecessary_null_checks, join_return_with_assignment, prefer_final_locals, avoid_js_rounded_ints, avoid_positional_boolean_parameters, always_specify_types
+// ignore_for_file: duplicate_ignore, non_constant_identifier_names, constant_identifier_names, invalid_use_of_protected_member, unnecessary_cast, prefer_const_constructors, lines_longer_than_80_chars, require_trailing_commas, inference_failure_on_function_invocation, unnecessary_parenthesis, unnecessary_raw_strings, unnecessary_null_checks, join_return_with_assignment, prefer_final_locals, avoid_js_rounded_ints, avoid_positional_boolean_parameters, always_specify_types, experimental_member_use
 
 extension GetMapLayerCollection on Isar {
   IsarCollection<MapLayer> get mapLayers => this.collection();
@@ -902,7 +902,7 @@ const MapLayerSchema = CollectionSchema(
   getId: _mapLayerGetId,
   getLinks: _mapLayerGetLinks,
   attach: _mapLayerAttach,
-  version: '3.3.2',
+  version: '3.4.1',
 );
 
 int _mapLayerEstimateSize(
@@ -1635,7 +1635,7 @@ extension MapLayerQueryProperty
 }
 
 // coverage:ignore-file
-// ignore_for_file: duplicate_ignore, non_constant_identifier_names, constant_identifier_names, invalid_use_of_protected_member, unnecessary_cast, prefer_const_constructors, lines_longer_than_80_chars, require_trailing_commas, inference_failure_on_function_invocation, unnecessary_parenthesis, unnecessary_raw_strings, unnecessary_null_checks, join_return_with_assignment, prefer_final_locals, avoid_js_rounded_ints, avoid_positional_boolean_parameters, always_specify_types
+// ignore_for_file: duplicate_ignore, non_constant_identifier_names, constant_identifier_names, invalid_use_of_protected_member, unnecessary_cast, prefer_const_constructors, lines_longer_than_80_chars, require_trailing_commas, inference_failure_on_function_invocation, unnecessary_parenthesis, unnecessary_raw_strings, unnecessary_null_checks, join_return_with_assignment, prefer_final_locals, avoid_js_rounded_ints, avoid_positional_boolean_parameters, always_specify_types, experimental_member_use
 
 extension GetGrenadeCollection on Isar {
   IsarCollection<Grenade> get grenades => this.collection();
@@ -1803,7 +1803,7 @@ const GrenadeSchema = CollectionSchema(
   getId: _grenadeGetId,
   getLinks: _grenadeGetLinks,
   attach: _grenadeAttach,
-  version: '3.3.2',
+  version: '3.4.1',
 );
 
 int _grenadeEstimateSize(
@@ -4856,7 +4856,7 @@ extension GrenadeQueryProperty
 }
 
 // coverage:ignore-file
-// ignore_for_file: duplicate_ignore, non_constant_identifier_names, constant_identifier_names, invalid_use_of_protected_member, unnecessary_cast, prefer_const_constructors, lines_longer_than_80_chars, require_trailing_commas, inference_failure_on_function_invocation, unnecessary_parenthesis, unnecessary_raw_strings, unnecessary_null_checks, join_return_with_assignment, prefer_final_locals, avoid_js_rounded_ints, avoid_positional_boolean_parameters, always_specify_types
+// ignore_for_file: duplicate_ignore, non_constant_identifier_names, constant_identifier_names, invalid_use_of_protected_member, unnecessary_cast, prefer_const_constructors, lines_longer_than_80_chars, require_trailing_commas, inference_failure_on_function_invocation, unnecessary_parenthesis, unnecessary_raw_strings, unnecessary_null_checks, join_return_with_assignment, prefer_final_locals, avoid_js_rounded_ints, avoid_positional_boolean_parameters, always_specify_types, experimental_member_use
 
 extension GetGrenadeStepCollection on Isar {
   IsarCollection<GrenadeStep> get grenadeSteps => this.collection();
@@ -4907,7 +4907,7 @@ const GrenadeStepSchema = CollectionSchema(
   getId: _grenadeStepGetId,
   getLinks: _grenadeStepGetLinks,
   attach: _grenadeStepAttach,
-  version: '3.3.2',
+  version: '3.4.1',
 );
 
 int _grenadeStepEstimateSize(
@@ -5660,7 +5660,7 @@ extension GrenadeStepQueryProperty
 }
 
 // coverage:ignore-file
-// ignore_for_file: duplicate_ignore, non_constant_identifier_names, constant_identifier_names, invalid_use_of_protected_member, unnecessary_cast, prefer_const_constructors, lines_longer_than_80_chars, require_trailing_commas, inference_failure_on_function_invocation, unnecessary_parenthesis, unnecessary_raw_strings, unnecessary_null_checks, join_return_with_assignment, prefer_final_locals, avoid_js_rounded_ints, avoid_positional_boolean_parameters, always_specify_types
+// ignore_for_file: duplicate_ignore, non_constant_identifier_names, constant_identifier_names, invalid_use_of_protected_member, unnecessary_cast, prefer_const_constructors, lines_longer_than_80_chars, require_trailing_commas, inference_failure_on_function_invocation, unnecessary_parenthesis, unnecessary_raw_strings, unnecessary_null_checks, join_return_with_assignment, prefer_final_locals, avoid_js_rounded_ints, avoid_positional_boolean_parameters, always_specify_types, experimental_member_use
 
 extension GetStepMediaCollection on Isar {
   IsarCollection<StepMedia> get stepMedias => this.collection();
@@ -5705,7 +5705,7 @@ const StepMediaSchema = CollectionSchema(
   getId: _stepMediaGetId,
   getLinks: _stepMediaGetLinks,
   attach: _stepMediaAttach,
-  version: '3.3.2',
+  version: '3.4.1',
 );
 
 int _stepMediaEstimateSize(
@@ -6305,7 +6305,7 @@ extension StepMediaQueryProperty
 }
 
 // coverage:ignore-file
-// ignore_for_file: duplicate_ignore, non_constant_identifier_names, constant_identifier_names, invalid_use_of_protected_member, unnecessary_cast, prefer_const_constructors, lines_longer_than_80_chars, require_trailing_commas, inference_failure_on_function_invocation, unnecessary_parenthesis, unnecessary_raw_strings, unnecessary_null_checks, join_return_with_assignment, prefer_final_locals, avoid_js_rounded_ints, avoid_positional_boolean_parameters, always_specify_types
+// ignore_for_file: duplicate_ignore, non_constant_identifier_names, constant_identifier_names, invalid_use_of_protected_member, unnecessary_cast, prefer_const_constructors, lines_longer_than_80_chars, require_trailing_commas, inference_failure_on_function_invocation, unnecessary_parenthesis, unnecessary_raw_strings, unnecessary_null_checks, join_return_with_assignment, prefer_final_locals, avoid_js_rounded_ints, avoid_positional_boolean_parameters, always_specify_types, experimental_member_use
 
 extension GetImportHistoryCollection on Isar {
   IsarCollection<ImportHistory> get importHistorys => this.collection();
@@ -6359,7 +6359,7 @@ const ImportHistorySchema = CollectionSchema(
   getId: _importHistoryGetId,
   getLinks: _importHistoryGetLinks,
   attach: _importHistoryAttach,
-  version: '3.3.2',
+  version: '3.4.1',
 );
 
 int _importHistoryEstimateSize(
@@ -7231,7 +7231,7 @@ extension ImportHistoryQueryProperty
 }
 
 // coverage:ignore-file
-// ignore_for_file: duplicate_ignore, non_constant_identifier_names, constant_identifier_names, invalid_use_of_protected_member, unnecessary_cast, prefer_const_constructors, lines_longer_than_80_chars, require_trailing_commas, inference_failure_on_function_invocation, unnecessary_parenthesis, unnecessary_raw_strings, unnecessary_null_checks, join_return_with_assignment, prefer_final_locals, avoid_js_rounded_ints, avoid_positional_boolean_parameters, always_specify_types
+// ignore_for_file: duplicate_ignore, non_constant_identifier_names, constant_identifier_names, invalid_use_of_protected_member, unnecessary_cast, prefer_const_constructors, lines_longer_than_80_chars, require_trailing_commas, inference_failure_on_function_invocation, unnecessary_parenthesis, unnecessary_raw_strings, unnecessary_null_checks, join_return_with_assignment, prefer_final_locals, avoid_js_rounded_ints, avoid_positional_boolean_parameters, always_specify_types, experimental_member_use
 
 extension GetImpactGroupCollection on Isar {
   IsarCollection<ImpactGroup> get impactGroups => this.collection();
@@ -7315,7 +7315,7 @@ const ImpactGroupSchema = CollectionSchema(
   getId: _impactGroupGetId,
   getLinks: _impactGroupGetLinks,
   attach: _impactGroupAttach,
-  version: '3.3.2',
+  version: '3.4.1',
 );
 
 int _impactGroupEstimateSize(
@@ -8454,7 +8454,7 @@ extension ImpactGroupQueryProperty
 }
 
 // coverage:ignore-file
-// ignore_for_file: duplicate_ignore, non_constant_identifier_names, constant_identifier_names, invalid_use_of_protected_member, unnecessary_cast, prefer_const_constructors, lines_longer_than_80_chars, require_trailing_commas, inference_failure_on_function_invocation, unnecessary_parenthesis, unnecessary_raw_strings, unnecessary_null_checks, join_return_with_assignment, prefer_final_locals, avoid_js_rounded_ints, avoid_positional_boolean_parameters, always_specify_types
+// ignore_for_file: duplicate_ignore, non_constant_identifier_names, constant_identifier_names, invalid_use_of_protected_member, unnecessary_cast, prefer_const_constructors, lines_longer_than_80_chars, require_trailing_commas, inference_failure_on_function_invocation, unnecessary_parenthesis, unnecessary_raw_strings, unnecessary_null_checks, join_return_with_assignment, prefer_final_locals, avoid_js_rounded_ints, avoid_positional_boolean_parameters, always_specify_types, experimental_member_use
 
 extension GetFavoriteFolderCollection on Isar {
   IsarCollection<FavoriteFolder> get favoriteFolders => this.collection();
@@ -8533,7 +8533,7 @@ const FavoriteFolderSchema = CollectionSchema(
   getId: _favoriteFolderGetId,
   getLinks: _favoriteFolderGetLinks,
   attach: _favoriteFolderAttach,
-  version: '3.3.2',
+  version: '3.4.1',
 );
 
 int _favoriteFolderEstimateSize(

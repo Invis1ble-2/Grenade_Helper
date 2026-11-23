@@ -18,7 +18,7 @@ class WindowService with TrayListener, WindowListener {
   void Function()? onShowMainWindow;
   void Function()? onShowOverlay;
   void Function()? onHideOverlay;
-  void Function()? onExitApp;
+  Future<void> Function()? onExitApp;
   Future<void> Function()? onCloseDatabase; // 退出时关闭数据库
 
   WindowService(this._settings);
@@ -189,7 +189,7 @@ class WindowService with TrayListener, WindowListener {
 
   /// 强制退出
   Future<void> forceExitApp() async {
-    onExitApp?.call();
+    await onExitApp?.call();
     trayManager.removeListener(this);
     windowManager.removeListener(this);
     await trayManager.destroy();

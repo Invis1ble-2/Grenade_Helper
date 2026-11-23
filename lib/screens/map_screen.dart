@@ -441,10 +441,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     for (final info in _grenadeTypePictures.values) {
       info.picture.dispose();
     }
-    // 清除悬浮窗
-    globalOverlayState?.clearMap();
-    // 通知清除
-    _notifyOverlayWindowClearMap();
+    clearOverlayActiveMap();
     super.dispose();
   }
 
@@ -855,48 +852,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     widget.gameMap.layers.loadSync();
     final layers = widget.gameMap.layers.toList();
     if (layerIndex < layers.length) {
-      final layer = layers[layerIndex];
-      globalOverlayState?.setCurrentMap(widget.gameMap, layer);
-      // 通知独立悬浮窗
-      _notifyOverlayWindowSetMap(widget.gameMap.id, layer.id);
-    }
-  }
-
-  void _notifyOverlayWindowSetMap(int mapId, int layerId,
-      {int retryCount = 0}) {
-    if (!_supportsOverlayWindow) return;
-    if (overlayWindowController != null) {
-      try {
-        overlayWindowController!.invokeMethod('set_map', {
-          'map_id': mapId,
-          'layer_id': layerId,
-        }).catchError((e) {
-          if (retryCount < 3) {
-            Future.delayed(const Duration(milliseconds: 500), () {
-              _notifyOverlayWindowSetMap(mapId, layerId,
-                  retryCount: retryCount + 1);
-            });
-          }
-        });
-      } catch (e) {
-        // ignore
-      }
-    } else {
-      if (retryCount < 5) {
-        Future.delayed(const Duration(milliseconds: 500), () {
-          _notifyOverlayWindowSetMap(mapId, layerId,
-              retryCount: retryCount + 1);
-        });
-      }
-    }
-  }
-
-  void _notifyOverlayWindowClearMap() {
-    if (!_supportsOverlayWindow) return;
-    if (overlayWindowController != null) {
-      try {
-        overlayWindowController!.invokeMethod('clear_map').catchError((_) {});
-      } catch (_) {}
+      setOverlayActiveMap(widget.gameMap, layers[layerIndex]);
     }
   }
 
@@ -2432,8 +2388,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final Offset newPosition =
         cursorPosition * (1 - scaleRatio) + currentPosition * scaleRatio;
 
-    _photoViewController.scale = newScale;
-    _photoViewController.position = newPosition;
+    _photoViewController.updateMultiple(
+      scale: newScale,
+      position: newPosition,
+    );
   }
 
   Color _getTeamColor(int team) {
@@ -3369,6 +3327,26 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     );
   }
 
+  Widget _buildMapCapsuleSurface({
+    required double radius,
+    required bool useBlur,
+    required Widget child,
+  }) {
+    if (!useBlur) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(radius),
+        child: child,
+      );
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: child,
+      ),
+    );
+  }
+
   Widget _buildDesktopSpawnChip({
     required String label,
     required String tooltip,
@@ -3612,14 +3590,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       constraints: BoxConstraints(maxHeight: maxHeight),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(14),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.6),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-            ),
+        child: Container(
+          decoration: BoxDecoration(
+            color: const Color(0xD612151B),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+          ),
             child: !_isSpawnSidebarExpanded
                 ? GestureDetector(
                     behavior: HitTestBehavior.opaque,
@@ -3813,8 +3789,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   ),
           ),
         ),
-      ),
-    );
+      );
   }
 
   Widget _buildSpawnSidebarToggle({
@@ -4142,21 +4117,23 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         final visibleFolders =
             allFolders.where((f) => f.grenades.isNotEmpty).toList();
 
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-            child: Container(
-              height: 42,
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.56),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.12),
-                ),
+        final isMobile = AppBreakpoints.isMobile(context);
+        return _buildMapCapsuleSurface(
+          radius: 14,
+          useBlur: isMobile,
+          child: Container(
+            height: 42,
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            decoration: BoxDecoration(
+              color: isMobile
+                  ? Colors.black.withValues(alpha: 0.56)
+                  : const Color(0xD612151B),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.12),
               ),
-              child: visibleFolders.isEmpty
+            ),
+            child: visibleFolders.isEmpty
                   ? InkWell(
                       borderRadius: BorderRadius.circular(10),
                       onTap: () => _showFavoriteFolderManager(folderService),
@@ -4255,7 +4232,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                         ),
                       ],
                     ),
-            ),
           ),
         );
       },
@@ -6031,20 +6007,21 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   left: 16,
                   right: 16,
                   child: Center(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(15),
-                      child: BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 7, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.56),
-                            borderRadius: BorderRadius.circular(15),
-                            border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.12)),
-                          ),
-                          child: SingleChildScrollView(
+                    child: _buildMapCapsuleSurface(
+                      radius: 15,
+                      useBlur: isMobile,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: isMobile
+                              ? Colors.black.withValues(alpha: 0.56)
+                              : const Color(0xD612151B),
+                          borderRadius: BorderRadius.circular(15),
+                          border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.12)),
+                        ),
+                        child: SingleChildScrollView(
                             scrollDirection: Axis.horizontal,
                             child: IntrinsicWidth(
                               child: Column(
@@ -6175,7 +6152,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                         ),
                       ),
                     ),
-                  ),
                 ),
                 // 右下角工具胶囊（楼层切换 + 爆点切换 + 标签筛选）
                 Positioned(
@@ -6186,20 +6162,21 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       if (layers.length > 1) ...[
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(14),
-                          child: BackdropFilter(
-                            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-                            child: Container(
-                              padding: const EdgeInsets.all(4),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.56),
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: Colors.white.withValues(alpha: 0.12),
-                                ),
+                        _buildMapCapsuleSurface(
+                          radius: 14,
+                          useBlur: isMobile,
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              color: isMobile
+                                  ? Colors.black.withValues(alpha: 0.56)
+                                  : const Color(0xD612151B),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.12),
                               ),
-                              child: Column(
+                            ),
+                            child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   IconButton(
@@ -6259,25 +6236,25 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                 ],
                               ),
                             ),
-                          ),
                         ),
                         const SizedBox(height: 8),
                       ],
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-                          child: Container(
-                            height: 42,
-                            padding: const EdgeInsets.symmetric(horizontal: 5),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.56),
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.12),
-                              ),
+                      _buildMapCapsuleSurface(
+                        radius: 14,
+                        useBlur: isMobile,
+                        child: Container(
+                          height: 42,
+                          padding: const EdgeInsets.symmetric(horizontal: 5),
+                          decoration: BoxDecoration(
+                            color: isMobile
+                                ? Colors.black.withValues(alpha: 0.56)
+                                : const Color(0xD612151B),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.12),
                             ),
-                            child: Row(
+                          ),
+                          child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 IconButton(
@@ -6310,7 +6287,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                       behavior: SnackBarBehavior.floating,
                                     ));
                                   },
-                                  icon: Icon(
+                                  icon: FaIcon(
                                     _isImpactMode
                                         ? FontAwesomeIcons.crosshairs
                                         : FontAwesomeIcons.locationDot,
@@ -6358,7 +6335,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                             ),
                           ),
                         ),
-                      ),
                     ],
                   ),
                 ),

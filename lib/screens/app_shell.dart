@@ -157,7 +157,7 @@ class _ShellPanningBackground extends StatefulWidget {
 }
 
 class _ShellPanningBackgroundState extends State<_ShellPanningBackground>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   static const int _sourceImageWidth = 3072;
   static const double _imageAspectRatio = 3072 / 2048;
   late final AnimationController _controller;
@@ -165,6 +165,7 @@ class _ShellPanningBackgroundState extends State<_ShellPanningBackground>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 28),
@@ -172,7 +173,19 @@ class _ShellPanningBackgroundState extends State<_ShellPanningBackground>
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      if (!_controller.isAnimating) {
+        _controller.repeat(reverse: true);
+      }
+    } else if (_controller.isAnimating) {
+      _controller.stop(canceled: false);
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
     super.dispose();
   }

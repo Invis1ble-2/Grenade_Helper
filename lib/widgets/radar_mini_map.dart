@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import '../models.dart';
+import '../models/overlay_snapshot.dart';
 import '../services/grenade_cluster_service.dart';
 import 'path_image_provider.dart';
 
 /// 雷达小地图
 class RadarMiniMap extends StatefulWidget {
   final String mapAssetPath;
-  final Grenade? currentGrenade;
-  final List<Grenade> allGrenades;
+  final OverlayGrenadeItem? currentGrenade;
+  final List<OverlayGrenadeItem> allGrenades;
   final double width;
   final double height;
   final double zoomLevel;
@@ -38,12 +39,12 @@ class RadarMiniMap extends StatefulWidget {
 class _RadarMiniMapState extends State<RadarMiniMap>
     with SingleTickerProviderStateMixin {
   late Ticker _ticker;
+  late List<GrenadeCluster> _cachedClusters;
+  ImageProvider? _cachedMapImageProvider;
 
-  // 动画位置
   double _animatedX = 0.5;
   double _animatedY = 0.5;
 
-  // 平滑追踪速度（0.0-1.0，值越大追踪越快）
   static const double _smoothFactor = 0.35;
 
   @override
@@ -51,18 +52,35 @@ class _RadarMiniMapState extends State<RadarMiniMap>
     super.initState();
     _animatedX = widget.crosshairX;
     _animatedY = widget.crosshairY;
+    _cachedClusters = GrenadeClusterService.buildClusters(widget.allGrenades);
+    _cachedMapImageProvider = imageProviderFromPath(widget.mapAssetPath);
+    _ticker = createTicker(_onTick);
+  }
 
-    // 驱动更新
-    _ticker = createTicker(_onTick)..start();
+  @override
+  void didUpdateWidget(covariant RadarMiniMap oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.allGrenades, widget.allGrenades)) {
+      _cachedClusters =
+          GrenadeClusterService.buildClusters(widget.allGrenades);
+    }
+    if (oldWidget.mapAssetPath != widget.mapAssetPath) {
+      _cachedMapImageProvider = imageProviderFromPath(widget.mapAssetPath);
+    }
+    if ((widget.crosshairX - _animatedX).abs() >= 0.001 ||
+        (widget.crosshairY - _animatedY).abs() >= 0.001) {
+      if (!_ticker.isActive) {
+        _ticker.start();
+      }
+    }
   }
 
   void _onTick(Duration elapsed) {
-    // 计算差距
     final dx = widget.crosshairX - _animatedX;
     final dy = widget.crosshairY - _animatedY;
 
-    // 到达目标
     if (dx.abs() < 0.001 && dy.abs() < 0.001) {
+      _ticker.stop();
       if (_animatedX != widget.crosshairX || _animatedY != widget.crosshairY) {
         setState(() {
           _animatedX = widget.crosshairX;
@@ -72,7 +90,6 @@ class _RadarMiniMapState extends State<RadarMiniMap>
       return;
     }
 
-    // 平滑插值
     setState(() {
       _animatedX += dx * _smoothFactor;
       _animatedY += dy * _smoothFactor;
@@ -154,10 +171,9 @@ class _RadarMiniMapState extends State<RadarMiniMap>
     // 地图尺寸
     final mapSize = widget.width > widget.height ? widget.width : widget.height;
 
-    // 计算偏移
     final offsetX = (0.5 - centerX) * mapSize * widget.zoomLevel;
     final offsetY = (0.5 - centerY) * mapSize * widget.zoomLevel;
-    final mapImageProvider = imageProviderFromPath(widget.mapAssetPath);
+    final mapImageProvider = _cachedMapImageProvider;
 
     return SizedBox(
       width: widget.width,
@@ -186,11 +202,8 @@ class _RadarMiniMapState extends State<RadarMiniMap>
   }
 
   List<Widget> _buildOtherPoints(double centerX, double centerY) {
-    // 地图尺寸
     final mapSize = widget.width > widget.height ? widget.width : widget.height;
-
-    // 聚合点位
-    var clusters = GrenadeClusterService.buildClusters(widget.allGrenades);
+    var clusters = _cachedClusters;
 
     // 过滤当前
     if (widget.isSnapped && widget.currentGrenade != null) {
