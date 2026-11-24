@@ -21,6 +21,8 @@ import '../widgets/joystick_widget.dart';
 import '../widgets/path_image_provider.dart';
 import '../widgets/square_brush.dart';
 import '../widgets/app_svg_icon.dart';
+import '../widgets/dashed_line_painter.dart';
+import '../widgets/grenade_tag_editor.dart';
 import '../widgets/grenade_type_icon.dart';
 import '../widgets/map_icon.dart';
 import '../theme/app_design_system.dart';
@@ -246,6 +248,7 @@ List<GrenadeCluster> clusterGrenadesByImpact(List<Grenade> grenades,
     grenades,
     threshold: threshold,
     pointOf: (g) {
+      if (g.type == GrenadeType.wallbang) return null;
       final x = g.impactXRatio;
       final y = g.impactYRatio;
       if (x == null || y == null) return null;
@@ -353,6 +356,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   bool _isLoadingGrenadeTypePictures = false;
 
   bool get _useLegacyMapMarkers => GrenadeTypeIcon.useLegacy;
+  bool get _isPickingWallbangLine =>
+      _movingSingleImpactGrenade?.type == GrenadeType.wallbang;
 
   @override
   void initState() {
@@ -979,9 +984,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         await isar.writeTxn(() async {
           final g = await isar.grenades.get(targetId);
           if (g != null) {
-            g.xRatio = targetX;
-            g.yRatio = targetY;
-            g.updatedAt = DateTime.now();
+            _applyThrowPosition(g, targetX, targetY);
             await isar.grenades.put(g);
           }
         });
@@ -1033,60 +1036,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         return;
       }
 
-      // 移动爆点
+      // 移动爆点或设置穿线方位
       if (_movingSingleImpactGrenade != null) {
-        final isar = ref.read(isarProvider);
-        await isar.writeTxn(() async {
-          final g = await isar.grenades.get(_movingSingleImpactGrenade!.id);
-          if (g != null) {
-            g.impactXRatio = targetX;
-            g.impactYRatio = targetY;
-            g.updatedAt = DateTime.now();
-            await isar.grenades.put(g);
-          }
-        });
-
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text("✓ 爆点位置已更新"),
-            backgroundColor: Colors.purpleAccent,
-            duration: Duration(seconds: 1)));
-
-        // 恢复选中
-        final impactTargetId = _movingSingleImpactGrenade!.id;
-        Future.delayed(const Duration(milliseconds: 50), () {
-          if (!mounted) return;
-          final grenades =
-              ref.read(_filteredGrenadesProvider(layerId)).asData?.value;
-          if (grenades != null) {
-            final clusterThreshold = _getAdaptiveClusterThreshold(
-              scale: _photoViewController.scale ?? 1.0,
-              grenadeCount: grenades.length,
-            );
-
-            List<GrenadeCluster> clusters;
-            if (_isImpactMode) {
-              clusters =
-                  _getImpactClusters(grenades, threshold: clusterThreshold);
-            } else {
-              clusters =
-                  _getThrowClusters(grenades, threshold: clusterThreshold);
-            }
-
-            try {
-              final cluster = clusters.firstWhere(
-                  (c) => c.grenades.any((g) => g.id == impactTargetId));
-              setState(() {
-                _selectedClusterForImpact = cluster;
-              });
-            } catch (_) {}
-          }
-        });
-
-        setState(() {
-          _movingSingleImpactGrenade = null;
-        });
+        await _saveSingleImpactPosition(
+          _movingSingleImpactGrenade!,
+          targetX,
+          targetY,
+          layerId: layerId,
+        );
         return;
       }
 
@@ -1126,9 +1083,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           for (final g in _draggingCluster!.grenades) {
             final freshG = isar.grenades.getSync(g.id);
             if (freshG != null) {
-              freshG.xRatio = targetX;
-              freshG.yRatio = targetY;
-              freshG.updatedAt = DateTime.now();
+              _applyThrowPosition(freshG, targetX, targetY);
               isar.grenades.putSync(freshG);
             }
           }
@@ -1156,6 +1111,36 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     _tryCreateGrenadeAtGlobalPosition(details.globalPosition, layerId);
   }
 
+  void _applyThrowPosition(Grenade grenade, double targetX, double targetY) {
+    grenade.xRatio = targetX;
+    grenade.yRatio = targetY;
+    if (grenade.type == GrenadeType.wallbang &&
+        grenade.impactXRatio != null &&
+        grenade.impactYRatio != null &&
+        isZeroLengthPointPair(
+            targetX, targetY, grenade.impactXRatio!, grenade.impactYRatio!)) {
+      grenade.impactXRatio = null;
+      grenade.impactYRatio = null;
+    }
+    grenade.updatedAt = DateTime.now();
+  }
+
+  Future<void> _bindDefaultRoleTagInTxn(
+    Isar isar,
+    int grenadeId,
+    int mapId,
+  ) async {
+    final mapTags = await isar.tags.filter().mapIdEqualTo(mapId).findAll();
+    for (final tag in mapTags) {
+      if (roleTagToTeamType(tag) == TeamType.all) {
+        await isar.grenadeTags.put(
+          GrenadeTag(grenadeId: grenadeId, tagId: tag.id),
+        );
+        break;
+      }
+    }
+  }
+
   void _createGrenade(int layerId) async {
     final isar = ref.read(isarProvider);
     final layer = await isar.mapLayers.get(layerId);
@@ -1174,6 +1159,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       id = await isar.grenades.put(grenade);
       grenade.layer.value = layer;
       await grenade.layer.save();
+      await _bindDefaultRoleTagInTxn(isar, id, widget.gameMap.id);
     });
     setState(() {
       _tempTapPosition = null;
@@ -1240,14 +1226,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       await isar.writeTxn(() async {
         final g = await isar.grenades.get(_movingSingleGrenade!.id);
         if (g != null) {
-          // 合并坐标
-          // 物理合并
           final targetX = cluster.grenades.first.xRatio;
           final targetY = cluster.grenades.first.yRatio;
-
-          g.xRatio = targetX;
-          g.yRatio = targetY;
-          g.updatedAt = DateTime.now();
+          _applyThrowPosition(g, targetX, targetY);
           await isar.grenades.put(g);
         }
       });
@@ -1262,40 +1243,17 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       setState(() {
         _movingSingleGrenade = null;
       });
-      setState(() {
-        _movingSingleGrenade = null;
-      });
       return;
     }
 
     // 处理单个爆点移动
-    if (_movingSingleImpactGrenade != null) {
-      final isar = ref.read(isarProvider);
-
-      // 吸附效果
-      final targetX = cluster.xRatio;
-      final targetY = cluster.yRatio;
-
-      await isar.writeTxn(() async {
-        final g = await isar.grenades.get(_movingSingleImpactGrenade!.id);
-        if (g != null) {
-          g.impactXRatio = targetX;
-          g.impactYRatio = targetY;
-          g.updatedAt = DateTime.now();
-          await isar.grenades.put(g);
-        }
-      });
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("✓ 爆点位置已更新"),
-          backgroundColor: Colors.purpleAccent,
-          duration: Duration(seconds: 1)));
-
-      setState(() {
-        _movingSingleImpactGrenade = null;
-      });
+    if (_movingSingleImpactGrenade != null && !_isPickingWallbangLine) {
+      await _saveSingleImpactPosition(
+        _movingSingleImpactGrenade!,
+        cluster.xRatio,
+        cluster.yRatio,
+        layerId: layerId,
+      );
       return;
     }
 
@@ -1322,9 +1280,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         for (final g in _draggingCluster!.grenades) {
           final freshG = await isar.grenades.get(g.id);
           if (freshG != null) {
-            freshG.xRatio = targetX;
-            freshG.yRatio = targetY;
-            freshG.updatedAt = DateTime.now();
+            _applyThrowPosition(freshG, targetX, targetY);
             await isar.grenades.put(freshG);
           }
         }
@@ -1620,6 +1576,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                   leading: Container(
                                     width: 28,
                                     height: 28,
+                                    alignment: Alignment.center,
                                     decoration: BoxDecoration(
                                       color: Colors.black54,
                                       shape: BoxShape.circle,
@@ -1628,7 +1585,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                     ),
                                     child: GrenadeTypeIcon(
                                       type: g.type,
-                                      size: 14,
+                                      size: _useLegacyMapMarkers ? 14 : 18,
                                       color: typeColor,
                                     ),
                                   ),
@@ -1768,13 +1725,16 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           leading: Container(
             width: 28,
             height: 28,
+            alignment: Alignment.center,
             decoration: BoxDecoration(
               color: Colors.black54,
               shape: BoxShape.circle,
               border: Border.all(color: color, width: 1.8),
             ),
             child: GrenadeTypeIcon(
-                type: cluster.primaryType, size: 14, color: color),
+                type: cluster.primaryType,
+                size: _useLegacyMapMarkers ? 14 : 18,
+                color: color),
           ),
           title: Text(
             entry.name,
@@ -1857,6 +1817,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       id = await isar.grenades.put(grenade);
       grenade.layer.value = layer;
       await grenade.layer.save();
+      await _bindDefaultRoleTagInTxn(isar, id, widget.gameMap.id);
     });
     if (!mounted) return;
     Navigator.push(
@@ -1941,14 +1902,17 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     ));
   }
 
-  /// 开始移动单个道具的爆点
+  /// 开始移动单个道具的爆点或设置穿线方位
   void _startMoveSingleGrenadeImpact(Grenade grenade) {
+    final isWallbang = grenade.type == GrenadeType.wallbang;
     setState(() {
       _movingSingleImpactGrenade = grenade;
     });
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('点击地图移动爆点「${grenade.title}」'),
-      backgroundColor: Colors.purpleAccent,
+      content: Text(isWallbang
+          ? '点击地图设置穿线方位「${grenade.title}」'
+          : '点击地图移动爆点「${grenade.title}」'),
+      backgroundColor: isWallbang ? Colors.cyan : Colors.purpleAccent,
       duration: const Duration(seconds: 10),
       action: SnackBarAction(
           label: "取消",
@@ -1962,6 +1926,118 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       _movingSingleImpactGrenade = null;
     });
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
+  }
+
+  Future<void> _updateGrenadeImpactPoint(
+    Grenade grenade, {
+    double? x,
+    double? y,
+    bool clearImpactAreaStrokes = false,
+  }) async {
+    final now = DateTime.now();
+    final isar = ref.read(isarProvider);
+    final shouldClearStrokes =
+        clearImpactAreaStrokes || grenade.type == GrenadeType.wallbang;
+    await isar.writeTxn(() async {
+      final g = await isar.grenades.get(grenade.id);
+      if (g != null) {
+        g.impactXRatio = x;
+        g.impactYRatio = y;
+        if (shouldClearStrokes || g.type == GrenadeType.wallbang) {
+          g.impactAreaStrokes = null;
+        }
+        g.hasLocalEdits = true;
+        g.updatedAt = now;
+        await isar.grenades.put(g);
+      }
+    });
+    grenade.impactXRatio = x;
+    grenade.impactYRatio = y;
+    if (shouldClearStrokes) {
+      grenade.impactAreaStrokes = null;
+    }
+    grenade.hasLocalEdits = true;
+    grenade.updatedAt = now;
+    sendOverlayCommand('reload_data');
+  }
+
+  Future<void> _saveSingleImpactPosition(
+    Grenade grenade,
+    double targetX,
+    double targetY, {
+    required int layerId,
+  }) async {
+    final isWallbang = grenade.type == GrenadeType.wallbang;
+    if (isWallbang &&
+        isZeroLengthPointPair(grenade.xRatio, grenade.yRatio, targetX, targetY)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('穿线终点不能与穿点重合，请选择其他方位'),
+        backgroundColor: Colors.orange,
+        duration: Duration(seconds: 2),
+      ));
+      return;
+    }
+    await _updateGrenadeImpactPoint(
+      grenade,
+      x: targetX,
+      y: targetY,
+      clearImpactAreaStrokes: isWallbang,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(isWallbang ? '✓ 穿线方位已更新' : '✓ 爆点位置已更新'),
+      backgroundColor: isWallbang ? Colors.cyan : Colors.purpleAccent,
+      duration: const Duration(seconds: 1),
+    ));
+    final impactTargetId = grenade.id;
+    Future.delayed(const Duration(milliseconds: 50), () {
+      if (!mounted) return;
+      final grenades =
+          ref.read(_filteredGrenadesProvider(layerId)).asData?.value;
+      if (grenades != null) {
+        final clusterThreshold = _getAdaptiveClusterThreshold(
+          scale: _photoViewController.scale ?? 1.0,
+          grenadeCount: grenades.length,
+        );
+        final clusters = _isImpactMode
+            ? _getImpactClusters(grenades, threshold: clusterThreshold)
+            : _getThrowClusters(grenades, threshold: clusterThreshold);
+        try {
+          final cluster = clusters
+              .firstWhere((c) => c.grenades.any((g) => g.id == impactTargetId));
+          setState(() {
+            _selectedClusterForImpact = cluster;
+          });
+        } catch (_) {}
+      }
+    });
+    setState(() {
+      _movingSingleImpactGrenade = null;
+    });
+  }
+
+  Future<void> _clearWallbangLine(
+    Grenade grenade,
+    void Function(void Function()) setPanelState,
+  ) async {
+    await _updateGrenadeImpactPoint(
+      grenade,
+      x: null,
+      y: null,
+      clearImpactAreaStrokes: true,
+    );
+    if (!mounted) return;
+    setPanelState(() {});
+    setState(() {});
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('穿线已清除'),
+      backgroundColor: Colors.cyan,
+      duration: Duration(seconds: 1),
+    ));
   }
 
   /// 打开绘制爆点区域界面
@@ -2109,10 +2185,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final isar = ref.read(isarProvider);
     isar.writeTxnSync(() {
       for (final g in _draggingCluster!.grenades) {
-        g.xRatio = _dragOffset!.dx;
-        g.yRatio = _dragOffset!.dy;
-        g.updatedAt = DateTime.now();
-        isar.grenades.putSync(g);
+        final freshG = isar.grenades.getSync(g.id);
+        if (freshG != null) {
+          _applyThrowPosition(freshG, _dragOffset!.dx, _dragOffset!.dy);
+          isar.grenades.putSync(freshG);
+        }
       }
     });
     setState(() {
@@ -2232,10 +2309,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final isar = ref.read(isarProvider);
     isar.writeTxnSync(() {
       for (final g in _joystickCluster!.grenades) {
-        g.xRatio = _dragOffset!.dx;
-        g.yRatio = _dragOffset!.dy;
-        g.updatedAt = DateTime.now();
-        isar.grenades.putSync(g);
+        final freshG = isar.grenades.getSync(g.id);
+        if (freshG != null) {
+          _applyThrowPosition(freshG, _dragOffset!.dx, _dragOffset!.dy);
+          isar.grenades.putSync(freshG);
+        }
       }
     });
 
@@ -2474,6 +2552,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     Grenade grenade,
     BoxConstraints constraints,
   ) {
+    if (grenade.type == GrenadeType.wallbang) return const SizedBox.shrink();
     final strokes = _parseStrokes(grenade.impactAreaStrokes);
     if (strokes.isEmpty) return const SizedBox.shrink();
 
@@ -2528,7 +2607,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           children: [
             GrenadeTypeIcon(
               type: type,
-              size: 15,
+              size: _useLegacyMapMarkers ? 15 : 18,
               color: isSelected ? activeColor : unselectedColor,
             ),
             const SizedBox(width: 5),
@@ -2629,13 +2708,15 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     return Positioned(
       left: left,
       top: top,
-      child: Transform.scale(
-        scale: markerScale,
-        alignment: Alignment.center,
-        child: GestureDetector(
-          onTap: () {
-            _handleClusterTap(cluster, layerId);
-          },
+      child: IgnorePointer(
+        ignoring: _isPickingWallbangLine,
+        child: Transform.scale(
+          scale: markerScale,
+          alignment: Alignment.center,
+          child: GestureDetector(
+            onTap: () {
+              _handleClusterTap(cluster, layerId);
+            },
           // 长按开始拖动或摇杆移动（仅编辑模式）
           onLongPressStart: isEditMode
               ? (details) async {
@@ -2732,6 +2813,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             ),
           ),
         ),
+        ),
       ),
     );
   }
@@ -2774,11 +2856,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     return Positioned(
       left: left,
       top: top,
-      child: Transform.scale(
-        scale: markerScale,
-        alignment: Alignment.center,
-        child: GestureDetector(
-          onTap: () => _handleClusterTap(cluster, layerId),
+      child: IgnorePointer(
+        ignoring: _isPickingWallbangLine,
+        child: Transform.scale(
+          scale: markerScale,
+          alignment: Alignment.center,
+          child: GestureDetector(
+            onTap: () => _handleClusterTap(cluster, layerId),
           onLongPressStart: isEditMode
               ? (details) async {
                   // 移动端检查是否使用摇杆模式
@@ -2853,7 +2937,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                       )
                     : _buildMapMarkerTypeIcon(
                         cluster.primaryType,
-                        size: 11,
+                        size: _useLegacyMapMarkers ? 11 : 12.5,
                         color: _getTypeColor(cluster.primaryType),
                       )),
             if (showCountText)
@@ -2879,6 +2963,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                       decoration: const BoxDecoration(
                           color: Colors.red, shape: BoxShape.circle))),
           ]),
+        ),
         ),
       ),
     );
@@ -2911,6 +2996,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         child: Container(
           width: 20,
           height: 20,
+          alignment: Alignment.center,
           decoration: BoxDecoration(
             color: Colors.black.withValues(alpha: 0.5),
             shape: BoxShape.circle,
@@ -2928,7 +3014,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           ),
           child: _buildMapMarkerTypeIcon(
             grenade.type,
-            size: 11,
+            size: _useLegacyMapMarkers ? 11 : 12.5,
             color: _getTypeColor(grenade.type),
           ),
         ),
@@ -2965,6 +3051,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         child: Container(
           width: 24,
           height: 24,
+          alignment: Alignment.center,
           decoration: BoxDecoration(
             color: Colors.black.withValues(alpha: 0.7),
             shape: BoxShape.circle,
@@ -2987,7 +3074,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           ),
           child: _buildMapMarkerTypeIcon(
             grenade.type,
-            size: 13,
+            size: _useLegacyMapMarkers ? 13 : 15,
             color: typeColor,
           ),
         ),
@@ -3029,6 +3116,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           Container(
             width: 28,
             height: 28,
+            alignment: Alignment.center,
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.7),
               shape: BoxShape.circle,
@@ -3059,7 +3147,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 ? Icon(Icons.layers, size: 14, color: typeColor)
                 : _buildMapMarkerTypeIcon(
                     cluster.primaryType,
-                    size: 15,
+                    size: _useLegacyMapMarkers ? 15 : 17.5,
                     color: typeColor,
                   ),
           ),
@@ -3145,6 +3233,47 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     );
   }
 
+  Widget _buildDashedSegmentLine(
+      Grenade grenade,
+      ({
+        double width,
+        double height,
+        double offsetX,
+        double offsetY
+      }) imageBounds,
+      {required Color color,
+      required double strokeWidth,
+      required double dashLength,
+      required double gapLength,
+      bool showArrow = false,
+      double arrowLength = 8.0}) {
+    if (grenade.impactXRatio == null || grenade.impactYRatio == null) {
+      return const SizedBox.shrink();
+    }
+    final startX = imageBounds.offsetX + grenade.xRatio * imageBounds.width;
+    final startY = imageBounds.offsetY + grenade.yRatio * imageBounds.height;
+    final endX =
+        imageBounds.offsetX + grenade.impactXRatio! * imageBounds.width;
+    final endY =
+        imageBounds.offsetY + grenade.impactYRatio! * imageBounds.height;
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: CustomPaint(
+          painter: DashedLinePainter(
+            start: Offset(startX, startY),
+            end: Offset(endX, endY),
+            color: color,
+            strokeWidth: strokeWidth,
+            dashLength: dashLength,
+            gapLength: gapLength,
+            showArrow: showArrow,
+            arrowLength: arrowLength,
+          ),
+        ),
+      ),
+    );
+  }
+
   /// 构建投掷点到爆点的连线
   Widget _buildConnectionLine(
       Grenade grenade,
@@ -3155,34 +3284,38 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         double offsetX,
         double offsetY
       }) imageBounds) {
-    if (grenade.impactXRatio == null || grenade.impactYRatio == null) {
-      return const SizedBox.shrink();
-    }
-
-    final startX = imageBounds.offsetX + grenade.xRatio * imageBounds.width;
-    final startY = imageBounds.offsetY + grenade.yRatio * imageBounds.height;
-    final endX =
-        imageBounds.offsetX + grenade.impactXRatio! * imageBounds.width;
-    final endY =
-        imageBounds.offsetY + grenade.impactYRatio! * imageBounds.height;
-
     final lineColorVal = ref.watch(mapLineColorProvider);
     final lineOpacity = ref.watch(mapLineOpacityProvider);
     final lineColor = Color(lineColorVal).withValues(alpha: lineOpacity);
+    return _buildDashedSegmentLine(
+      grenade,
+      imageBounds,
+      color: lineColor,
+      strokeWidth: 1.5 * scale,
+      dashLength: 6 * scale,
+      gapLength: 4 * scale,
+    );
+  }
 
-    return Positioned.fill(
-      child: IgnorePointer(
-        child: CustomPaint(
-          painter: _DashedLinePainter(
-            start: Offset(startX, startY),
-            end: Offset(endX, endY),
-            color: lineColor,
-            strokeWidth: 1.5 * scale,
-            dashLength: 6 * scale,
-            gapLength: 4 * scale,
-          ),
-        ),
-      ),
+  /// 构建穿点方向穿线
+  Widget _buildWallbangLine(
+      Grenade grenade,
+      double scale,
+      ({
+        double width,
+        double height,
+        double offsetX,
+        double offsetY
+      }) imageBounds) {
+    return _buildDashedSegmentLine(
+      grenade,
+      imageBounds,
+      color: Colors.cyanAccent.withValues(alpha: 0.9),
+      strokeWidth: 2.0 * scale,
+      dashLength: 7 * scale,
+      gapLength: 4 * scale,
+      showArrow: true,
+      arrowLength: 9 * scale,
     );
   }
 
@@ -3192,32 +3325,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final teamName = isCT ? "CT" : "T";
     final label = isCasual ? 'C${spawn.id}' : '${spawn.id}';
     final title = isCasual ? "$teamName 休闲出生点 $label" : "$teamName 出生点 #$label";
-    _showPresetPointBottomSheet(
-      badgeText: label,
-      title: title,
-      point: spawn,
-      color: color,
-      layerId: layerId,
-    );
-  }
-
-  void _showHostagePointBottomSheet(SpawnPoint hostage, int layerId) {
-    _showPresetPointBottomSheet(
-      badgeText: 'H${hostage.id}',
-      title: "人质点 #${hostage.id}",
-      point: hostage,
-      color: const Color(0xFF10B981),
-      layerId: layerId,
-    );
-  }
-
-  void _showPresetPointBottomSheet({
-    required String badgeText,
-    required String title,
-    required SpawnPoint point,
-    required Color color,
-    required int layerId,
-  }) {
     final isEditMode = ref.read(isEditModeProvider);
 
     showModalBottomSheet(
@@ -3243,10 +3350,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   ),
                   child: Center(
                     child: Text(
-                      badgeText,
+                      label,
                       style: TextStyle(
                         color: color,
-                        fontSize: badgeText.length >= 3 ? 12 : 15,
+                        fontSize: label.length >= 3 ? 12 : 15,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -3265,7 +3372,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              "坐标: (${point.x.toStringAsFixed(3)}, ${point.y.toStringAsFixed(3)})",
+              "坐标: (${spawn.x.toStringAsFixed(3)}, ${spawn.y.toStringAsFixed(3)})",
               style: const TextStyle(color: Colors.grey, fontSize: 12),
             ),
             const SizedBox(height: 20),
@@ -3276,7 +3383,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   onPressed: () {
                     Navigator.pop(ctx);
                     setState(() {
-                      _tempTapPosition = Offset(point.x, point.y);
+                      _tempTapPosition = Offset(spawn.x, spawn.y);
                     });
                     _createGrenade(layerId);
                   },
@@ -3457,21 +3564,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     MapSpawnConfig config,
     int layerId, {
     required bool showCasual,
-    required bool showHostages,
     required double maxHeight,
   }) {
-    final showHostageTab = showHostages && config.hasHostageSpawns;
-    final activeTab =
-        (_selectedSpawnSidebarTab == 'H' && !showHostageTab)
-            ? 'T'
-            : _selectedSpawnSidebarTab;
-
-    final tabs = <({String id, String label, Color color})>[
+    const tabs = <({String id, String label, Color color})>[
       (id: 'CT', label: 'CT', color: Colors.blueAccent),
       (id: 'T', label: 'T', color: Colors.amber),
-      if (showHostageTab)
-        (id: 'H', label: '人质', color: const Color(0xFF34D399)),
     ];
+    final activeTab = _selectedSpawnSidebarTab == 'CT' ? 'CT' : 'T';
 
     Widget buildTabBody() {
       if (activeTab == 'CT') {
@@ -3484,7 +3583,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   onTap: () => _showSpawnPointBottomSheet(s, true, layerId),
                 ))
             .toList();
-        final casualCells = (showCasual && config.casualCtSpawns.isNotEmpty)
+        final casualCells = (showCasual && config.hasCasualSpawns)
             ? config.casualCtSpawns
                 .map((s) => _buildDesktopSpawnCell(
                       pointKey: 'cct-${s.id}',
@@ -3524,66 +3623,53 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         );
       }
 
-      if (activeTab == 'T') {
-        final mainCells = config.tSpawns
-            .map((s) => _buildDesktopSpawnCell(
-                  pointKey: 't-${s.id}',
-                  label: '${s.id}',
-                  color: Colors.amber,
-                  outlined: false,
-                  onTap: () => _showSpawnPointBottomSheet(s, false, layerId),
-                ))
-            .toList();
-        final casualCells = (showCasual && config.casualTSpawns.isNotEmpty)
-            ? config.casualTSpawns
-                .map((s) => _buildDesktopSpawnCell(
-                      pointKey: 'ct_c-${s.id}',
-                      label: 'C${s.id}',
-                      color: Colors.amber,
-                      outlined: true,
-                      onTap: () => _showSpawnPointBottomSheet(s, false, layerId,
-                          isCasual: true),
-                    ))
-                .toList()
-            : const <Widget>[];
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildDesktopSpawnGrid(mainCells),
-            if (casualCells.isNotEmpty) ...[
-              Container(
-                height: 1,
-                margin: const EdgeInsets.symmetric(vertical: 6),
-                color: Colors.white.withValues(alpha: 0.1),
-              ),
-              const Padding(
-                padding: EdgeInsets.only(bottom: 4),
-                child: Text(
-                  'T 休闲',
-                  style: TextStyle(
-                    color: Colors.orangeAccent,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              _buildDesktopSpawnGrid(casualCells),
-            ],
-          ],
-        );
-      }
-
-      final hostageCells = config.hostageSpawns
-          .map((h) => _buildDesktopSpawnCell(
-                pointKey: 'h-${h.id}',
-                label: 'H${h.id}',
-                color: const Color(0xFF34D399),
+      final mainCells = config.tSpawns
+          .map((s) => _buildDesktopSpawnCell(
+                pointKey: 't-${s.id}',
+                label: '${s.id}',
+                color: Colors.amber,
                 outlined: false,
-                onTap: () => _showHostagePointBottomSheet(h, layerId),
+                onTap: () => _showSpawnPointBottomSheet(s, false, layerId),
               ))
           .toList();
-      return _buildDesktopSpawnGrid(hostageCells);
+      final casualCells = (showCasual && config.hasCasualSpawns)
+          ? config.casualTSpawns
+              .map((s) => _buildDesktopSpawnCell(
+                    pointKey: 'ct_c-${s.id}',
+                    label: 'C${s.id}',
+                    color: Colors.amber,
+                    outlined: true,
+                    onTap: () => _showSpawnPointBottomSheet(s, false, layerId,
+                        isCasual: true),
+                  ))
+              .toList()
+          : const <Widget>[];
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildDesktopSpawnGrid(mainCells),
+          if (casualCells.isNotEmpty) ...[
+            Container(
+              height: 1,
+              margin: const EdgeInsets.symmetric(vertical: 6),
+              color: Colors.white.withValues(alpha: 0.1),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(bottom: 4),
+              child: Text(
+                'T 休闲',
+                style: TextStyle(
+                  color: Colors.orangeAccent,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            _buildDesktopSpawnGrid(casualCells),
+          ],
+        ],
+      );
     }
 
     return ConstrainedBox(
@@ -3610,13 +3696,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(Icons.chevron_left_rounded,
-                                color: Colors.greenAccent, size: 16),
+                                color: Color(0xFFFF1744), size: 16),
                             SizedBox(height: 2),
                             Text(
                               '出\n生\n点',
                               textAlign: TextAlign.center,
                               style: TextStyle(
-                                color: Colors.greenAccent,
+                                color: Color(0xFFFF1744),
                                 fontSize: 10,
                                 height: 1.25,
                                 fontWeight: FontWeight.w700,
@@ -3641,8 +3727,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                     const EdgeInsets.fromLTRB(8, 7, 8, 6),
                                 child: Row(
                                   children: [
-                                    const Icon(Icons.my_location_rounded,
-                                        color: Colors.greenAccent, size: 13),
+                                    const Icon(
+                                      Icons.my_location_rounded,
+                                      color: Color(0xFFFF1744),
+                                      size: 13,
+                                    ),
                                     const SizedBox(width: 4),
                                     const Expanded(
                                       child: Text(
@@ -3667,23 +3756,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                                 showCasualSpawnPointsProvider
                                                     .notifier)
                                             .state = !showCasual,
-                                      ),
-                                    if (config.hasCasualSpawns &&
-                                        config.hasHostageSpawns)
-                                      const SizedBox(width: 4),
-                                    if (config.hasHostageSpawns)
-                                      _buildDesktopSpawnChip(
-                                        label: '质',
-                                        tooltip: showHostages
-                                            ? '隐藏人质点'
-                                            : '显示人质点',
-                                        enabled: showHostages,
-                                        activeColor:
-                                            const Color(0xFF34D399),
-                                        onTap: () => ref
-                                            .read(showHostagePointsProvider
-                                                .notifier)
-                                            .state = !showHostages,
                                       ),
                                   ],
                                 ),
@@ -3769,7 +3841,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                             child: Center(
                               child: Icon(
                                 Icons.chevron_right_rounded,
-                                color: Colors.greenAccent,
+                                color: Color(0xFFFF1744),
                                 size: 17,
                               ),
                             ),
@@ -3848,10 +3920,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     int layerId,
     bool isEditMode, {
     required bool showCasual,
-    required bool showHostages,
   }) {
-    final hasExtraToggles = config.hasCasualSpawns || config.hasHostageSpawns;
-
     return ClipRRect(
       borderRadius: BorderRadius.circular(14),
       child: BackdropFilter(
@@ -3876,7 +3945,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                       _isSpawnSidebarExpanded
                           ? Icons.chevron_right_rounded
                           : Icons.chevron_left_rounded,
-                      color: Colors.greenAccent,
+                      color: const Color(0xFFFF1744),
                       size: 18,
                     ),
                   ),
@@ -3891,17 +3960,20 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   width: 76,
                   child: Column(
                     children: [
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                            vertical: 8, horizontal: 6),
+                      const Padding(
+                        padding:
+                            EdgeInsets.symmetric(vertical: 8, horizontal: 6),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            const Icon(Icons.my_location_rounded,
-                                color: Colors.greenAccent, size: 13),
-                            const SizedBox(width: 4),
-                            const Text(
-                              "出生点",
+                            Icon(
+                              Icons.my_location_rounded,
+                              color: Color(0xFFFF1744),
+                              size: 13,
+                            ),
+                            SizedBox(width: 4),
+                            Text(
+                              '出生点',
                               style: TextStyle(
                                 color: Colors.white,
                                 fontSize: 11,
@@ -3911,40 +3983,21 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                           ],
                         ),
                       ),
-                      if (hasExtraToggles) ...[
+                      if (config.hasCasualSpawns) ...[
                         Container(
                           height: 1,
                           color: Colors.white.withValues(alpha: 0.08),
                         ),
                         Padding(
                           padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
-                          child: Column(
-                            children: [
-                              if (config.hasCasualSpawns)
-                                _buildSpawnSidebarToggle(
-                                  icon: Icons.groups_rounded,
-                                  label: '休闲',
-                                  enabled: showCasual,
-                                  activeColor: Colors.cyanAccent,
-                                  onTap: () => ref
-                                      .read(showCasualSpawnPointsProvider
-                                          .notifier)
-                                      .state = !showCasual,
-                                ),
-                              if (config.hasCasualSpawns &&
-                                  config.hasHostageSpawns)
-                                const SizedBox(height: 5),
-                              if (config.hasHostageSpawns)
-                                _buildSpawnSidebarToggle(
-                                  icon: Icons.person_pin_circle_rounded,
-                                  label: '人质',
-                                  enabled: showHostages,
-                                  activeColor: const Color(0xFF34D399),
-                                  onTap: () => ref
-                                      .read(showHostagePointsProvider.notifier)
-                                      .state = !showHostages,
-                                ),
-                            ],
+                          child: _buildSpawnSidebarToggle(
+                            icon: Icons.groups_rounded,
+                            label: '休闲',
+                            enabled: showCasual,
+                            activeColor: Colors.cyanAccent,
+                            onTap: () => ref
+                                .read(showCasualSpawnPointsProvider.notifier)
+                                .state = !showCasual,
                           ),
                         ),
                       ],
@@ -4018,20 +4071,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                           isCasual: true)),
                                 ],
                               ],
-                              if (showHostages && config.hasHostageSpawns) ...[
-                                const SizedBox(height: 8),
-                                const Text(
-                                  "人质",
-                                  style: TextStyle(
-                                    color: Color(0xFF34D399),
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                ...config.hostageSpawns.map((hostage) =>
-                                    _buildHostageListItem(hostage, layerId)),
-                              ],
                             ],
                           ),
                         ),
@@ -4075,32 +4114,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           style: TextStyle(
             color: color,
             fontSize: label.length >= 3 ? 10 : 11,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHostageListItem(SpawnPoint hostage, int layerId) {
-    const color = Color(0xFF34D399);
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () => _showHostagePointBottomSheet(hostage, layerId),
-      child: Container(
-        width: 36,
-        height: 24,
-        margin: const EdgeInsets.only(bottom: 4),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.2),
-          borderRadius: BorderRadius.circular(7),
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          'H${hostage.id}',
-          style: const TextStyle(
-            color: color,
-            fontSize: 11,
             fontWeight: FontWeight.w700,
           ),
         ),
@@ -4951,6 +4964,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final spawnConfig = spawnPointData[mapName];
     final hasCasualSpawns = spawnConfig?.hasCasualSpawns ?? false;
     final hasHostageSpawns = spawnConfig?.hasHostageSpawns ?? false;
+    final effectiveShowHostages = showHostagePoints && hasHostageSpawns;
+    final showAnyPresetPoints = showSpawnPoints || effectiveShowHostages;
 
     widget.gameMap.layers.loadSync();
     final layers = widget.gameMap.layers.toList();
@@ -5296,7 +5311,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
                               return GestureDetector(
                                   onTapUp: (d) {
-                                    if (enableBatchedClusterHitTest) {
+                                    if (enableBatchedClusterHitTest &&
+                                        !_isPickingWallbangLine) {
                                       final hitCluster =
                                           _hitTestClusterAtGlobalPosition(
                                         d.globalPosition,
@@ -5381,7 +5397,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                             height: constraints.maxHeight,
                                             fit: BoxFit.contain,
                                           ),
-                                    if (showSpawnPoints && spawnConfig != null)
+                                    if (showAnyPresetPoints &&
+                                        spawnConfig != null)
                                       Positioned.fill(
                                         child: IgnorePointer(
                                           child: RepaintBoundary(
@@ -5392,12 +5409,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                                 imageBounds: imageBounds,
                                                 photoScale: scale,
                                                 markerScale: markerScale,
-                                                showCasual:
+                                                showSpawns: showSpawnPoints,
+                                                showCasual: showSpawnPoints &&
                                                     showCasualSpawnPoints &&
-                                                        hasCasualSpawns,
+                                                    hasCasualSpawns,
                                                 showHostages:
-                                                    showHostagePoints &&
-                                                        hasHostageSpawns,
+                                                    effectiveShowHostages,
                                                 occupiedKeys:
                                                     spawnPartition.occupiedKeys,
                                                 selectedKey: selectedSpawnKey,
@@ -5440,14 +5457,16 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                             );
                                           }
 
-                                          // 根据当前筛选结果过滤选中的grenades
-                                          final filteredIds =
-                                              list.map((g) => g.id).toSet();
+                                          // 根据当前筛选结果映射到流中的最新实例，避免复用旧快照
+                                          final latestById = {
+                                            for (final g in list) g.id: g
+                                          };
                                           final filteredSelectedGrenades =
                                               _selectedClusterForImpact
                                                       ?.grenades
-                                                      .where((g) => filteredIds
-                                                          .contains(g.id))
+                                                      .map((g) =>
+                                                          latestById[g.id])
+                                                      .whereType<Grenade>()
                                                       .toList() ??
                                                   [];
 
@@ -5477,6 +5496,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                             // 去重逻辑：避免重复绘制相同的 strokes 导致透明度叠加
                                             final visitedStrokes = <String>{};
                                             for (final g in areaGrenades) {
+                                              if (g.type ==
+                                                  GrenadeType.wallbang) {
+                                                continue;
+                                              }
                                               if (g.impactAreaStrokes != null &&
                                                   g.impactAreaStrokes!
                                                       .isNotEmpty &&
@@ -5807,8 +5830,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                             });
                                             widgets.addAll(lineGrenades
                                                 .where((g) =>
-                                                    g.impactXRatio != null &&
-                                                    g.impactYRatio != null &&
+                                                    (g.type ==
+                                                            GrenadeType.wallbang
+                                                        ? hasValidWallbangLine(
+                                                            g)
+                                                        : hasValidImpactPoint(
+                                                            g)) &&
                                                     _isRatioSegmentVisible(
                                                       g.xRatio,
                                                       g.yRatio,
@@ -5818,11 +5845,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                                           visibleRatioRect,
                                                       marginX: lineCullMarginX,
                                                       marginY: lineCullMarginY,
-                                                    ) &&
-                                                    g.type !=
-                                                        GrenadeType.wallbang)
-                                                .map((g) =>
-                                                    _buildConnectionLine(
+                                                    ))
+                                                .map((g) => g.type ==
+                                                        GrenadeType.wallbang
+                                                    ? _buildWallbangLine(
+                                                        g,
+                                                        markerScale,
+                                                        imageBounds)
+                                                    : _buildConnectionLine(
                                                         g,
                                                         markerScale,
                                                         imageBounds)));
@@ -5924,17 +5954,25 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                         loading: () => []),
                                     // 移动单个爆点时显示其原始位置及连线（无论在哪种模式）
                                     if (_movingSingleImpactGrenade != null) ...[
-                                      if (_movingSingleImpactGrenade!.type !=
-                                          GrenadeType.wallbang)
+                                      if (_movingSingleImpactGrenade!.type ==
+                                          GrenadeType.wallbang) ...[
+                                        if (hasValidWallbangLine(
+                                            _movingSingleImpactGrenade!))
+                                          _buildWallbangLine(
+                                              _movingSingleImpactGrenade!,
+                                              markerScale,
+                                              imageBounds),
+                                      ] else ...[
                                         _buildConnectionLine(
                                             _movingSingleImpactGrenade!,
                                             markerScale,
                                             imageBounds),
-                                      _buildImpactMarker(
-                                          _movingSingleImpactGrenade!,
-                                          constraints,
-                                          markerScale,
-                                          imageBounds),
+                                        _buildImpactMarker(
+                                            _movingSingleImpactGrenade!,
+                                            constraints,
+                                            markerScale,
+                                            imageBounds),
+                                      ],
                                     ],
                                     // 移动投掷点时显示原始位置标记（爆点模式）
                                     if (_isImpactMode &&
@@ -6083,23 +6121,54 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                                 size: 18),
                                           ),
                                           IconButton(
-                                            tooltip: '显示出生点',
+                                            tooltip: showSpawnPoints
+                                                ? '隐藏出生点'
+                                                : '显示出生点',
                                             visualDensity:
                                                 VisualDensity.compact,
                                             padding: const EdgeInsets.all(5),
                                             constraints: const BoxConstraints(
                                                 minWidth: 28, minHeight: 28),
-                                            onPressed: () => ref
-                                                .read(showSpawnPointsProvider
-                                                    .notifier)
-                                                .state = !showSpawnPoints,
+                                            onPressed: () {
+                                              _hoveredSpawnKey.value = null;
+                                              ref
+                                                  .read(showSpawnPointsProvider
+                                                      .notifier)
+                                                  .state = !showSpawnPoints;
+                                            },
                                             icon: Icon(
                                                 Icons.my_location_rounded,
                                                 color: showSpawnPoints
-                                                    ? Colors.greenAccent
+                                                    ? const Color(0xFFFF1744)
                                                     : Colors.white60,
                                                 size: 17),
                                           ),
+                                          if (hasHostageSpawns)
+                                            IconButton(
+                                              tooltip: showHostagePoints
+                                                  ? '隐藏人质点'
+                                                  : '显示人质点',
+                                              visualDensity:
+                                                  VisualDensity.compact,
+                                              padding: const EdgeInsets.all(5),
+                                              constraints: const BoxConstraints(
+                                                  minWidth: 28, minHeight: 28),
+                                              onPressed: () {
+                                                ref
+                                                    .read(
+                                                        showHostagePointsProvider
+                                                            .notifier)
+                                                    .state = !showHostagePoints;
+                                              },
+                                              icon: AppSvgIcon(
+                                                asset:
+                                                    'assets/icons/ui_hostage.svg',
+                                                size: 17,
+                                                color: showHostagePoints
+                                                    ? const Color(0xFF34D399)
+                                                    : Colors.white60,
+                                              ),
+                                            ),
                                         ],
                                       ),
                                     ],
@@ -6277,7 +6346,18 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                     setState(() {
                                       _isImpactMode = !_isImpactMode;
                                       _selectedClusterForImpact = null;
+                                      _movingSingleImpactGrenade = null;
+                                      _movingSingleGrenade = null;
+                                      _isMovingCluster = false;
+                                      _draggingCluster = null;
+                                      _dragOffset = null;
+                                      _dragAnchorOffset = null;
+                                      _draggingImpactCluster = null;
+                                      _impactDragOffset = null;
+                                      _impactDragAnchorOffset = null;
                                     });
+                                    ScaffoldMessenger.of(context)
+                                        .hideCurrentSnackBar();
                                     ScaffoldMessenger.of(context)
                                         .showSnackBar(SnackBar(
                                       content: Text(_isImpactMode
@@ -6351,7 +6431,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                         currentLayer.id,
                         isEditMode,
                         showCasual: showCasualSpawnPoints,
-                        showHostages: showHostagePoints,
                       ),
                     )
                   else
@@ -6362,7 +6441,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                         spawnConfig,
                         currentLayer.id,
                         showCasual: showCasualSpawnPoints,
-                        showHostages: showHostagePoints,
                         maxHeight: (constraints.maxHeight - 170)
                             .clamp(160.0, 340.0),
                       ),
@@ -6396,7 +6474,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               transitionBuilder: (child, animation) => ClipRect(
                 child: SizeTransition(
                   sizeFactor: animation,
-                  axisAlignment: 1,
+                  alignment: const Alignment(-1.0, 1.0),
                   child: child,
                 ),
               ),
@@ -6439,10 +6517,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         final grenadesAsync = ref.watch(_filteredGrenadesProvider(layerId));
         return grenadesAsync.when(
           data: (filteredList) {
-            // 根据筛选结果过滤cluster中的grenades
-            final filteredIds = filteredList.map((g) => g.id).toSet();
+            // 映射到流中的最新实例，确保面板随数据库变更实时同步
+            final latestById = {for (final g in filteredList) g.id: g};
             final grenades = cluster.grenades
-                .where((g) => filteredIds.contains(g.id))
+                .map((g) => latestById[g.id])
+                .whereType<Grenade>()
                 .toList();
             // 如果所有道具都被筛选掉，自动关闭面板
             if (grenades.isEmpty) {
@@ -6851,6 +6930,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                               }
 
                               final isSelected = selectedIds.contains(g.id);
+                              final hasWallbangLine = hasValidWallbangLine(g);
+                              final canClearWallbang = hasWallbangLine ||
+                                  (g.type == GrenadeType.wallbang &&
+                                      ((g.impactAreaStrokes != null &&
+                                              g.impactAreaStrokes!
+                                                  .isNotEmpty) ||
+                                          (g.impactXRatio != null &&
+                                              g.impactYRatio != null)));
 
                               // 左滑删除功能（编辑模式下）
                               Widget listItem = ListTile(
@@ -6879,6 +6966,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                     Container(
                                       width: 26,
                                       height: 26,
+                                      alignment: Alignment.center,
                                       decoration: BoxDecoration(
                                         color: Colors.black54,
                                         shape: BoxShape.circle,
@@ -6887,7 +6975,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                       ),
                                       child: GrenadeTypeIcon(
                                         type: g.type,
-                                        size: 15,
+                                        size: _useLegacyMapMarkers ? 15 : 16.5,
                                         color: typeColor,
                                       ),
                                     ),
@@ -6942,20 +7030,62 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                       Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          // 移除 _isImpactMode 限制，使得普通模式下也可以移动爆点
-                                          IconButton(
-                                            onPressed: () {
-                                              _closeClusterPanel();
-                                              _startMoveSingleGrenadeImpact(g);
-                                            },
-                                            icon: const Icon(Icons.gps_fixed),
-                                            color: Colors.purpleAccent,
-                                            tooltip: "设置/移动爆点",
-                                            iconSize: 18,
-                                            padding: EdgeInsets.zero,
-                                            constraints: const BoxConstraints(
-                                                minWidth: 32, minHeight: 32),
-                                          ),
+                                          if (g.type ==
+                                              GrenadeType.wallbang) ...[
+                                            IconButton(
+                                              onPressed: () {
+                                                _closeClusterPanel();
+                                                _startMoveSingleGrenadeImpact(
+                                                    g);
+                                              },
+                                              icon: const Icon(
+                                                  Icons.north_east_rounded),
+                                              color: Colors.cyanAccent,
+                                              tooltip: hasWallbangLine
+                                                  ? '修改穿线'
+                                                  : '设置穿线',
+                                              iconSize: 18,
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints(
+                                                  minWidth: 32, minHeight: 32),
+                                            ),
+                                            if (canClearWallbang)
+                                              IconButton(
+                                                onPressed: () =>
+                                                    _clearWallbangLine(
+                                                  g,
+                                                  (fn) {
+                                                    if (context.mounted) {
+                                                      setPanelState(fn);
+                                                    }
+                                                  },
+                                                ),
+                                                icon: const Icon(
+                                                    Icons.link_off_rounded),
+                                                color: Colors.redAccent,
+                                                tooltip: '清除穿线',
+                                                iconSize: 18,
+                                                padding: EdgeInsets.zero,
+                                                constraints:
+                                                    const BoxConstraints(
+                                                        minWidth: 32,
+                                                        minHeight: 32),
+                                              ),
+                                          ] else
+                                            IconButton(
+                                              onPressed: () {
+                                                _closeClusterPanel();
+                                                _startMoveSingleGrenadeImpact(
+                                                    g);
+                                              },
+                                              icon: const Icon(Icons.gps_fixed),
+                                              color: Colors.purpleAccent,
+                                              tooltip: "设置/移动爆点",
+                                              iconSize: 18,
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints(
+                                                  minWidth: 32, minHeight: 32),
+                                            ),
                                           // 绘制爆点区域按钮（仅在爆点模式下显示，且仅限烟雾和燃烧）
                                           if (_isImpactMode &&
                                               (g.type == GrenadeType.smoke ||
@@ -7401,6 +7531,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 leading: Container(
                   width: 40,
                   height: 40,
+                  alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: Colors.purpleAccent.withValues(alpha: 0.2),
                     shape: BoxShape.circle,
@@ -7408,7 +7539,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   ),
                   child: GrenadeTypeIcon(
                     type: group.type,
-                    size: 21,
+                    size: _useLegacyMapMarkers ? 21 : 26,
                     color: typeColor,
                   ),
                 ),
@@ -7596,6 +7727,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                         secondary: Container(
                           width: 30,
                           height: 30,
+                          alignment: Alignment.center,
                           decoration: BoxDecoration(
                             color: typeColor.withValues(alpha: 0.2),
                             shape: BoxShape.circle,
@@ -7603,7 +7735,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                           ),
                           child: GrenadeTypeIcon(
                             type: g.type,
-                            size: 15,
+                            size: _useLegacyMapMarkers ? 15 : 20,
                             color: typeColor,
                           ),
                         ),
@@ -7794,7 +7926,7 @@ class _ImpactClusterBatchPainter extends CustomPainter {
         textDirection: textDirection,
       );
     } else if (typePicture != null && cluster.grenades.length == 1) {
-      _drawTypePicture(canvas, typePicture, center: Offset.zero, size: 11);
+      _drawTypePicture(canvas, typePicture, center: Offset.zero, size: 12.5);
     } else {
       _drawIconGlyph(
         canvas,
@@ -7983,7 +8115,7 @@ class _ClusterBatchPainter extends CustomPainter {
         textDirection: textDirection,
       );
     } else if (!cluster.hasMultipleTypes && typePicture != null) {
-      _drawTypePicture(canvas, typePicture, center: Offset.zero, size: 11);
+      _drawTypePicture(canvas, typePicture, center: Offset.zero, size: 12.5);
     } else {
       _drawIconGlyph(
         canvas,
@@ -8151,67 +8283,6 @@ class _ClusterBatchPainter extends CustomPainter {
   }
 }
 
-/// 虚线画笔，用于绘制投掷点到爆点的连线
-class _DashedLinePainter extends CustomPainter {
-  final Offset start;
-  final Offset end;
-  final Color color;
-  final double strokeWidth;
-  final double dashLength;
-  final double gapLength;
-
-  _DashedLinePainter({
-    required this.start,
-    required this.end,
-    required this.color,
-    this.strokeWidth = 1.5,
-    this.dashLength = 4,
-    this.gapLength = 4,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = strokeWidth
-      ..style = PaintingStyle.stroke;
-
-    final path = Path();
-    final totalLength = (end - start).distance;
-    final direction = (end - start) / totalLength;
-
-    double currentLength = 0;
-    bool draw = true;
-
-    path.moveTo(start.dx, start.dy);
-
-    while (currentLength < totalLength) {
-      final segmentLength = draw ? dashLength : gapLength;
-      final nextLength =
-          (currentLength + segmentLength).clamp(0.0, totalLength);
-      final nextPoint = start + direction * nextLength;
-
-      if (draw) {
-        path.lineTo(nextPoint.dx, nextPoint.dy);
-      } else {
-        path.moveTo(nextPoint.dx, nextPoint.dy);
-      }
-
-      currentLength = nextLength;
-      draw = !draw;
-    }
-
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _DashedLinePainter oldDelegate) {
-    return start != oldDelegate.start ||
-        end != oldDelegate.end ||
-        color != oldDelegate.color;
-  }
-}
-
 class _ImpactAreaPainter extends CustomPainter {
   final List<Map<String, dynamic>> strokes;
   final List<Offset> currentStroke;
@@ -8352,6 +8423,7 @@ class _SpawnPointOverlayPainter extends CustomPainter {
   }) imageBounds;
   final double photoScale;
   final double markerScale;
+  final bool showSpawns;
   final bool showCasual;
   final bool showHostages;
   final Set<String> occupiedKeys;
@@ -8364,6 +8436,7 @@ class _SpawnPointOverlayPainter extends CustomPainter {
     required this.imageBounds,
     required this.photoScale,
     required this.markerScale,
+    required this.showSpawns,
     required this.showCasual,
     required this.showHostages,
     required this.occupiedKeys,
@@ -8386,13 +8459,17 @@ class _SpawnPointOverlayPainter extends CustomPainter {
     final safeScale = photoScale <= 0 ? 1.0 : photoScale;
     final mapSpan = math.min(imageBounds.width, imageBounds.height);
     final minSpacingPx =
-        config.minSpacingRatio(includeCasual: showCasual) * mapSpan * safeScale;
+        config.minSpacingRatio(includeCasual: showSpawns && showCasual) *
+            mapSpan *
+            safeScale;
     final showNum = minSpacingPx >= 13.5;
     final showCasualNum = minSpacingPx >= 16.5;
+    final spawnSide = showNum
+        ? (minSpacingPx * 0.72).clamp(12.0, 16.0)
+        : (minSpacingPx * 0.62).clamp(6.0, 8.5);
     final activeHighlight = hoveredKey.value ?? selectedKey;
 
-    ({SpawnPoint point, String label, Color color, bool isHostage})?
-        hoveredItem;
+    ({SpawnPoint point, String label, Color color})? hoveredItem;
 
     void drawSquare(
       double side,
@@ -8415,6 +8492,23 @@ class _SpawnPointOverlayPainter extends CustomPainter {
       );
     }
 
+    void drawCircle(
+      double radius,
+      Color fill,
+      Color border,
+      double strokeWidth,
+    ) {
+      canvas.drawCircle(Offset.zero, radius, Paint()..color = fill);
+      canvas.drawCircle(
+        Offset.zero,
+        radius,
+        Paint()
+          ..color = border
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = strokeWidth,
+      );
+    }
+
     void paintPoint(
       SpawnPoint p, {
       required String key,
@@ -8426,12 +8520,11 @@ class _SpawnPointOverlayPainter extends CustomPainter {
       required bool isCasual,
       required bool isHostage,
     }) {
-      if (activeHighlight == key) {
+      if (!isHostage && activeHighlight == key) {
         hoveredItem = (
           point: p,
           label: label,
           color: highlightColor,
-          isHostage: isHostage,
         );
         return;
       }
@@ -8448,22 +8541,14 @@ class _SpawnPointOverlayPainter extends CustomPainter {
       canvas.scale(markerScale, markerScale);
 
       if (isHostage) {
-        final r = showNum ? 8.5 : 5.5;
-        canvas.drawCircle(
-          Offset.zero,
-          r,
-          Paint()..color = fillColor,
-        );
-        canvas.drawCircle(
-          Offset.zero,
-          r,
-          Paint()
-            ..color = borderColor
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.1,
-        );
+        drawCircle(spawnSide / 2, fillColor, borderColor, 1.0);
         if (showNum) {
-          _paintLabel(canvas, label, 8.0, textColor);
+          _paintLabel(
+            canvas,
+            label,
+            _labelFontSize(spawnSide, label),
+            textColor,
+          );
         }
       } else if (isCasual) {
         if (!showCasualNum) {
@@ -8492,28 +8577,18 @@ class _SpawnPointOverlayPainter extends CustomPainter {
           );
         }
       } else {
-        if (!showNum) {
-          final s = (minSpacingPx * 0.62).clamp(6.0, 8.5);
-          drawSquare(
-            s,
-            s * 0.24,
-            _scaleAlpha(fillColor, shapeAlpha),
-            _scaleAlpha(borderColor, shapeAlpha),
-            1.0,
-          );
-        } else {
-          final s = (minSpacingPx * 0.72).clamp(12.0, 16.0);
-          drawSquare(
-            s,
-            3.0,
-            _scaleAlpha(fillColor, shapeAlpha),
-            _scaleAlpha(borderColor, shapeAlpha),
-            1.0,
-          );
+        drawSquare(
+          spawnSide,
+          showNum ? 3.0 : spawnSide * 0.24,
+          _scaleAlpha(fillColor, shapeAlpha),
+          _scaleAlpha(borderColor, shapeAlpha),
+          1.0,
+        );
+        if (showNum) {
           _paintLabel(
             canvas,
             label,
-            _labelFontSize(s, label),
+            _labelFontSize(spawnSide, label),
             _scaleAlpha(textColor, labelAlpha),
           );
         }
@@ -8522,65 +8597,67 @@ class _SpawnPointOverlayPainter extends CustomPainter {
       canvas.restore();
     }
 
-    if (showCasual) {
-      for (final s in config.casualCtSpawns) {
+    if (showSpawns) {
+      if (showCasual) {
+        for (final s in config.casualCtSpawns) {
+          paintPoint(
+            s,
+            key: 'cct-${s.id}',
+            label: 'C${s.id}',
+            fillColor: const Color(0xC7080B10),
+            borderColor: const Color(0xD960A5FA),
+            textColor: const Color(0xFF93C5FD),
+            highlightColor: Colors.blueAccent,
+            isCasual: true,
+            isHostage: false,
+          );
+        }
+        for (final s in config.casualTSpawns) {
+          paintPoint(
+            s,
+            key: 'ct_c-${s.id}',
+            label: 'C${s.id}',
+            fillColor: const Color(0xC7080B10),
+            borderColor: const Color(0xD9FBBF24),
+            textColor: const Color(0xFFFDE68A),
+            highlightColor: Colors.amber,
+            isCasual: true,
+            isHostage: false,
+          );
+        }
+      }
+
+      for (final s in config.ctSpawns) {
         paintPoint(
           s,
-          key: 'cct-${s.id}',
-          label: 'C${s.id}',
-          fillColor: const Color(0xC7080B10),
-          borderColor: const Color(0xD960A5FA),
-          textColor: const Color(0xFF93C5FD),
+          key: 'ct-${s.id}',
+          label: '${s.id}',
+          fillColor: showNum
+              ? const Color(0xD62563EB)
+              : const Color(0xEB448AFF),
+          borderColor: const Color(0xDEFFFFFF),
+          textColor: Colors.white,
           highlightColor: Colors.blueAccent,
-          isCasual: true,
+          isCasual: false,
           isHostage: false,
         );
       }
-      for (final s in config.casualTSpawns) {
+
+      for (final s in config.tSpawns) {
         paintPoint(
           s,
-          key: 'ct_c-${s.id}',
-          label: 'C${s.id}',
-          fillColor: const Color(0xC7080B10),
-          borderColor: const Color(0xD9FBBF24),
-          textColor: const Color(0xFFFDE68A),
+          key: 't-${s.id}',
+          label: '${s.id}',
+          fillColor: showNum
+              ? const Color(0xDBD97706)
+              : const Color(0xEBFFC107),
+          borderColor: const Color(0xDEFFFFFF),
+          textColor: Colors.white,
           highlightColor: Colors.amber,
-          isCasual: true,
+          isCasual: false,
           isHostage: false,
         );
       }
-    }
-
-    for (final s in config.ctSpawns) {
-      paintPoint(
-        s,
-        key: 'ct-${s.id}',
-        label: '${s.id}',
-        fillColor: showNum
-            ? const Color(0xD62563EB)
-            : const Color(0xEB448AFF),
-        borderColor: const Color(0xDEFFFFFF),
-        textColor: Colors.white,
-        highlightColor: Colors.blueAccent,
-        isCasual: false,
-        isHostage: false,
-      );
-    }
-
-    for (final s in config.tSpawns) {
-      paintPoint(
-        s,
-        key: 't-${s.id}',
-        label: '${s.id}',
-        fillColor: showNum
-            ? const Color(0xDBD97706)
-            : const Color(0xEBFFC107),
-        borderColor: const Color(0xDEFFFFFF),
-        textColor: Colors.white,
-        highlightColor: Colors.amber,
-        isCasual: false,
-        isHostage: false,
-      );
     }
 
     if (showHostages) {
@@ -8607,43 +8684,14 @@ class _SpawnPointOverlayPainter extends CustomPainter {
       canvas.save();
       canvas.translate(cx, cy);
       canvas.scale(markerScale, markerScale);
-      if (hovered.isHostage) {
-        canvas.drawCircle(
-          Offset.zero,
-          15.0,
-          Paint()..color = hovered.color.withValues(alpha: 0.28),
-        );
-        canvas.drawCircle(
-          Offset.zero,
-          15.0,
-          Paint()
-            ..color = hovered.color.withValues(alpha: 0.9)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.6,
-        );
-        canvas.drawCircle(
-          Offset.zero,
-          10.5,
-          Paint()..color = hovered.color,
-        );
-        canvas.drawCircle(
-          Offset.zero,
-          10.5,
-          Paint()
-            ..color = Colors.white
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.6,
-        );
-      } else {
-        drawSquare(
-          28.0,
-          6.5,
-          hovered.color.withValues(alpha: 0.28),
-          hovered.color.withValues(alpha: 0.9),
-          1.6,
-        );
-        drawSquare(20.0, 4.0, hovered.color, Colors.white, 1.6);
-      }
+      drawSquare(
+        28.0,
+        6.5,
+        hovered.color.withValues(alpha: 0.28),
+        hovered.color.withValues(alpha: 0.9),
+        1.6,
+      );
+      drawSquare(20.0, 4.0, hovered.color, Colors.white, 1.6);
       _paintLabel(
         canvas,
         hovered.label,
@@ -8676,6 +8724,7 @@ class _SpawnPointOverlayPainter extends CustomPainter {
         oldDelegate.imageBounds != imageBounds ||
         oldDelegate.photoScale != photoScale ||
         oldDelegate.markerScale != markerScale ||
+        oldDelegate.showSpawns != showSpawns ||
         oldDelegate.showCasual != showCasual ||
         oldDelegate.showHostages != showHostages ||
         oldDelegate.occupiedKeys.length != occupiedKeys.length ||

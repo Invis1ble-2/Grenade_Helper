@@ -266,3 +266,22 @@ class FavoriteFolder {
   })  : createdAt = created ?? DateTime.now(),
         updatedAt = updated ?? DateTime.now();
 }
+
+bool isZeroLengthPointPair(double x1, double y1, double x2, double y2) =>
+    (x1 - x2).abs() <= 1e-6 && (y1 - y2).abs() <= 1e-6;
+
+bool hasValidImpactPoint(Grenade grenade) =>
+    grenade.type != GrenadeType.wallbang &&
+    grenade.impactXRatio != null &&
+    grenade.impactYRatio != null;
+
+bool hasValidWallbangLine(Grenade grenade) =>
+    grenade.type == GrenadeType.wallbang &&
+    grenade.impactXRatio != null &&
+    grenade.impactYRatio != null &&
+    !isZeroLengthPointPair(
+      grenade.xRatio,
+      grenade.yRatio,
+      grenade.impactXRatio!,
+      grenade.impactYRatio!,
+    );

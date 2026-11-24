@@ -6,6 +6,7 @@ import 'package:photo_view/photo_view.dart';
 import '../models.dart';
 import '../providers.dart';
 import '../widgets/app_svg_icon.dart';
+import '../widgets/dashed_line_painter.dart';
 import '../widgets/path_image_provider.dart';
 import '../widgets/square_brush.dart';
 
@@ -22,6 +23,7 @@ class ImpactPointPickerScreen extends ConsumerStatefulWidget {
   final bool readOnly;
   // 投掷点模式：爆点固定(initialX/Y)，点击地图设置投掷点(throwX/Y为初始值)
   final bool pickThrowPoint;
+  final bool wallbangLineMode;
 
   const ImpactPointPickerScreen({
     super.key,
@@ -35,6 +37,7 @@ class ImpactPointPickerScreen extends ConsumerStatefulWidget {
     this.grenadeType = GrenadeType.smoke,
     this.readOnly = false,
     this.pickThrowPoint = false,
+    this.wallbangLineMode = false,
   });
 
   @override
@@ -53,8 +56,9 @@ class _ImpactPointPickerScreenState
   MapLayer? _layer;
   List<Map<String, dynamic>> _drawingStrokes = [];
 
-  bool get _throwMode => widget.pickThrowPoint;
-  String get _targetName => _throwMode ? '投掷点' : '爆点';
+  bool get _throwMode => !widget.wallbangLineMode && widget.pickThrowPoint;
+  String get _targetName =>
+      widget.wallbangLineMode ? '穿线方位' : (_throwMode ? '投掷点' : '爆点');
 
   @override
   void initState() {
@@ -70,8 +74,15 @@ class _ImpactPointPickerScreenState
       }
     } else {
       _fixedPoint = Offset(widget.throwX, widget.throwY);
-      _selectedX = widget.initialX;
-      _selectedY = widget.initialY;
+      final isZeroWallbang = widget.wallbangLineMode &&
+          widget.initialX != null &&
+          widget.initialY != null &&
+          isZeroLengthPointPair(
+              widget.throwX, widget.throwY, widget.initialX!, widget.initialY!);
+      if (!isZeroWallbang) {
+        _selectedX = widget.initialX;
+        _selectedY = widget.initialY;
+      }
     }
     _loadLayer();
 
@@ -147,6 +158,14 @@ class _ImpactPointPickerScreenState
         localRatio.dy > 1) {
       return;
     }
+    if (widget.wallbangLineMode &&
+        isZeroLengthPointPair(
+            widget.throwX, widget.throwY, localRatio.dx, localRatio.dy)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('穿线终点不能与穿点重合，请选择其他方位')),
+      );
+      return;
+    }
 
     setState(() {
       _selectedX = localRatio.dx;
@@ -159,7 +178,11 @@ class _ImpactPointPickerScreenState
       Navigator.pop(context, Offset(_selectedX!, _selectedY!));
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('请先点击地图选择$_targetName位置')),
+        SnackBar(
+          content: Text(widget.wallbangLineMode
+              ? '请先点击地图设置穿线方位'
+              : '请先点击地图选择$_targetName位置'),
+        ),
       );
     }
   }
@@ -223,7 +246,9 @@ class _ImpactPointPickerScreenState
           icon: const Icon(Icons.close),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text(widget.readOnly ? '查看爆点位置' : '选择$_targetName位置'),
+        title: Text(widget.wallbangLineMode
+            ? (widget.readOnly ? '查看穿线方位' : '设置穿线方位')
+            : (widget.readOnly ? '查看爆点位置' : '选择$_targetName位置')),
         centerTitle: true,
         actions: [
           if (!widget.readOnly)
@@ -322,10 +347,12 @@ class _ImpactPointPickerScreenState
       if (throwPoint != null)
         _buildThrowPointMarker(imageBounds, markerScale, throwPoint),
       if (throwPoint != null && impactPoint != null)
-        _buildConnectionLine(imageBounds, throwPoint, impactPoint),
-      if (impactPoint != null)
+        _buildConnectionLine(imageBounds, markerScale, throwPoint, impactPoint),
+      if (!widget.wallbangLineMode && impactPoint != null)
         _buildImpactMarker(imageBounds, markerScale, impactPoint),
-      if (widget.readOnly && _drawingStrokes.isNotEmpty)
+      if (!widget.wallbangLineMode &&
+          widget.readOnly &&
+          _drawingStrokes.isNotEmpty)
         Positioned.fill(
           child: IgnorePointer(
             child: CustomPaint(
@@ -357,35 +384,62 @@ class _ImpactPointPickerScreenState
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Container(
-                width: 12,
-                height: 12,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: markerColor, width: 2),
+              if (widget.wallbangLineMode)
+                Container(
+                  width: 16,
+                  height: 16,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.75),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: theme.brightness == Brightness.dark
+                          ? Colors.white
+                          : markerColor.withValues(alpha: 0.8),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: const Icon(Icons.place, size: 10, color: Colors.white),
+                )
+              else
+                Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: markerColor, width: 2),
+                  ),
                 ),
-              ),
               const SizedBox(width: 8),
               Text(
-                '投掷点',
+                widget.wallbangLineMode ? '穿点' : '投掷点',
                 style: TextStyle(color: textColor, fontSize: 12),
               ),
               const SizedBox(width: 24),
-              Container(
-                width: 12,
-                height: 12,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.purpleAccent, width: 2),
+              if (widget.wallbangLineMode) ...[
+                const Icon(Icons.north_east_rounded,
+                    size: 16, color: Colors.cyan),
+                const SizedBox(width: 6),
+                Text(
+                  '穿线方向',
+                  style: TextStyle(color: textColor, fontSize: 12),
                 ),
-                child: const Icon(Icons.close,
-                    size: 8, color: Colors.purpleAccent),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                '爆点',
-                style: TextStyle(color: textColor, fontSize: 12),
-              ),
+              ] else ...[
+                Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.purpleAccent, width: 2),
+                  ),
+                  child: const Icon(Icons.close,
+                      size: 8, color: Colors.purpleAccent),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '爆点',
+                  style: TextStyle(color: textColor, fontSize: 12),
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 8),
@@ -512,23 +566,29 @@ class _ImpactPointPickerScreenState
         double offsetX,
         double offsetY
       }) imageBounds,
+      double markerScale,
       Offset from,
       Offset to) {
     final startX = imageBounds.offsetX + from.dx * imageBounds.width;
     final startY = imageBounds.offsetY + from.dy * imageBounds.height;
     final endX = imageBounds.offsetX + to.dx * imageBounds.width;
     final endY = imageBounds.offsetY + to.dy * imageBounds.height;
+    final isWallbang = widget.wallbangLineMode;
 
     return Positioned.fill(
       child: IgnorePointer(
         child: CustomPaint(
-          painter: _DashedLinePainter(
+          painter: DashedLinePainter(
             start: Offset(startX, startY),
             end: Offset(endX, endY),
-            color: Colors.purpleAccent.withValues(alpha: 0.7),
-            strokeWidth: 2,
-            dashLength: 5,
-            gapLength: 5,
+            color: isWallbang
+                ? Colors.cyanAccent.withValues(alpha: 0.9)
+                : Colors.purpleAccent.withValues(alpha: 0.7),
+            strokeWidth: 2 * markerScale,
+            dashLength: (isWallbang ? 7 : 5) * markerScale,
+            gapLength: (isWallbang ? 4 : 5) * markerScale,
+            showArrow: isWallbang,
+            arrowLength: 9.0 * markerScale,
           ),
         ),
       ),
@@ -651,67 +711,5 @@ class _ImpactAreaPainter extends CustomPainter {
     return oldDelegate.strokes != strokes ||
         oldDelegate.opacity != opacity ||
         oldDelegate.color != color;
-  }
-}
-
-class _DashedLinePainter extends CustomPainter {
-  final Offset start;
-  final Offset end;
-  final Color color;
-  final double strokeWidth;
-  final double dashLength;
-  final double gapLength;
-
-  _DashedLinePainter({
-    required this.start,
-    required this.end,
-    required this.color,
-    this.strokeWidth = 1.5,
-    this.dashLength = 4,
-    this.gapLength = 4,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = strokeWidth
-      ..style = PaintingStyle.stroke;
-
-    final path = Path();
-    final totalLength = (end - start).distance;
-    if (totalLength == 0) return;
-
-    final direction = (end - start) / totalLength;
-
-    double currentLength = 0;
-    bool draw = true;
-
-    path.moveTo(start.dx, start.dy);
-
-    while (currentLength < totalLength) {
-      final segmentLength = draw ? dashLength : gapLength;
-      final nextLength =
-          (currentLength + segmentLength).clamp(0.0, totalLength);
-      final nextPoint = start + direction * nextLength;
-
-      if (draw) {
-        path.lineTo(nextPoint.dx, nextPoint.dy);
-      } else {
-        path.moveTo(nextPoint.dx, nextPoint.dy);
-      }
-
-      currentLength = nextLength;
-      draw = !draw;
-    }
-
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _DashedLinePainter oldDelegate) {
-    return start != oldDelegate.start ||
-        end != oldDelegate.end ||
-        color != oldDelegate.color;
   }
 }

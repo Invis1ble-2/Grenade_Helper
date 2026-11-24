@@ -99,8 +99,7 @@ class _AreaAutoTagPreviewScreenState
       if (_areaService.isPointInArea(g.xRatio, g.yRatio, widget.area)) {
         inAreaThrowIds.add(g.id);
       }
-      if (g.impactXRatio != null &&
-          g.impactYRatio != null &&
+      if (hasValidImpactPoint(g) &&
           _areaService.isPointInArea(
               g.impactXRatio!, g.impactYRatio!, widget.area)) {
         inAreaImpactIds.add(g.id);
@@ -281,9 +280,7 @@ class _AreaAutoTagPreviewScreenState
 
   int get _displayTotal {
     if (_showImpact) {
-      return _grenades
-          .where((g) => g.impactXRatio != null && g.impactYRatio != null)
-          .length;
+      return _grenades.where(hasValidImpactPoint).length;
     }
     return _grenades.length;
   }
@@ -298,10 +295,7 @@ class _AreaAutoTagPreviewScreenState
     final group = _grenades.where((g) {
       if (!matchedSet.contains(g.id)) return false;
       if (_showImpact) {
-        if (anchor.impactXRatio == null ||
-            anchor.impactYRatio == null ||
-            g.impactXRatio == null ||
-            g.impactYRatio == null) {
+        if (!hasValidImpactPoint(anchor) || !hasValidImpactPoint(g)) {
           return false;
         }
         return (g.impactXRatio! - anchor.impactXRatio!).abs() < 1e-6 &&
@@ -561,7 +555,7 @@ class _AreaAutoTagPreviewScreenState
       IconData icon;
 
       if (_showImpact) {
-        if (g.impactXRatio == null || g.impactYRatio == null) continue;
+        if (!hasValidImpactPoint(g)) continue;
         x = g.impactXRatio!;
         y = g.impactYRatio!;
         matched = _inAreaImpactIds.contains(g.id);
