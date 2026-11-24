@@ -356,6 +356,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   bool _isLoadingGrenadeTypePictures = false;
 
   bool get _useLegacyMapMarkers => GrenadeTypeIcon.useLegacy;
+  bool get _isPickingWallbangLine =>
+      _movingSingleImpactGrenade?.type == GrenadeType.wallbang;
 
   @override
   void initState() {
@@ -1244,8 +1246,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       return;
     }
 
-    // 处理单个爆点或穿线方位移动
-    if (_movingSingleImpactGrenade != null) {
+    // 处理单个爆点移动
+    if (_movingSingleImpactGrenade != null && !_isPickingWallbangLine) {
       await _saveSingleImpactPosition(
         _movingSingleImpactGrenade!,
         cluster.xRatio,
@@ -2706,13 +2708,15 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     return Positioned(
       left: left,
       top: top,
-      child: Transform.scale(
-        scale: markerScale,
-        alignment: Alignment.center,
-        child: GestureDetector(
-          onTap: () {
-            _handleClusterTap(cluster, layerId);
-          },
+      child: IgnorePointer(
+        ignoring: _isPickingWallbangLine,
+        child: Transform.scale(
+          scale: markerScale,
+          alignment: Alignment.center,
+          child: GestureDetector(
+            onTap: () {
+              _handleClusterTap(cluster, layerId);
+            },
           // 长按开始拖动或摇杆移动（仅编辑模式）
           onLongPressStart: isEditMode
               ? (details) async {
@@ -2809,6 +2813,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             ),
           ),
         ),
+        ),
       ),
     );
   }
@@ -2851,11 +2856,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     return Positioned(
       left: left,
       top: top,
-      child: Transform.scale(
-        scale: markerScale,
-        alignment: Alignment.center,
-        child: GestureDetector(
-          onTap: () => _handleClusterTap(cluster, layerId),
+      child: IgnorePointer(
+        ignoring: _isPickingWallbangLine,
+        child: Transform.scale(
+          scale: markerScale,
+          alignment: Alignment.center,
+          child: GestureDetector(
+            onTap: () => _handleClusterTap(cluster, layerId),
           onLongPressStart: isEditMode
               ? (details) async {
                   // 移动端检查是否使用摇杆模式
@@ -2956,6 +2963,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                       decoration: const BoxDecoration(
                           color: Colors.red, shape: BoxShape.circle))),
           ]),
+        ),
         ),
       ),
     );
@@ -5303,7 +5311,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
                               return GestureDetector(
                                   onTapUp: (d) {
-                                    if (enableBatchedClusterHitTest) {
+                                    if (enableBatchedClusterHitTest &&
+                                        !_isPickingWallbangLine) {
                                       final hitCluster =
                                           _hitTestClusterAtGlobalPosition(
                                         d.globalPosition,
