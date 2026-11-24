@@ -29,8 +29,13 @@ class SelectableGrenadeListItem extends StatelessWidget {
     layer?.map.loadSync();
     final layerName = layer?.name ?? '-';
     final mapName = layer?.map.value?.name ?? '-';
-    final hasImpact =
-        grenade.impactXRatio != null && grenade.impactYRatio != null;
+    final hasImpact = hasValidImpactPoint(grenade);
+    final hasWallbang = hasValidWallbangLine(grenade);
+    final showPointBadge = hasImpact || hasWallbang;
+    final badgeColor = hasWallbang ? Colors.cyan : Colors.green;
+    final badgeIcon =
+        hasWallbang ? Icons.north_east_rounded : Icons.my_location;
+    final badgeLabel = hasWallbang ? '穿线' : '爆点';
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
@@ -72,24 +77,23 @@ class SelectableGrenadeListItem extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        if (hasImpact)
+                        if (showPointBadge)
                           Container(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: Colors.green.withValues(alpha: 0.16),
+                              color: badgeColor.withValues(alpha: 0.16),
                               borderRadius: BorderRadius.circular(999),
                             ),
-                            child: const Row(
+                            child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.my_location,
-                                    size: 10, color: Colors.green),
-                                SizedBox(width: 2),
+                                Icon(badgeIcon, size: 10, color: badgeColor),
+                                const SizedBox(width: 2),
                                 Text(
-                                  '爆点',
+                                  badgeLabel,
                                   style: TextStyle(
-                                      fontSize: 10, color: Colors.green),
+                                      fontSize: 10, color: badgeColor),
                                 ),
                               ],
                             ),

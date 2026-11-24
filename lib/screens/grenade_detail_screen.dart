@@ -303,6 +303,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
   final Map<int, GlobalKey> _stepKeys = <int, GlobalKey>{};
   String? _originalTitle; // 存原始标题
   List<Tag>? _grenadeTags; // 缓存道具的标签
+  int _loadGeneration = 0;
 
   @override
   void initState() {
@@ -337,24 +338,42 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
   }
 
   Future<void> _loadData({bool resetTitle = true}) async {
+    final generation = ++_loadGeneration;
     final isar = ref.read(isarProvider);
-    grenade = await isar.grenades.get(widget.grenadeId);
-    if (grenade != null) {
-      grenade!.steps.loadSync();
-      for (var step in grenade!.steps) {
+    final loaded = await isar.grenades.get(widget.grenadeId);
+    List<Tag>? resolvedTags;
+    if (loaded != null) {
+      loaded.steps.loadSync();
+      for (var step in loaded.steps) {
         step.medias.loadSync();
       }
-      if (resetTitle) {
-        _titleController.text = grenade!.title;
-        _originalTitle = grenade!.title; // 存原始标题
+      await loaded.layer.load();
+      final layer = loaded.layer.value;
+      int? mapId;
+      if (layer != null) {
+        await layer.map.load();
+        mapId = layer.map.value?.id;
       }
-      // 加载标签数据
       final tagService = TagService(isar);
-      _grenadeTags = await tagService.getGrenadeTags(grenade!.id);
+      final boundTags = await tagService.getGrenadeTags(loaded.id);
+      final allMapTags =
+          mapId != null ? await tagService.getAllTags(mapId) : const <Tag>[];
+      resolvedTags = resolveDisplayedGrenadeTags(
+        allTags: allMapTags,
+        boundTags: boundTags,
+        grenadeTeam: loaded.team,
+      );
     }
-    if (mounted) {
-      setState(() {});
+    if (!mounted || generation != _loadGeneration) return;
+    grenade = loaded;
+    if (loaded != null) {
+      if (resetTitle) {
+        _titleController.text = loaded.title;
+        _originalTitle = loaded.title;
+      }
+      _grenadeTags = resolvedTags;
     }
+    setState(() {});
   }
 
   /// 默认作者
@@ -401,36 +420,76 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     }
   }
 
-  void _updateGrenade(
-      {String? title,
-      int? type,
-      int? team,
-      String? author,
-      String? sourceUrl,
-      String? sourceNote}) async {
+  /// 事务内读取最新记录再修改目标字段，避免覆盖并行更新的 team 等字段
+  Future<void> _mutateGrenadeFields(
+    void Function(Grenade target) updater,
+  ) async {
     if (grenade == null) return;
     final isar = ref.read(isarProvider);
-
-    if (title != null) {
-      grenade!.title = title;
-      _originalTitle = title; // 更新原始标题
-    }
-    if (type != null) grenade!.type = type;
-    if (team != null) grenade!.team = team;
-    if (author != null) grenade!.author = author.isEmpty ? null : author;
-    if (sourceUrl != null) {
-      grenade!.sourceUrl = sourceUrl.isEmpty ? null : sourceUrl;
-    }
-    if (sourceNote != null) {
-      grenade!.sourceNote = sourceNote.isEmpty ? null : sourceNote;
-    }
-
-    grenade!.updatedAt = DateTime.now();
+    final now = DateTime.now();
+    Grenade? persisted;
     await isar.writeTxn(() async {
-      await isar.grenades.put(grenade!);
+      final latest = await isar.grenades.get(grenade!.id);
+      if (latest == null) return;
+      updater(latest);
+      latest.updatedAt = now;
+      latest.hasLocalEdits = true;
+      await isar.grenades.put(latest);
+      persisted = latest;
     });
-    await _markAsLocallyEdited();
-    _loadData(resetTitle: false);
+    if (persisted != null && grenade != null) {
+      updater(grenade!);
+      grenade!.team = persisted!.team;
+      grenade!.updatedAt = now;
+      grenade!.hasLocalEdits = true;
+    }
+  }
+
+  Future<void> _updateGrenade({
+    String? title,
+    int? type,
+    String? author,
+    String? sourceUrl,
+    String? sourceNote,
+  }) async {
+    if (grenade == null) return;
+    if (title != null) {
+      _originalTitle = title;
+    }
+    await _mutateGrenadeFields((target) {
+      if (title != null) target.title = title;
+      if (type != null) {
+        final switchedWallbangBoundary =
+            (target.type == GrenadeType.wallbang) !=
+                (type == GrenadeType.wallbang);
+        target.type = type;
+        if (switchedWallbangBoundary) {
+          target.impactXRatio = null;
+          target.impactYRatio = null;
+          target.impactAreaStrokes = null;
+          target.impactGroupId = null;
+        } else if (type == GrenadeType.wallbang) {
+          target.impactAreaStrokes = null;
+          target.impactGroupId = null;
+          if (target.impactXRatio != null &&
+              target.impactYRatio != null &&
+              isZeroLengthPointPair(target.xRatio, target.yRatio,
+                  target.impactXRatio!, target.impactYRatio!)) {
+            target.impactXRatio = null;
+            target.impactYRatio = null;
+          }
+        }
+      }
+      if (author != null) target.author = author.isEmpty ? null : author;
+      if (sourceUrl != null) {
+        target.sourceUrl = sourceUrl.isEmpty ? null : sourceUrl;
+      }
+      if (sourceNote != null) {
+        target.sourceNote = sourceNote.isEmpty ? null : sourceNote;
+      }
+    });
+    await _loadData(resetTitle: false);
+    sendOverlayCommand('reload_data');
   }
 
   Future<int?> _resolveMapId() async {
@@ -582,21 +641,17 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     _loadData(resetTitle: false);
   }
 
-  /// 更新爆点
+  /// 更新爆点/穿线方位
   Future<void> _updateImpactPoint(double? x, double? y) async {
     if (grenade == null) return;
-    final isar = ref.read(isarProvider);
-
-    grenade!.impactXRatio = x;
-    grenade!.impactYRatio = y;
-    grenade!.updatedAt = DateTime.now();
-
-    await isar.writeTxn(() async {
-      await isar.grenades.put(grenade!);
+    await _mutateGrenadeFields((target) {
+      target.impactXRatio = x;
+      target.impactYRatio = y;
+      if (target.type == GrenadeType.wallbang) {
+        target.impactAreaStrokes = null;
+      }
     });
-
-    await _markAsLocallyEdited();
-    _loadData(resetTitle: false);
+    await _loadData(resetTitle: false);
     sendOverlayCommand('reload_data');
   }
 
@@ -634,15 +689,11 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     );
 
     if (result == null) return;
-    final isar = ref.read(isarProvider);
-    grenade!.xRatio = result.dx;
-    grenade!.yRatio = result.dy;
-    grenade!.updatedAt = DateTime.now();
-    await isar.writeTxn(() async {
-      await isar.grenades.put(grenade!);
+    await _mutateGrenadeFields((target) {
+      target.xRatio = result.dx;
+      target.yRatio = result.dy;
     });
-    await _markAsLocallyEdited();
-    _loadData(resetTitle: false);
+    await _loadData(resetTitle: false);
     sendOverlayCommand('reload_data');
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -658,8 +709,8 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
   Future<void> _pickImpactPoint() async {
     if (grenade == null) return;
     final isWallbang = grenade!.type == GrenadeType.wallbang;
+    final hasWallbang = hasValidWallbangLine(grenade!);
 
-    // 获取楼层
     await grenade!.layer.load();
     final layer = grenade!.layer.value;
     if (layer == null) {
@@ -675,8 +726,12 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
       MaterialPageRoute(
         builder: (_) => ImpactPointPickerScreen(
           grenadeId: grenade!.id,
-          initialX: grenade!.impactXRatio,
-          initialY: grenade!.impactYRatio,
+          initialX: isWallbang
+              ? (hasWallbang ? grenade!.impactXRatio : null)
+              : grenade!.impactXRatio,
+          initialY: isWallbang
+              ? (hasWallbang ? grenade!.impactYRatio : null)
+              : grenade!.impactYRatio,
           throwX: grenade!.xRatio,
           throwY: grenade!.yRatio,
           layerId: layer.id,
@@ -721,19 +776,12 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     );
 
     if (confirm == true) {
-      final isar = ref.read(isarProvider);
-
-      grenade!.impactXRatio = null;
-      grenade!.impactYRatio = null;
-      grenade!.impactAreaStrokes = null;
-      grenade!.updatedAt = DateTime.now();
-
-      await isar.writeTxn(() async {
-        await isar.grenades.put(grenade!);
+      await _mutateGrenadeFields((target) {
+        target.impactXRatio = null;
+        target.impactYRatio = null;
+        target.impactAreaStrokes = null;
       });
-
-      await _markAsLocallyEdited();
-      _loadData(resetTitle: false);
+      await _loadData(resetTitle: false);
       sendOverlayCommand('reload_data');
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -904,8 +952,11 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
 
         grenade!.steps.add(step);
         await grenade!.steps.save();
-        grenade!.updatedAt = DateTime.now();
-        await isar.grenades.put(grenade!);
+        final latest = await isar.grenades.get(grenade!.id);
+        if (latest != null) {
+          latest.updatedAt = DateTime.now();
+          await isar.grenades.put(latest);
+        }
       });
     } catch (_) {
       if (mediaPath != null) {
@@ -1498,8 +1549,11 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                 step.description = descController.text;
                 await isar.writeTxn(() async {
                   await isar.grenadeSteps.put(step);
-                  grenade!.updatedAt = DateTime.now();
-                  await isar.grenades.put(grenade!);
+                  final latest = await isar.grenades.get(grenade!.id);
+                  if (latest != null) {
+                    latest.updatedAt = DateTime.now();
+                    await isar.grenades.put(latest);
+                  }
                 });
                 await _markAsLocallyEdited(); // 编辑步骤文字算实质性编辑
                 Navigator.pop(ctx);
@@ -1556,8 +1610,11 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
               try {
                 await isar.writeTxn(() async {
                   await isar.stepMedias.put(media);
-                  grenade!.updatedAt = DateTime.now();
-                  await isar.grenades.put(grenade!);
+                  final latest = await isar.grenades.get(grenade!.id);
+                  if (latest != null) {
+                    latest.updatedAt = DateTime.now();
+                    await isar.grenades.put(latest);
+                  }
                 });
               } catch (_) {
                 media.localPath = previousPath;
@@ -1845,7 +1902,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     );
 
     if (result == 'save') {
-      _updateGrenade(title: _titleController.text);
+      await _updateGrenade(title: _titleController.text);
       return true;
     } else if (result == 'discard') {
       return true;
@@ -2114,14 +2171,16 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
   /// 构建爆点/穿线设置区域
   Widget _buildImpactPointSection(bool isEditing) {
     final isWallbang = grenade!.type == GrenadeType.wallbang;
-    final hasImpactPoint =
-        grenade!.impactXRatio != null && grenade!.impactYRatio != null;
+    final hasImpactPoint = hasValidImpactPoint(grenade!);
+    final hasWallbangLine = hasValidWallbangLine(grenade!);
+    final hasTargetPoint = isWallbang ? hasWallbangLine : hasImpactPoint;
     final throwMode =
         !isWallbang && isEditing && widget.pickThrowPoint && hasImpactPoint;
     // 投掷点与爆点重合视为未设置
-    final hasThrowPoint = grenade!.xRatio != grenade!.impactXRatio ||
-        grenade!.yRatio != grenade!.impactYRatio;
-    final pointSet = throwMode ? hasThrowPoint : hasImpactPoint;
+    final hasThrowPoint = hasImpactPoint &&
+        !isZeroLengthPointPair(grenade!.xRatio, grenade!.yRatio,
+            grenade!.impactXRatio!, grenade!.impactYRatio!);
+    final pointSet = throwMode ? hasThrowPoint : hasTargetPoint;
     final accentColor =
         isWallbang ? Colors.cyan : Theme.of(context).colorScheme.primary;
     final cardIcon =
@@ -2129,7 +2188,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
     final sectionTitle =
         isWallbang ? '穿线方位' : (throwMode ? '投掷点位置' : '爆点位置');
     final sectionSubtitle = isWallbang
-        ? (hasImpactPoint
+        ? (hasWallbangLine
             ? '方位终点 (${grenade!.impactXRatio!.toStringAsFixed(3)}, ${grenade!.impactYRatio!.toStringAsFixed(3)})'
             : '尚未设置穿线')
         : (throwMode
@@ -2140,16 +2199,18 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                 ? '坐标 (${grenade!.impactXRatio!.toStringAsFixed(3)}, ${grenade!.impactYRatio!.toStringAsFixed(3)})'
                 : '尚未设置爆点'));
     final editActionLabel = isWallbang
-        ? (hasImpactPoint ? '修改穿线' : '设置穿线')
+        ? (hasWallbangLine ? '修改穿线' : '设置穿线')
         : (throwMode
             ? (hasThrowPoint ? '修改投掷点' : '设置投掷点')
             : (hasImpactPoint ? '修改爆点' : '设置爆点'));
     final editButtonColor = isWallbang ? Colors.cyan : Colors.purpleAccent;
-    final canClear = !throwMode &&
-        (hasImpactPoint ||
-            (!isWallbang &&
-                grenade!.impactAreaStrokes != null &&
-                grenade!.impactAreaStrokes!.isNotEmpty));
+    final hasResidualImpactData =
+        (grenade!.impactAreaStrokes != null &&
+                grenade!.impactAreaStrokes!.isNotEmpty) ||
+            (isWallbang &&
+                grenade!.impactXRatio != null &&
+                grenade!.impactYRatio != null);
+    final canClear = !throwMode && (hasTargetPoint || hasResidualImpactData);
 
     Future<void> openImpactPoint() async {
       await grenade!.layer.load();
@@ -2168,8 +2229,8 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
         MaterialPageRoute(
           builder: (_) => ImpactPointPickerScreen(
             grenadeId: grenade!.id,
-            initialX: grenade!.impactXRatio,
-            initialY: grenade!.impactYRatio,
+            initialX: hasTargetPoint ? grenade!.impactXRatio : null,
+            initialY: hasTargetPoint ? grenade!.impactYRatio : null,
             throwX: grenade!.xRatio,
             throwY: grenade!.yRatio,
             layerId: layer.id,
@@ -2236,7 +2297,7 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
                           fontSize: 11,
                           fontWeight: FontWeight.w700)),
                 ),
-              if (!isEditing && hasImpactPoint) ...[
+              if (!isEditing && hasTargetPoint) ...[
                 const SizedBox(width: 8),
                 OutlinedButton.icon(
                   onPressed: openImpactPoint,
@@ -2392,6 +2453,11 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
               grenadeId: grenade!.id,
               mapId: map.id,
               tagService: tagService,
+              onTeamChanged: (team) {
+                if (grenade != null) {
+                  grenade!.team = team;
+                }
+              },
               onTagsChanged: () {
                 _loadData(resetTitle: false);
                 sendOverlayCommand('reload_data');
@@ -2427,11 +2493,14 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
 
   Widget _buildStepList(bool isEditing) {
     final steps = _sortedSteps();
-    final hasImpactPoint =
-        grenade!.impactXRatio != null && grenade!.impactYRatio != null;
-    final showImpactCard = isEditing || hasImpactPoint;
+    final isWallbang = grenade!.type == GrenadeType.wallbang;
+    final hasTargetPoint = isWallbang
+        ? hasValidWallbangLine(grenade!)
+        : hasValidImpactPoint(grenade!);
+    final showImpactCard = isEditing || hasTargetPoint;
+    final hasTags = _grenadeTags != null && _grenadeTags!.isNotEmpty;
 
-    if (steps.isEmpty && !showImpactCard) {
+    if (steps.isEmpty && !showImpactCard && !hasTags) {
       return const Center(
           child: Text("暂无教学步骤", style: TextStyle(color: Colors.grey)));
     }
@@ -2442,6 +2511,12 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
       children: [
         if (showImpactCard) _buildImpactPointSection(isEditing),
         _buildTagSection(isEditing),
+        if (steps.isEmpty && !isEditing)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 32),
+            child: Center(
+                child: Text("暂无教学步骤", style: TextStyle(color: Colors.grey))),
+          ),
         ...steps.map((step) => KeyedSubtree(
               key: _stepKeys.putIfAbsent(step.id, GlobalKey.new),
               child: _buildStepCard(step, isEditing),
@@ -2644,9 +2719,11 @@ class _GrenadeDetailScreenState extends ConsumerState<GrenadeDetailScreen> {
       await isar.stepMedias.put(fromMedia);
       await isar.stepMedias.put(toMedia);
 
-      // 更新道具的更新时间
-      grenade!.updatedAt = DateTime.now();
-      await isar.grenades.put(grenade!);
+      final latest = await isar.grenades.get(grenade!.id);
+      if (latest != null) {
+        latest.updatedAt = DateTime.now();
+        await isar.grenades.put(latest);
+      }
     });
 
     await _markAsLocallyEdited();

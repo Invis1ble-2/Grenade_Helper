@@ -21,6 +21,8 @@ import '../widgets/joystick_widget.dart';
 import '../widgets/path_image_provider.dart';
 import '../widgets/square_brush.dart';
 import '../widgets/app_svg_icon.dart';
+import '../widgets/dashed_line_painter.dart';
+import '../widgets/grenade_tag_editor.dart';
 import '../widgets/grenade_type_icon.dart';
 import '../widgets/map_icon.dart';
 import '../theme/app_design_system.dart';
@@ -980,9 +982,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         await isar.writeTxn(() async {
           final g = await isar.grenades.get(targetId);
           if (g != null) {
-            g.xRatio = targetX;
-            g.yRatio = targetY;
-            g.updatedAt = DateTime.now();
+            _applyThrowPosition(g, targetX, targetY);
             await isar.grenades.put(g);
           }
         });
@@ -1081,9 +1081,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           for (final g in _draggingCluster!.grenades) {
             final freshG = isar.grenades.getSync(g.id);
             if (freshG != null) {
-              freshG.xRatio = targetX;
-              freshG.yRatio = targetY;
-              freshG.updatedAt = DateTime.now();
+              _applyThrowPosition(freshG, targetX, targetY);
               isar.grenades.putSync(freshG);
             }
           }
@@ -1111,6 +1109,36 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     _tryCreateGrenadeAtGlobalPosition(details.globalPosition, layerId);
   }
 
+  void _applyThrowPosition(Grenade grenade, double targetX, double targetY) {
+    grenade.xRatio = targetX;
+    grenade.yRatio = targetY;
+    if (grenade.type == GrenadeType.wallbang &&
+        grenade.impactXRatio != null &&
+        grenade.impactYRatio != null &&
+        isZeroLengthPointPair(
+            targetX, targetY, grenade.impactXRatio!, grenade.impactYRatio!)) {
+      grenade.impactXRatio = null;
+      grenade.impactYRatio = null;
+    }
+    grenade.updatedAt = DateTime.now();
+  }
+
+  Future<void> _bindDefaultRoleTagInTxn(
+    Isar isar,
+    int grenadeId,
+    int mapId,
+  ) async {
+    final mapTags = await isar.tags.filter().mapIdEqualTo(mapId).findAll();
+    for (final tag in mapTags) {
+      if (roleTagToTeamType(tag) == TeamType.all) {
+        await isar.grenadeTags.put(
+          GrenadeTag(grenadeId: grenadeId, tagId: tag.id),
+        );
+        break;
+      }
+    }
+  }
+
   void _createGrenade(int layerId) async {
     final isar = ref.read(isarProvider);
     final layer = await isar.mapLayers.get(layerId);
@@ -1129,6 +1157,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       id = await isar.grenades.put(grenade);
       grenade.layer.value = layer;
       await grenade.layer.save();
+      await _bindDefaultRoleTagInTxn(isar, id, widget.gameMap.id);
     });
     setState(() {
       _tempTapPosition = null;
@@ -1195,14 +1224,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       await isar.writeTxn(() async {
         final g = await isar.grenades.get(_movingSingleGrenade!.id);
         if (g != null) {
-          // 合并坐标
-          // 物理合并
           final targetX = cluster.grenades.first.xRatio;
           final targetY = cluster.grenades.first.yRatio;
-
-          g.xRatio = targetX;
-          g.yRatio = targetY;
-          g.updatedAt = DateTime.now();
+          _applyThrowPosition(g, targetX, targetY);
           await isar.grenades.put(g);
         }
       });
@@ -1214,9 +1238,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           backgroundColor: Colors.blue,
           duration: Duration(seconds: 1)));
 
-      setState(() {
-        _movingSingleGrenade = null;
-      });
       setState(() {
         _movingSingleGrenade = null;
       });
@@ -1257,9 +1278,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         for (final g in _draggingCluster!.grenades) {
           final freshG = await isar.grenades.get(g.id);
           if (freshG != null) {
-            freshG.xRatio = targetX;
-            freshG.yRatio = targetY;
-            freshG.updatedAt = DateTime.now();
+            _applyThrowPosition(freshG, targetX, targetY);
             await isar.grenades.put(freshG);
           }
         }
@@ -1796,6 +1815,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       id = await isar.grenades.put(grenade);
       grenade.layer.value = layer;
       await grenade.layer.save();
+      await _bindDefaultRoleTagInTxn(isar, id, widget.gameMap.id);
     });
     if (!mounted) return;
     Navigator.push(
@@ -1910,14 +1930,20 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     Grenade grenade, {
     double? x,
     double? y,
+    bool clearImpactAreaStrokes = false,
   }) async {
     final now = DateTime.now();
     final isar = ref.read(isarProvider);
+    final shouldClearStrokes =
+        clearImpactAreaStrokes || grenade.type == GrenadeType.wallbang;
     await isar.writeTxn(() async {
       final g = await isar.grenades.get(grenade.id);
       if (g != null) {
         g.impactXRatio = x;
         g.impactYRatio = y;
+        if (shouldClearStrokes || g.type == GrenadeType.wallbang) {
+          g.impactAreaStrokes = null;
+        }
         g.hasLocalEdits = true;
         g.updatedAt = now;
         await isar.grenades.put(g);
@@ -1925,6 +1951,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     });
     grenade.impactXRatio = x;
     grenade.impactYRatio = y;
+    if (shouldClearStrokes) {
+      grenade.impactAreaStrokes = null;
+    }
     grenade.hasLocalEdits = true;
     grenade.updatedAt = now;
     sendOverlayCommand('reload_data');
@@ -1937,7 +1966,23 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     required int layerId,
   }) async {
     final isWallbang = grenade.type == GrenadeType.wallbang;
-    await _updateGrenadeImpactPoint(grenade, x: targetX, y: targetY);
+    if (isWallbang &&
+        isZeroLengthPointPair(grenade.xRatio, grenade.yRatio, targetX, targetY)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('穿线终点不能与穿点重合，请选择其他方位'),
+        backgroundColor: Colors.orange,
+        duration: Duration(seconds: 2),
+      ));
+      return;
+    }
+    await _updateGrenadeImpactPoint(
+      grenade,
+      x: targetX,
+      y: targetY,
+      clearImpactAreaStrokes: isWallbang,
+    );
     if (!mounted) return;
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -1976,7 +2021,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     Grenade grenade,
     void Function(void Function()) setPanelState,
   ) async {
-    await _updateGrenadeImpactPoint(grenade, x: null, y: null);
+    await _updateGrenadeImpactPoint(
+      grenade,
+      x: null,
+      y: null,
+      clearImpactAreaStrokes: true,
+    );
     if (!mounted) return;
     setPanelState(() {});
     setState(() {});
@@ -2133,10 +2183,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final isar = ref.read(isarProvider);
     isar.writeTxnSync(() {
       for (final g in _draggingCluster!.grenades) {
-        g.xRatio = _dragOffset!.dx;
-        g.yRatio = _dragOffset!.dy;
-        g.updatedAt = DateTime.now();
-        isar.grenades.putSync(g);
+        final freshG = isar.grenades.getSync(g.id);
+        if (freshG != null) {
+          _applyThrowPosition(freshG, _dragOffset!.dx, _dragOffset!.dy);
+          isar.grenades.putSync(freshG);
+        }
       }
     });
     setState(() {
@@ -2256,10 +2307,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final isar = ref.read(isarProvider);
     isar.writeTxnSync(() {
       for (final g in _joystickCluster!.grenades) {
-        g.xRatio = _dragOffset!.dx;
-        g.yRatio = _dragOffset!.dy;
-        g.updatedAt = DateTime.now();
-        isar.grenades.putSync(g);
+        final freshG = isar.grenades.getSync(g.id);
+        if (freshG != null) {
+          _applyThrowPosition(freshG, _dragOffset!.dx, _dragOffset!.dy);
+          isar.grenades.putSync(freshG);
+        }
       }
     });
 
@@ -2498,6 +2550,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     Grenade grenade,
     BoxConstraints constraints,
   ) {
+    if (grenade.type == GrenadeType.wallbang) return const SizedBox.shrink();
     final strokes = _parseStrokes(grenade.impactAreaStrokes);
     if (strokes.isEmpty) return const SizedBox.shrink();
 
@@ -3198,7 +3251,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     return Positioned.fill(
       child: IgnorePointer(
         child: CustomPaint(
-          painter: _DashedLinePainter(
+          painter: DashedLinePainter(
             start: Offset(startX, startY),
             end: Offset(endX, endY),
             color: color,
@@ -5395,14 +5448,16 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                             );
                                           }
 
-                                          // 根据当前筛选结果过滤选中的grenades
-                                          final filteredIds =
-                                              list.map((g) => g.id).toSet();
+                                          // 根据当前筛选结果映射到流中的最新实例，避免复用旧快照
+                                          final latestById = {
+                                            for (final g in list) g.id: g
+                                          };
                                           final filteredSelectedGrenades =
                                               _selectedClusterForImpact
                                                       ?.grenades
-                                                      .where((g) => filteredIds
-                                                          .contains(g.id))
+                                                      .map((g) =>
+                                                          latestById[g.id])
+                                                      .whereType<Grenade>()
                                                       .toList() ??
                                                   [];
 
@@ -5432,6 +5487,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                             // 去重逻辑：避免重复绘制相同的 strokes 导致透明度叠加
                                             final visitedStrokes = <String>{};
                                             for (final g in areaGrenades) {
+                                              if (g.type ==
+                                                  GrenadeType.wallbang) {
+                                                continue;
+                                              }
                                               if (g.impactAreaStrokes != null &&
                                                   g.impactAreaStrokes!
                                                       .isNotEmpty &&
@@ -5762,8 +5821,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                             });
                                             widgets.addAll(lineGrenades
                                                 .where((g) =>
-                                                    g.impactXRatio != null &&
-                                                    g.impactYRatio != null &&
+                                                    (g.type ==
+                                                            GrenadeType.wallbang
+                                                        ? hasValidWallbangLine(
+                                                            g)
+                                                        : hasValidImpactPoint(
+                                                            g)) &&
                                                     _isRatioSegmentVisible(
                                                       g.xRatio,
                                                       g.yRatio,
@@ -5883,12 +5946,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                     // 移动单个爆点时显示其原始位置及连线（无论在哪种模式）
                                     if (_movingSingleImpactGrenade != null) ...[
                                       if (_movingSingleImpactGrenade!.type ==
-                                          GrenadeType.wallbang)
-                                        _buildWallbangLine(
-                                            _movingSingleImpactGrenade!,
-                                            markerScale,
-                                            imageBounds)
-                                      else ...[
+                                          GrenadeType.wallbang) ...[
+                                        if (hasValidWallbangLine(
+                                            _movingSingleImpactGrenade!))
+                                          _buildWallbangLine(
+                                              _movingSingleImpactGrenade!,
+                                              markerScale,
+                                              imageBounds),
+                                      ] else ...[
                                         _buildConnectionLine(
                                             _movingSingleImpactGrenade!,
                                             markerScale,
@@ -6272,7 +6337,18 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                     setState(() {
                                       _isImpactMode = !_isImpactMode;
                                       _selectedClusterForImpact = null;
+                                      _movingSingleImpactGrenade = null;
+                                      _movingSingleGrenade = null;
+                                      _isMovingCluster = false;
+                                      _draggingCluster = null;
+                                      _dragOffset = null;
+                                      _dragAnchorOffset = null;
+                                      _draggingImpactCluster = null;
+                                      _impactDragOffset = null;
+                                      _impactDragAnchorOffset = null;
                                     });
+                                    ScaffoldMessenger.of(context)
+                                        .hideCurrentSnackBar();
                                     ScaffoldMessenger.of(context)
                                         .showSnackBar(SnackBar(
                                       content: Text(_isImpactMode
@@ -6432,10 +6508,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         final grenadesAsync = ref.watch(_filteredGrenadesProvider(layerId));
         return grenadesAsync.when(
           data: (filteredList) {
-            // 根据筛选结果过滤cluster中的grenades
-            final filteredIds = filteredList.map((g) => g.id).toSet();
+            // 映射到流中的最新实例，确保面板随数据库变更实时同步
+            final latestById = {for (final g in filteredList) g.id: g};
             final grenades = cluster.grenades
-                .where((g) => filteredIds.contains(g.id))
+                .map((g) => latestById[g.id])
+                .whereType<Grenade>()
                 .toList();
             // 如果所有道具都被筛选掉，自动关闭面板
             if (grenades.isEmpty) {
@@ -6844,9 +6921,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                               }
 
                               final isSelected = selectedIds.contains(g.id);
-                              final hasWallbangLine =
-                                  g.impactXRatio != null &&
-                                      g.impactYRatio != null;
+                              final hasWallbangLine = hasValidWallbangLine(g);
+                              final canClearWallbang = hasWallbangLine ||
+                                  (g.type == GrenadeType.wallbang &&
+                                      ((g.impactAreaStrokes != null &&
+                                              g.impactAreaStrokes!
+                                                  .isNotEmpty) ||
+                                          (g.impactXRatio != null &&
+                                              g.impactYRatio != null)));
 
                               // 左滑删除功能（编辑模式下）
                               Widget listItem = ListTile(
@@ -6958,7 +7040,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                               constraints: const BoxConstraints(
                                                   minWidth: 32, minHeight: 32),
                                             ),
-                                            if (hasWallbangLine)
+                                            if (canClearWallbang)
                                               IconButton(
                                                 onPressed: () =>
                                                     _clearWallbangLine(
@@ -8189,103 +8271,6 @@ class _ClusterBatchPainter extends CustomPainter {
       if (!identical(entry.value, right[entry.key])) return false;
     }
     return true;
-  }
-}
-
-/// 虚线画笔，用于绘制投掷点到爆点/穿点的连线
-class _DashedLinePainter extends CustomPainter {
-  final Offset start;
-  final Offset end;
-  final Color color;
-  final double strokeWidth;
-  final double dashLength;
-  final double gapLength;
-  final bool showArrow;
-  final double arrowLength;
-
-  _DashedLinePainter({
-    required this.start,
-    required this.end,
-    required this.color,
-    this.strokeWidth = 1.5,
-    this.dashLength = 4,
-    this.gapLength = 4,
-    this.showArrow = false,
-    this.arrowLength = 8.0,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final totalLength = (end - start).distance;
-    if (totalLength < 1e-3) return;
-
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = strokeWidth
-      ..style = PaintingStyle.stroke;
-
-    final path = Path();
-    final direction = (end - start) / totalLength;
-
-    double currentLength = 0;
-    bool draw = true;
-
-    path.moveTo(start.dx, start.dy);
-
-    while (currentLength < totalLength) {
-      final segmentLength = draw ? dashLength : gapLength;
-      final nextLength =
-          (currentLength + segmentLength).clamp(0.0, totalLength);
-      final nextPoint = start + direction * nextLength;
-
-      if (draw) {
-        path.lineTo(nextPoint.dx, nextPoint.dy);
-      } else {
-        path.moveTo(nextPoint.dx, nextPoint.dy);
-      }
-
-      currentLength = nextLength;
-      draw = !draw;
-    }
-
-    canvas.drawPath(path, paint);
-
-    if (showArrow && totalLength > 2.0) {
-      final angle = math.atan2(direction.dy, direction.dx);
-      const spread = 28 * math.pi / 180;
-      final wingLength = math.min(arrowLength, totalLength * 0.45);
-      final leftWing = Offset(
-        end.dx - wingLength * math.cos(angle - spread),
-        end.dy - wingLength * math.sin(angle - spread),
-      );
-      final rightWing = Offset(
-        end.dx - wingLength * math.cos(angle + spread),
-        end.dy - wingLength * math.sin(angle + spread),
-      );
-      final arrowPath = Path()
-        ..moveTo(leftWing.dx, leftWing.dy)
-        ..lineTo(end.dx, end.dy)
-        ..lineTo(rightWing.dx, rightWing.dy);
-      final arrowPaint = Paint()
-        ..color = color
-        ..strokeWidth = strokeWidth
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round;
-      canvas.drawPath(arrowPath, arrowPaint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _DashedLinePainter oldDelegate) {
-    return start != oldDelegate.start ||
-        end != oldDelegate.end ||
-        color != oldDelegate.color ||
-        strokeWidth != oldDelegate.strokeWidth ||
-        dashLength != oldDelegate.dashLength ||
-        gapLength != oldDelegate.gapLength ||
-        showArrow != oldDelegate.showArrow ||
-        arrowLength != oldDelegate.arrowLength;
   }
 }
 

@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +6,7 @@ import 'package:photo_view/photo_view.dart';
 import '../models.dart';
 import '../providers.dart';
 import '../widgets/app_svg_icon.dart';
+import '../widgets/dashed_line_painter.dart';
 import '../widgets/path_image_provider.dart';
 import '../widgets/square_brush.dart';
 
@@ -74,8 +74,15 @@ class _ImpactPointPickerScreenState
       }
     } else {
       _fixedPoint = Offset(widget.throwX, widget.throwY);
-      _selectedX = widget.initialX;
-      _selectedY = widget.initialY;
+      final isZeroWallbang = widget.wallbangLineMode &&
+          widget.initialX != null &&
+          widget.initialY != null &&
+          isZeroLengthPointPair(
+              widget.throwX, widget.throwY, widget.initialX!, widget.initialY!);
+      if (!isZeroWallbang) {
+        _selectedX = widget.initialX;
+        _selectedY = widget.initialY;
+      }
     }
     _loadLayer();
 
@@ -149,6 +156,14 @@ class _ImpactPointPickerScreenState
         localRatio.dx > 1 ||
         localRatio.dy < 0 ||
         localRatio.dy > 1) {
+      return;
+    }
+    if (widget.wallbangLineMode &&
+        isZeroLengthPointPair(
+            widget.throwX, widget.throwY, localRatio.dx, localRatio.dy)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('穿线终点不能与穿点重合，请选择其他方位')),
+      );
       return;
     }
 
@@ -332,7 +347,7 @@ class _ImpactPointPickerScreenState
       if (throwPoint != null)
         _buildThrowPointMarker(imageBounds, markerScale, throwPoint),
       if (throwPoint != null && impactPoint != null)
-        _buildConnectionLine(imageBounds, throwPoint, impactPoint),
+        _buildConnectionLine(imageBounds, markerScale, throwPoint, impactPoint),
       if (!widget.wallbangLineMode && impactPoint != null)
         _buildImpactMarker(imageBounds, markerScale, impactPoint),
       if (!widget.wallbangLineMode &&
@@ -369,23 +384,31 @@ class _ImpactPointPickerScreenState
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Container(
-                width: 12,
-                height: 12,
-                decoration: widget.wallbangLineMode
-                    ? BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: markerColor.withValues(alpha: 0.5),
-                          width: 1.5,
-                        ),
-                      )
-                    : BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: markerColor, width: 2),
-                      ),
-              ),
+              if (widget.wallbangLineMode)
+                Container(
+                  width: 16,
+                  height: 16,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.75),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: theme.brightness == Brightness.dark
+                          ? Colors.white
+                          : markerColor.withValues(alpha: 0.8),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: const Icon(Icons.place, size: 10, color: Colors.white),
+                )
+              else
+                Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: markerColor, width: 2),
+                  ),
+                ),
               const SizedBox(width: 8),
               Text(
                 widget.wallbangLineMode ? '穿点' : '投掷点',
@@ -543,6 +566,7 @@ class _ImpactPointPickerScreenState
         double offsetX,
         double offsetY
       }) imageBounds,
+      double markerScale,
       Offset from,
       Offset to) {
     final startX = imageBounds.offsetX + from.dx * imageBounds.width;
@@ -554,17 +578,17 @@ class _ImpactPointPickerScreenState
     return Positioned.fill(
       child: IgnorePointer(
         child: CustomPaint(
-          painter: _DashedLinePainter(
+          painter: DashedLinePainter(
             start: Offset(startX, startY),
             end: Offset(endX, endY),
             color: isWallbang
                 ? Colors.cyanAccent.withValues(alpha: 0.9)
                 : Colors.purpleAccent.withValues(alpha: 0.7),
-            strokeWidth: 2,
-            dashLength: isWallbang ? 7 : 5,
-            gapLength: isWallbang ? 4 : 5,
+            strokeWidth: 2 * markerScale,
+            dashLength: (isWallbang ? 7 : 5) * markerScale,
+            gapLength: (isWallbang ? 4 : 5) * markerScale,
             showArrow: isWallbang,
-            arrowLength: 9.0,
+            arrowLength: 9.0 * markerScale,
           ),
         ),
       ),
@@ -687,101 +711,5 @@ class _ImpactAreaPainter extends CustomPainter {
     return oldDelegate.strokes != strokes ||
         oldDelegate.opacity != opacity ||
         oldDelegate.color != color;
-  }
-}
-
-class _DashedLinePainter extends CustomPainter {
-  final Offset start;
-  final Offset end;
-  final Color color;
-  final double strokeWidth;
-  final double dashLength;
-  final double gapLength;
-  final bool showArrow;
-  final double arrowLength;
-
-  _DashedLinePainter({
-    required this.start,
-    required this.end,
-    required this.color,
-    this.strokeWidth = 1.5,
-    this.dashLength = 4,
-    this.gapLength = 4,
-    this.showArrow = false,
-    this.arrowLength = 8.0,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final totalLength = (end - start).distance;
-    if (totalLength < 1e-3) return;
-
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = strokeWidth
-      ..style = PaintingStyle.stroke;
-
-    final path = Path();
-    final direction = (end - start) / totalLength;
-
-    double currentLength = 0;
-    bool draw = true;
-
-    path.moveTo(start.dx, start.dy);
-
-    while (currentLength < totalLength) {
-      final segmentLength = draw ? dashLength : gapLength;
-      final nextLength =
-          (currentLength + segmentLength).clamp(0.0, totalLength);
-      final nextPoint = start + direction * nextLength;
-
-      if (draw) {
-        path.lineTo(nextPoint.dx, nextPoint.dy);
-      } else {
-        path.moveTo(nextPoint.dx, nextPoint.dy);
-      }
-
-      currentLength = nextLength;
-      draw = !draw;
-    }
-
-    canvas.drawPath(path, paint);
-
-    if (showArrow && totalLength > 2.0) {
-      final wingLength = math.min(arrowLength, totalLength * 0.45);
-      const spreadAngle = 28 * math.pi / 180;
-      final backAngle = math.atan2(-direction.dy, -direction.dx);
-      final leftWing = Offset(
-        end.dx + wingLength * math.cos(backAngle - spreadAngle),
-        end.dy + wingLength * math.sin(backAngle - spreadAngle),
-      );
-      final rightWing = Offset(
-        end.dx + wingLength * math.cos(backAngle + spreadAngle),
-        end.dy + wingLength * math.sin(backAngle + spreadAngle),
-      );
-      final arrowPaint = Paint()
-        ..color = color
-        ..strokeWidth = strokeWidth
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..style = PaintingStyle.stroke;
-      final arrowPath = Path()
-        ..moveTo(leftWing.dx, leftWing.dy)
-        ..lineTo(end.dx, end.dy)
-        ..lineTo(rightWing.dx, rightWing.dy);
-      canvas.drawPath(arrowPath, arrowPaint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _DashedLinePainter oldDelegate) {
-    return start != oldDelegate.start ||
-        end != oldDelegate.end ||
-        color != oldDelegate.color ||
-        strokeWidth != oldDelegate.strokeWidth ||
-        dashLength != oldDelegate.dashLength ||
-        gapLength != oldDelegate.gapLength ||
-        showArrow != oldDelegate.showArrow ||
-        arrowLength != oldDelegate.arrowLength;
   }
 }

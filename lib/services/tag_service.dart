@@ -166,11 +166,11 @@ class TagService {
   }
 
   Future<void> _touchGrenadeForTagRelationChange(int grenadeId) async {
-    final grenade = await isar.grenades.get(grenadeId);
-    if (grenade == null) return;
-    grenade.updatedAt = DateTime.now();
-    grenade.hasLocalEdits = true;
     await isar.writeTxn(() async {
+      final grenade = await isar.grenades.get(grenadeId);
+      if (grenade == null) return;
+      grenade.updatedAt = DateTime.now();
+      grenade.hasLocalEdits = true;
       await isar.grenades.put(grenade);
     });
   }

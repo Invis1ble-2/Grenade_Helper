@@ -39,6 +39,8 @@ int? roleTagToTeamType(Tag tag) {
   }
 }
 
+bool isRoleTeamTag(Tag tag) => roleTagToTeamType(tag) != null;
+
 int _normalizeRoleTeam(int? team) {
   return (team == TeamType.ct || team == TeamType.t) ? team! : TeamType.all;
 }
@@ -58,6 +60,52 @@ Tag? _findRoleTagByTeam(List<Tag> roleTags, int team) {
     if (roleTagToTeamType(tag) == normalizedTeam) return tag;
   }
   return null;
+}
+
+/// 统一解析道具展示的标签 ID，仅归一化阵营标签而不静默写库
+Set<int> resolveDisplayedTagIds({
+  required List<Tag> allTags,
+  required Set<int> selectedIds,
+  required int? grenadeTeam,
+}) {
+  final roleTags = allTags.where(isRoleTeamTag).toList();
+  if (roleTags.isEmpty) return Set<int>.from(selectedIds);
+  final roleById = {for (final tag in roleTags) tag.id: tag};
+  final selectedRoleIds = selectedIds.where(roleById.containsKey).toSet();
+  final expectedTeam = _normalizeRoleTeam(grenadeTeam);
+  final singleRole =
+      selectedRoleIds.length == 1 ? roleById[selectedRoleIds.first] : null;
+  if (singleRole != null && roleTagToTeamType(singleRole) == expectedTeam) {
+    return Set<int>.from(selectedIds);
+  }
+  final adjusted = Set<int>.from(selectedIds)..removeAll(roleById.keys);
+  final targetRoleTag = _findRoleTagByTeam(roleTags, expectedTeam);
+  if (targetRoleTag != null) {
+    adjusted.add(targetRoleTag.id);
+  }
+  return adjusted;
+}
+
+/// 统一解析只读展示的道具标签列表，与编辑态保持一致
+List<Tag> resolveDisplayedGrenadeTags({
+  required List<Tag> allTags,
+  required List<Tag> boundTags,
+  required int? grenadeTeam,
+}) {
+  final roleTags = allTags.where(isRoleTeamTag).toList();
+  if (roleTags.isEmpty) return sortTagsForDisplay(boundTags);
+  final boundRoleTags = boundTags.where(isRoleTeamTag).toList();
+  final expectedTeam = _normalizeRoleTeam(grenadeTeam);
+  if (boundRoleTags.length == 1 &&
+      roleTagToTeamType(boundRoleTags.first) == expectedTeam) {
+    return sortTagsForDisplay(boundTags);
+  }
+  final adjusted = boundTags.where((t) => !isRoleTeamTag(t)).toList();
+  final targetRoleTag = _findRoleTagByTeam(roleTags, expectedTeam);
+  if (targetRoleTag != null) {
+    adjusted.add(targetRoleTag);
+  }
+  return sortTagsForDisplay(adjusted);
 }
 
 List<Tag> sortTagsForDisplay(List<Tag> tags) {
@@ -86,6 +134,7 @@ class GrenadeTagEditor extends StatefulWidget {
   final int mapId;
   final TagService tagService;
   final VoidCallback? onTagsChanged;
+  final ValueChanged<int>? onTeamChanged;
 
   const GrenadeTagEditor({
     super.key,
@@ -93,6 +142,7 @@ class GrenadeTagEditor extends StatefulWidget {
     required this.mapId,
     required this.tagService,
     this.onTagsChanged,
+    this.onTeamChanged,
   });
 
   @override
@@ -104,6 +154,8 @@ class _GrenadeTagEditorState extends State<GrenadeTagEditor> {
   Set<int> _selectedTagIds = {};
   bool _isLoading = true;
   bool _showAllTags = false;
+  Future<void>? _activeWrite;
+  int _loadGeneration = 0;
 
   @override
   void initState() {
@@ -111,18 +163,46 @@ class _GrenadeTagEditorState extends State<GrenadeTagEditor> {
     _loadData();
   }
 
-  Future<void> _loadData() async {
-    setState(() => _isLoading = true);
+  @override
+  void didUpdateWidget(covariant GrenadeTagEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.grenadeId != widget.grenadeId ||
+        oldWidget.mapId != widget.mapId) {
+      _activeWrite = null;
+      _loadData();
+    }
+  }
+
+  Future<void> _enqueueWrite(Future<void> Function() action) {
+    final prev = _activeWrite;
+    late final Future<void> current;
+    current = (prev == null
+            ? Future<void>.sync(action)
+            : prev.catchError((_) {}).then((_) => action()))
+        .whenComplete(() {
+      if (identical(_activeWrite, current)) {
+        _activeWrite = null;
+      }
+    });
+    _activeWrite = current;
+    return current;
+  }
+
+  Future<void> _loadData({bool showLoading = true}) async {
+    final generation = ++_loadGeneration;
+    if (showLoading && mounted) {
+      setState(() => _isLoading = true);
+    }
     final allTags = await widget.tagService.getAllTags(widget.mapId);
     final selectedIds =
         await widget.tagService.getGrenadeTagIds(widget.grenadeId);
     final grenade = await widget.tagService.isar.grenades.get(widget.grenadeId);
-    final resolvedSelection = _resolveDisplayedSelection(
+    final resolvedSelection = resolveDisplayedTagIds(
       allTags: allTags,
       selectedIds: selectedIds,
       grenadeTeam: grenade?.team,
     );
-    if (!mounted) return;
+    if (!mounted || generation != _loadGeneration) return;
     setState(() {
       _allTags = allTags;
       _selectedTagIds = resolvedSelection;
@@ -130,59 +210,48 @@ class _GrenadeTagEditorState extends State<GrenadeTagEditor> {
     });
   }
 
-  Set<int> _resolveDisplayedSelection({
-    required List<Tag> allTags,
-    required Set<int> selectedIds,
-    required int? grenadeTeam,
-  }) {
-    final roleTags =
-        allTags.where((t) => t.dimension == TagDimension.role).toList();
-    if (roleTags.isEmpty) return Set<int>.from(selectedIds);
-    final roleById = {for (final tag in roleTags) tag.id: tag};
-    final selectedRoleIds = selectedIds.where(roleById.containsKey).toSet();
-    final expectedTeam = _normalizeRoleTeam(grenadeTeam);
-    final singleRole =
-        selectedRoleIds.length == 1 ? roleById[selectedRoleIds.first] : null;
-    if (singleRole != null && roleTagToTeamType(singleRole) == expectedTeam) {
-      return Set<int>.from(selectedIds);
-    }
-    final adjusted = Set<int>.from(selectedIds)..removeAll(roleById.keys);
-    final targetRoleTag = _findRoleTagByTeam(roleTags, expectedTeam);
-    if (targetRoleTag != null) {
-      adjusted.add(targetRoleTag.id);
-    }
-    return adjusted;
+  Future<void> _toggleTag(Tag tag) {
+    final targetGrenadeId = widget.grenadeId;
+    return _enqueueWrite(() async {
+      if (!mounted || widget.grenadeId != targetGrenadeId) return;
+      final clickedTeam = roleTagToTeamType(tag);
+      if (clickedTeam != null) {
+        await _toggleRoleTag(tag, clickedTeam, targetGrenadeId);
+        return;
+      }
+      final wasSelected = _selectedTagIds.contains(tag.id);
+      if (wasSelected) {
+        await widget.tagService.removeTagFromGrenade(targetGrenadeId, tag.id);
+      } else {
+        await widget.tagService.addTagToGrenade(targetGrenadeId, tag.id);
+      }
+      if (!mounted || widget.grenadeId != targetGrenadeId) return;
+      final newSelection = Set<int>.from(_selectedTagIds);
+      if (wasSelected) {
+        newSelection.remove(tag.id);
+      } else {
+        newSelection.add(tag.id);
+      }
+      setState(() => _selectedTagIds = newSelection);
+      widget.onTagsChanged?.call();
+    });
   }
 
-  Future<void> _toggleTag(Tag tag) async {
-    final clickedTeam = roleTagToTeamType(tag);
-    if (clickedTeam != null) {
-      await _toggleRoleTag(tag, clickedTeam);
-      return;
-    }
-    final newSelection = Set<int>.from(_selectedTagIds);
-    if (newSelection.contains(tag.id)) {
-      newSelection.remove(tag.id);
-      await widget.tagService.removeTagFromGrenade(widget.grenadeId, tag.id);
-    } else {
-      newSelection.add(tag.id);
-      await widget.tagService.addTagToGrenade(widget.grenadeId, tag.id);
-    }
-    if (!mounted) return;
-    setState(() => _selectedTagIds = newSelection);
-    widget.onTagsChanged?.call();
-  }
-
-  Future<void> _toggleRoleTag(Tag tag, int clickedTeam) async {
-    final roleTags =
-        _allTags.where((t) => t.dimension == TagDimension.role).toList();
+  Future<void> _toggleRoleTag(
+    Tag tag,
+    int clickedTeam,
+    int targetGrenadeId,
+  ) async {
+    final roleTags = _allTags.where(isRoleTeamTag).toList();
     final isCurrentlySelected = _selectedTagIds.contains(tag.id);
-    if (isCurrentlySelected && clickedTeam == TeamType.all) return;
 
     final int targetTeam;
     final Tag? targetTag;
     if (!isCurrentlySelected) {
       targetTeam = clickedTeam;
+      targetTag = tag;
+    } else if (clickedTeam == TeamType.all) {
+      targetTeam = TeamType.all;
       targetTag = tag;
     } else {
       targetTeam = TeamType.all;
@@ -193,10 +262,33 @@ class _GrenadeTagEditorState extends State<GrenadeTagEditor> {
     final isar = widget.tagService.isar;
     final now = DateTime.now();
 
+    // 历史脏数据下点击「通用」也需校验库内实际关联，仅在库已一致时跳过写库
+    if (isCurrentlySelected && clickedTeam == TeamType.all) {
+      final currentLinks = isar.grenadeTags
+          .filter()
+          .grenadeIdEqualTo(targetGrenadeId)
+          .findAllSync();
+      final persistedRoleIds = currentLinks
+          .map((link) => link.tagId)
+          .where(roleTagIds.contains)
+          .toList();
+      final currentGrenade = isar.grenades.getSync(targetGrenadeId);
+      final targetTagId = targetTag?.id;
+      final linksAlreadyClean = targetTagId == null
+          ? persistedRoleIds.isEmpty
+          : (persistedRoleIds.length == 1 &&
+              persistedRoleIds.first == targetTagId);
+      if (linksAlreadyClean &&
+          (currentGrenade == null || currentGrenade.team == targetTeam)) {
+        return;
+      }
+    }
+
+    var persistedChanged = false;
     await isar.writeTxn(() async {
       final existingLinks = await isar.grenadeTags
           .filter()
-          .grenadeIdEqualTo(widget.grenadeId)
+          .grenadeIdEqualTo(targetGrenadeId)
           .findAll();
       var hasTargetLink = false;
       final deleteIds = <int>[];
@@ -212,41 +304,52 @@ class _GrenadeTagEditorState extends State<GrenadeTagEditor> {
       }
       if (deleteIds.isNotEmpty) {
         await isar.grenadeTags.deleteAll(deleteIds);
+        persistedChanged = true;
       }
       if (targetTag != null && !hasTargetLink) {
         await isar.grenadeTags.put(
-          GrenadeTag(grenadeId: widget.grenadeId, tagId: targetTag.id),
+          GrenadeTag(grenadeId: targetGrenadeId, tagId: targetTag.id),
         );
+        persistedChanged = true;
       }
-      final grenade = await isar.grenades.get(widget.grenadeId);
-      if (grenade != null) {
+      final grenade = await isar.grenades.get(targetGrenadeId);
+      if (grenade != null && (persistedChanged || grenade.team != targetTeam)) {
         grenade.team = targetTeam;
         grenade.updatedAt = now;
         grenade.hasLocalEdits = true;
         await isar.grenades.put(grenade);
+        persistedChanged = true;
       }
     });
 
+    if (!mounted || widget.grenadeId != targetGrenadeId) return;
     final newSelection = Set<int>.from(_selectedTagIds)..removeAll(roleTagIds);
     if (targetTag != null) {
       newSelection.add(targetTag.id);
     }
-    if (!mounted) return;
     setState(() => _selectedTagIds = newSelection);
-    widget.onTagsChanged?.call();
+    if (persistedChanged) {
+      widget.onTeamChanged?.call(targetTeam);
+      widget.onTagsChanged?.call();
+    }
   }
 
   Future<void> _createQuickTag() async {
+    final targetGrenadeId = widget.grenadeId;
+    final targetMapId = widget.mapId;
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (ctx) => _QuickCreateTagDialog(),
     );
     if (result != null) {
-      final tag = await widget.tagService
-          .createTag(widget.mapId, result['name'], result['color']);
-      await widget.tagService.addTagToGrenade(widget.grenadeId, tag.id);
-      await _loadData();
-      widget.onTagsChanged?.call();
+      await _enqueueWrite(() async {
+        final tag = await widget.tagService
+            .createTag(targetMapId, result['name'], result['color']);
+        await widget.tagService.addTagToGrenade(targetGrenadeId, tag.id);
+        if (!mounted || widget.grenadeId != targetGrenadeId) return;
+        await _loadData(showLoading: false);
+        widget.onTagsChanged?.call();
+      });
     }
   }
 

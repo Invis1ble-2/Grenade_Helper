@@ -341,9 +341,7 @@ class AreaService {
     }
 
     final processedGrenades = useImpactPoint
-        ? allGrenades
-            .where((g) => g.impactXRatio != null && g.impactYRatio != null)
-            .length
+        ? allGrenades.where(hasValidImpactPoint).length
         : allGrenades.length;
 
     if (areas.isEmpty || allGrenades.isEmpty || processedGrenades == 0) {
@@ -365,9 +363,7 @@ class AreaService {
           ? allGrenades
           : (grenadesByLayer[area.layerId!] ?? const <Grenade>[]);
       final candidates = useImpactPoint
-          ? candidatesRaw
-              .where((g) => g.impactXRatio != null && g.impactYRatio != null)
-              .toList()
+          ? candidatesRaw.where(hasValidImpactPoint).toList()
           : candidatesRaw;
 
       final matchedIds = <int>{};
@@ -462,9 +458,7 @@ class AreaService {
     }
 
     final candidates = useImpactPoint
-        ? grenades
-            .where((g) => g.impactXRatio != null && g.impactYRatio != null)
-            .toList()
+        ? grenades.where(hasValidImpactPoint).toList()
         : grenades;
 
     final matchedGrenadeIds = <int>{};
